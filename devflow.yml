@@ -1,19 +1,22 @@
 # agent-devflow 專案設定。本 repo 自己也是第一個消費者。
 # 只有 forge / coder / orchestrator 是自變數；其餘（PR/MR、CLI、入口檔、skills 目錄、派工方式）
-# 都是衍生值，由 devflow/ 下的對照表生成，不在這裡寫。
+# 都是衍生值，由 devflow/ 下的對照表產生，不在這裡寫。規則本體：devflow/WORKFLOW.md。
 
 forge: github          # github | gitlab
 coder: claude-code     # claude-code | codex
 orchestrator: hermes   # none | hermes | paperclip（省略＝none）
 
-# 本 repo 套用到哪一層流程（不是版本號）：
+# 本 repo 套用到哪一層流程（不是版本號；定義見 WORKFLOW.md 第 11 節）：
 #   0 bootstrap（無流程，直推 main）
 #   1 單線（issue → worktree → PR → 審查 → merge）
-#   2 規格建版（規格文檔先合入 main，任務從 diff 拆）
+#   2 規格建版（規格先合入 main，任務從 diff 推導）
 #   3 平行（多 worktree、多 coder）
 stage: 0
 
-# 人類文檔投影。現在只靠 forge 渲染；mkdocs + mike 等 kit 第一個 release。
+# 誰按合併（WORKFLOW.md M2）：human | orchestrator（後者需有機械 guard 驗 M1，否則視同 human）
+merge: human
+
+# 人類文檔投影（WORKFLOW.md D3）。現在只靠 forge 渲染；mkdocs + mike 等 kit 首個 release。
 docs:
   site: none           # none | mkdocs
   versioning: none     # none | mike
