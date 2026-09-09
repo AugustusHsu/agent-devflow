@@ -5,7 +5,7 @@ version: 0.0.1.0
 # agent-devflow WORKFLOW
 
 給 agent 讀的規範本體。引用規則一律用 ID（例：`I2`、`R3`），不用節號。
-本檔不解釋理由；理由在對應規格與 README。例外：規則的正確執行依賴違反直覺的機制時——照直覺執行會失敗，或會把必要步驟當成多餘而刪除——在該條內嵌最小必要的機制說明；判準是「刪掉這段，後人會做錯」。只回答「為什麼這樣設計」的內容（取捨、背景、替代方案）仍住規格與 README。人類導讀另見 `docs/guide/`（尚未建立）。
+本檔不解釋理由；理由在對應規格與 README。人類導讀另見 `docs/guide/`（尚未建立）。
 
 ## 0. 變數與基準
 
@@ -79,7 +79,7 @@ version: 0.0.1.0
 
 ## 8. 收尾（C）
 
-- `C1` 順序：確認來源 head 是 main 祖先（`git merge-base --is-ancestor`）→ 停止 coder 程序 → 檢查 worktree 無需保留的未提交／未追蹤內容 → `git worktree remove` → 本機目標分支快轉對齊遠端（`git checkout main && git merge --ff-only origin/main`）→ `git branch -d`（永不 `-D`）→ 刪遠端分支 → `git ls-remote --heads` 驗證。保護來自第一步的顯式祖先驗證，不是來自 `-d`：有 upstream 時 `-d` 只看「是否已合入 upstream」、完全不看 HEAD，而以 `push -u` 同步後未再新增本機 commit 的分支（收尾時的常態）必然通過該檢查，此時 `-d` 不提供任何保護。快轉本機 main 的作用是讓 `-d` 不再輸出誤導性的 `not yet merged to HEAD` warning，使收尾輸出乾淨可讀。
+- `C1` 順序：確認來源 head 是 main 祖先（`git merge-base --is-ancestor`）→ 停止 coder 程序 → 檢查 worktree 無需保留的未提交／未追蹤內容 → `git worktree remove` → 本機目標分支快轉對齊遠端（`git checkout main && git merge --ff-only origin/main`）→ `git branch -d`（永不 `-D`）→ 刪遠端分支 → `git ls-remote --heads` 驗證。保護來自第一步的顯式祖先驗證；`-d` 的內建檢查不足以取代它。快轉本機 main 是為了避免 `-d` 輸出誤導性的 warning。
 - `C2` 關 issue；forge 自動關閉也要讀回驗證。
 - `C3` 只清本次任務擁有的資源；其他活躍任務的 worktree、分支不動。blocked 或取消且成果未處置者保留並回報。
 - `C4` 「`git worktree list` 只剩主目錄」是成功收尾的判準，不是強清命令。
