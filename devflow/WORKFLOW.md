@@ -79,7 +79,7 @@ version: 0.0.1.0
 
 ## 8. 收尾（C）
 
-- `C1` 順序：停止 coder 程序 → 確認來源 head 是 main 祖先（`git merge-base --is-ancestor`）→ 檢查 worktree 無需保留的未提交／未追蹤內容 → `git worktree remove` → 本機目標分支快轉對齊遠端（`git checkout main && git merge --ff-only origin/main`）→ 記下待刪 ref 的 OID（`git rev-parse <branch>`）→ 確認該 OID 是 main 祖先（`git merge-base --is-ancestor`）→ 以同一個 OID 為 expected 值刪除（`git update-ref -d refs/heads/<branch> <oid>`）→ 刪遠端分支 → `git ls-remote --heads` 驗證。這三步須引用同一個 OID。`update-ref` 回非零表示 ref 在期間被改動：停下回報，不得改用 `git branch -d`／`-D` 繞過。保護來自顯式祖先驗證；`-d` 的內建檢查不足以取代它。快轉本機 main 是為了讓後續的祖先驗證以對齊遠端的 main 為基準；本機 main 落後時，以它為基準的驗證結果不足採信。
+- `C1` 順序：停止 coder 程序 → `git fetch origin` → 本機目標分支快轉對齊遠端（`git checkout main && git merge --ff-only origin/main`）→ 確認來源 head 是 main 祖先（`git merge-base --is-ancestor`）→ 檢查 worktree 無需保留的未提交／未追蹤內容 → `git worktree remove` → 記下待刪 ref 的 OID（`git rev-parse <branch>`）→ 確認該 OID 是 main 祖先（`git merge-base --is-ancestor`）→ 以同一個 OID 為 expected 值刪除（`git update-ref -d refs/heads/<branch> <oid>`）→ 刪遠端分支 → `git ls-remote --heads` 驗證。這三步須引用同一個 OID。`update-ref` 回非零表示 ref 在期間被改動：停下回報，不得改用 `git branch -d`／`-D` 繞過。保護來自顯式祖先驗證；`-d` 的內建檢查不足以取代它。快轉本機 main 是為了讓後續的祖先驗證以對齊遠端的 main 為基準；本機 main 落後時，以它為基準的驗證結果不足採信。
 - `C2` 關 issue；forge 自動關閉也要讀回驗證。
 - `C3` 只清本次任務擁有的資源；其他活躍任務的 worktree、分支不動。blocked 或取消且成果未處置者保留並回報。
 - `C4` 「`git worktree list` 只剩主目錄」是成功收尾的判準，不是強清命令。
