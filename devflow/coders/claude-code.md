@@ -4,9 +4,9 @@
 
 | 面向 | 值 | 狀態 |
 |---|---|---|
-| headless 執行（`L2`） | 在 worktree 內：`claude -p "<prompt>" --output-format json --max-turns <N>`；prompt 含 issue、G、T、驗證指令 | ✅ 實測 2026-09-09（PR #2 的 coder1：`claude -p "$(cat /tmp/coder1.txt)" --output-format json --max-turns 25`，在 `../agent-devflow.worktrees/1` 內單次跑完 issue #1 並 commit） |
+| headless 執行（`L2`） | 在 worktree 內：`claude -p "<prompt>" --output-format json --max-turns <N>`；prompt 含 issue、G、T、驗證指令。註：本格證據為 orchestrator 的執行紀錄，非 forge 內產物 | ✅ 實測 2026-09-09（PR #2 的 coder1：`claude -p "$(cat /tmp/coder1.txt)" --output-format json --max-turns 25`，在 `../agent-devflow.worktrees/1` 內單次跑完 issue #1 並 commit `6eb62d4`。證據來源是 orchestrator 側的一手執行紀錄；repo／forge 內只查得到產出的 commit，查不到該次呼叫本身） |
 | 入口檔（`D2`） | `CLAUDE.md` | ⬜ 未實測（coder1 的行為確實符合 devflow 區塊要求——未進主 checkout、單一 commit、gitmoji ＋繁中標題——但派工 prompt 同時載明這些要求，行為符合無法區分來源是 `CLAUDE.md` 還是 prompt，依 `R8` 視同未測。補測方式：放一項只寫在 `CLAUDE.md`、不寫進 prompt 的可觀察約定，看 coder 是否遵守） |
-| 權限 | `--permission-mode` ／ `--allowedTools`；持憑證的環境不用 `--dangerously-skip-permissions` | ✅ 實測 2026-09-09（coder1 用白名單 `--allowedTools 'Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status *),Bash(grep *),Bash(cat *)'`；全程未用 `--dangerously-skip-permissions`） |
+| 權限 | `--allowedTools`（已驗證）／`--permission-mode`（未測）；持憑證的環境不用 `--dangerously-skip-permissions`（已驗證：全程未用） | ⬜ 未實測（`--allowedTools` 部分已於 2026-09-09 驗證：coder1 以白名單 `--allowedTools 'Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status *),Bash(grep *),Bash(cat *)'` 啟動，全程未用 `--dangerously-skip-permissions`。`--permission-mode` 從未帶過，依 `R7` 全格取最保守者） |
 | worktree（`I2`） | 由 orchestrator 建；不用 `claude -w`（它建在 repo 內的 `.claude/worktrees/`） | ✅ 實測 2026-09-09（worktree 由 orchestrator 以 `git branch` ＋ `git worktree add ../agent-devflow.worktrees/1` 建好，coder 只收路徑；未用 `claude -w`） |
 | HITL（`L3`） | headless 無互動 → issue 留言後停。註：PR #2 驗證到的是 write scope 紀律（coder 遇工作區內非本任務生成的 `.serena/`，未自行 add 或刪除，於交付時回報），不是 `L3`。`L3` 的「issue 留言 ＋ 停下（blocked）」機制尚未觸發——該次無未決事項，coder 正常完成並 commit `6eb62d4`，且其 `--allowedTools` 白名單不含 `gh`，本就留不了言 | ⬜ 未實測 |
 | 審查用法（`R1`） | fresh context：`gh pr diff <N> \| claude -p "<review-prompt>"`，或在乾淨 checkout 執行 | ⬜ 未實測 |
