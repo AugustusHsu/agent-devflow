@@ -1,5 +1,5 @@
 ---
-version: 0.0.0.0
+version: 0.0.1.0
 ---
 
 # agent-devflow WORKFLOW
@@ -9,7 +9,7 @@ version: 0.0.0.0
 
 ## 0. 變數與基準
 
-- 三個自變數住 `devflow.yml`：`forge`、`coder`、`orchestrator`（省略＝`none`）。其餘皆衍生值，見 `forges/`、`coders/`、`orchestrators/` 對照表；對照表每格標實測狀態，未實測不得當作可用。
+- 三個自變數住 `devflow.yml`：`forge`、`coder`、`orchestrator`（省略＝`none`）。其餘皆衍生值，見 `forges/`、`coders/`、`orchestrators/` 對照表；對照表每格標實測狀態，未實測不得當作可用；實測狀態的認定依 `R7`、`R8`，不因 `stage` 放寬。
 - 每個任務固定兩個基準，寫在 issue 與 PR：
   - **治理基準 G**：本任務遵守的 `devflow/WORKFLOW.md` commit。
   - **開發目標 T**：本任務要實現的規格 commit 與 AC 清單。
@@ -45,7 +45,7 @@ version: 0.0.0.0
 
 - `L1` 派工前 issue 必須有：目標與對應 AC、G、T、write scope、阻塞依賴、共用契約、外部資源；「未決事項」為空。模板 `templates/issue.md`。
 - `L2` 派工：從最新 main 建分支與 worktree；coder 收到 issue、G、T、worktree 路徑、驗證指令。
-- `L3` coder 遇未決事項：issue 留言 → 停（blocked），不猜。orchestrator 問人，答案寫回 issue，再重派。issue 留言是持久紀錄，提問通道只是通道。
+- `L3` coder 遇未決事項：issue 留言 → 停（blocked），不猜。orchestrator 問人，答案寫回 issue，再重派。issue 留言是持久紀錄，提問通道只是通道。工作區內出現非本任務產生的檔案或工具生成物（MCP、編輯器、快取自動寫入者）同樣適用：回報，不自行 `add`、不自行刪除。
 - `L4` 完成：測試綠 → push 分支 → 開 PR，引用 issue、G、T、head sha。模板 `templates/pr.md`。
 - `L5` 之後依序：審查（第 5 節）→ 合併（第 6 節）→ 收尾（第 8 節）。
 - `L6` 取消任務而分支已有 commit：先問人保留或丟棄，不得逕自刪除。
@@ -55,8 +55,11 @@ version: 0.0.0.0
 - `R1` 實作 PR 由 fresh-context 審查者審：拿到 G、T、`base..head`、完整來源、測試指令；不接受作者摘要當證據。同一 session 不得對自己的工作簽正式 verdict。
 - `R2` 建議審查者與 coder 異廠；只有一家可用時，用同廠的全新 context。
 - `R3` verdict 必須寫明 head sha；head 變更即失效，須重審。
-- `R4` 逐條 AC 給證據，至少嘗試一個反例；檢查 write scope 是否被超出、是否夾帶 `G5` 所列變更。用 `templates/review-prompt.md`。
+- `R4` 逐條 AC 給證據，至少嘗試一個反例；反例須涵蓋「正確的值出現在錯誤的位置」這一類，不只是「值不存在」——把 AC 要求的字串設想成落在另一列、另一節、另一格，再看現有證據是否仍然成立；仍成立即證據不足。檢查 write scope 是否被超出、是否夾帶 `G5` 所列變更。用 `templates/review-prompt.md`。
 - `R5` 審查證據住 forge（PR review／comment）。merge commit 訊息帶 PR 號、reviewer、head sha，作為離開 forge 時的可攜最小集合。
+- `R6` 證據須能定位：AC 的驗證指令要指出具體位置與內容。計數式斷言（`grep -c`、`wc -l`、`--count`、比對總數）不得作為任一條 AC 的唯一證據——計數相符不表示內容落在正確位置；須另以 `grep -n` 定位或 `git diff` 逐行比對，並貼出該行。
+- `R7` 對照表一格的值欄列出多個指令、選項或能力時，`✅ 實測` 必須對應全部皆已驗證。只驗證其中一部分：拆成獨立列各自標狀態，或在值欄逐項標明已驗證／未測，該格狀態取最保守者。實際生效的機制與值欄所列不同時（例如靠平台預設而非該指令），改寫值欄，不沿用原宣稱。值欄是包裝命令、腳本或別名時，先展開其涵蓋的能力再逐項適用本條；不得以「值欄只寫了一項」規避。
+- `R8` 對照表的證據須是可獨立核對的觀察：第三者能重跑、或在 repo／forge 內查得到的產物（指令輸出、PR／issue 的實際狀態、transcript）；不得以 commit 訊息或對照表自身互證。不得由「行為符合規則」反推規則已生效——該行為若同時被派工 prompt 或其他來源要求，證據分不出來源，視同未測。
 
 ## 6. 合併（M）
 
