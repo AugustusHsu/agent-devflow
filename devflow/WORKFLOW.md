@@ -79,7 +79,7 @@ version: 0.0.1.0
 
 ## 8. 收尾（C）
 
-- `C1` 順序：確認來源 head 是 main 祖先（`git merge-base --is-ancestor`）→ 停止 coder 程序 → 檢查 worktree 無需保留的未提交／未追蹤內容 → `git worktree remove` → 本機目標分支快轉對齊遠端（`git checkout main && git merge --ff-only origin/main`）→ `git branch -d`（永不 `-D`）→ 刪遠端分支 → `git ls-remote --heads` 驗證。保護來自第一步的顯式祖先驗證；`-d` 的內建檢查不足以取代它。快轉本機 main 是為了避免 `-d` 輸出誤導性的 warning。
+- `C1` 順序：停止 coder 程序 → 確認來源 head 是 main 祖先（`git merge-base --is-ancestor`）→ 檢查 worktree 無需保留的未提交／未追蹤內容 → `git worktree remove` → 本機目標分支快轉對齊遠端（`git checkout main && git merge --ff-only origin/main`）→ 重新確認待刪 ref 仍是 main 祖先 → `git branch -d`（永不 `-D`）→ 刪遠端分支 → `git ls-remote --heads` 驗證。保護來自顯式祖先驗證；`-d` 的內建檢查不足以取代它。快轉本機 main 是為了避免 `-d` 輸出誤導性的 warning。
 - `C2` 關 issue；forge 自動關閉也要讀回驗證。
 - `C3` 只清本次任務擁有的資源；其他活躍任務的 worktree、分支不動。blocked 或取消且成果未處置者保留並回報。
 - `C4` 「`git worktree list` 只剩主目錄」是成功收尾的判準，不是強清命令。
