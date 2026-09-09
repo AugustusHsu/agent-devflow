@@ -4,8 +4,8 @@ Hermes Agent 當協調者：確認範圍、固定 G／T、建 worktree、啟動 
 
 | 面向 | 值 | 狀態 |
 |---|---|---|
-| 派工（`L2`） | 用 `terminal` 直接啟動 coder CLI（見 `coders/`），保存程序或 session 識別。**不用 `delegate_task` 起 coder**——它起的是 Hermes 子代理，不是 Claude Code／Codex | ⬜ 未實測 |
-| 建 worktree（`I2`） | `git worktree add ../<repo>.worktrees/<N> <N>-<slug>` | ⬜ 未實測 |
+| 派工（`L2`） | 用 `terminal` 直接啟動 coder CLI（見 `coders/`），保存程序或 session 識別。**不用 `delegate_task` 起 coder**——它起的是 Hermes 子代理，不是 Claude Code／Codex | ✅ 實測 2026-09-09（PR #2 的 coder1 以 `terminal` 啟動 `claude -p` 跑完並保存 session；未用 `delegate_task`） |
+| 建 worktree（`I2`） | `git worktree add ../<repo>.worktrees/<N> <N>-<slug>` | ✅ 實測 2026-09-09（`git branch 1-forges-github-phase1 origin/main` ＋ `git worktree add ../agent-devflow.worktrees/1 1-forges-github-phase1`，coder 只收該路徑） |
 | HITL（`L3`） | `clarify` 問人；答案寫回 issue 留言；派工前先清完未決事項 | ⬜ 未實測 |
 | 平行上限 | 人設；`P1` 逐項確認寫進 issue | ⬜ 未實測 |
 | 流程指令住哪 | `devflow/orchestrators/hermes/SKILL.md`（尚未寫；依 Phase 2 實跑後萃取），接入方式待驗：symlink 進 `~/.hermes/skills/`、或 `skills.external_dirs`、或 trusted project-local skills | ⬜ 未實測 |
