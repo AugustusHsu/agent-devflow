@@ -58,7 +58,7 @@ version: 0.0.1.0
 - `R4` 逐條 AC 給證據，至少嘗試一個反例；反例須涵蓋「正確的值出現在錯誤的位置」這一類，不只是「值不存在」——把 AC 要求的字串設想成落在另一列、另一節、另一格，再看現有證據是否仍然成立；仍成立即證據不足。檢查 write scope 是否被超出、是否夾帶 `G5` 所列變更。用 `templates/review-prompt.md`。
 - `R5` 審查證據住 forge（PR review／comment）。merge commit 訊息帶 PR 號、reviewer、head sha，作為離開 forge 時的可攜最小集合。
 - `R6` 證據須能定位：AC 的驗證指令要指出具體位置與內容。計數式斷言（`grep -c`、`wc -l`、`--count`、比對總數）不得作為任一條 AC 的唯一證據——計數相符不表示內容落在正確位置；須另以 `grep -n` 定位或 `git diff` 逐行比對，並貼出該行。
-- `R7` 對照表一格的值欄列出多個指令、選項或能力時，`✅ 實測` 必須對應全部皆已驗證。只驗證其中一部分：拆成獨立列各自標狀態，或在值欄逐項標明已驗證／未測，該格狀態取最保守者。實際生效的機制與值欄所列不同時（例如靠平台預設而非該指令），改寫值欄，不沿用原宣稱。
+- `R7` 對照表一格的值欄列出多個指令、選項或能力時，`✅ 實測` 必須對應全部皆已驗證。只驗證其中一部分：拆成獨立列各自標狀態，或在值欄逐項標明已驗證／未測，該格狀態取最保守者。實際生效的機制與值欄所列不同時（例如靠平台預設而非該指令），改寫值欄，不沿用原宣稱。值欄是包裝命令、腳本或別名時，先展開其涵蓋的能力再逐項適用本條；不得以「值欄只寫了一項」規避。
 - `R8` 對照表的證據須是可獨立核對的觀察：第三者能重跑、或在 repo／forge 內查得到的產物（指令輸出、PR／issue 的實際狀態、transcript）；不得以 commit 訊息或對照表自身互證。不得由「行為符合規則」反推規則已生效——該行為若同時被派工 prompt 或其他來源要求，證據分不出來源，視同未測。
 
 ## 6. 合併（M）
@@ -79,7 +79,7 @@ version: 0.0.1.0
 
 ## 8. 收尾（C）
 
-- `C1` 順序：確認來源 head 是 main 祖先（`git merge-base --is-ancestor`）→ 停止 coder 程序 → 檢查 worktree 無需保留的未提交／未追蹤內容 → `git worktree remove` → 本機目標分支快轉對齊遠端（`git checkout main && git merge --ff-only origin/main`）→ `git branch -d`（永不 `-D`）→ 刪遠端分支 → `git ls-remote --heads` 驗證。快轉這步不可省：`-d` 的保護判準是 HEAD，本機 main 落後時 `-d` 等同失去保護。
+- `C1` 順序：確認來源 head 是 main 祖先（`git merge-base --is-ancestor`）→ 停止 coder 程序 → 檢查 worktree 無需保留的未提交／未追蹤內容 → `git worktree remove` → 本機目標分支快轉對齊遠端（`git checkout main && git merge --ff-only origin/main`）→ `git branch -d`（永不 `-D`）→ 刪遠端分支 → `git ls-remote --heads` 驗證。保護來自第一步的顯式祖先驗證，不是來自 `-d`：`-d` 對有 upstream 的分支依「已合入 upstream」判斷，push 過的分支恆滿足此條件，故其內建保護不可倚賴。快轉本機 main 的作用是讓 `-d` 不再輸出誤導性的 `not yet merged to HEAD` warning，使收尾輸出乾淨可讀。
 - `C2` 關 issue；forge 自動關閉也要讀回驗證。
 - `C3` 只清本次任務擁有的資源；其他活躍任務的 worktree、分支不動。blocked 或取消且成果未處置者保留並回報。
 - `C4` 「`git worktree list` 只剩主目錄」是成功收尾的判準，不是強清命令。
