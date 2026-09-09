@@ -8,8 +8,8 @@
 | CLI | `gh`（本機 2.97.0） | ✅ 實測 2026-09-09（issue #1／#3 建單、PR #2 開單與合併全程以 `gh` 2.97.0 完成） |
 | 建 issue／留言／label | `gh issue create --label`（已驗證）／`gh issue comment`（未測）／`gh issue edit --add-label` 增量（未測） | ⬜ 未實測（`gh issue create --label` 部分已於 2026-09-09 驗證：issue #1、#3 建單當下即帶上 label。另兩項在 PR #2 期間從未呼叫；它們於 issue #4 執行期間跑過——本 issue 的 AC 修訂留言、#3 轉 tracking 的 comment——但發生在本 PR 開出之後，不列為本次證據，待下一輪結帳。依 `R7` 全格取最保守者） |
 | 標準 label | `spec`、`process`、`bypass`、`blocked` | ✅ 實測 2026-09-09（`gh label list` 列出 spec／process／bypass／blocked） |
-| 從 issue 開分支 | `gh issue develop <N> --base main`，分支名 `<N>-<slug>`。註：PR #2 實際用 `git branch <N>-<slug> origin/main` ＋ `git worktree add` 建分支，`gh issue develop` 本身尚未跑過 | ⬜ 未實測 |
-| 分支保護 | main：必經 PR、只允許 merge commit、禁 force push、dismiss stale approvals、required approvals 0 | ✅ 實測 2026-09-09（五項逐一讀回：`gh api repos/AugustusHsu/agent-devflow/branches/main/protection` 回 `pr_required=true`、`force_push_allowed=false`、`dismiss_stale=true`、`approvals=0`；`gh api repos/AugustusHsu/agent-devflow` 回 `squash=false`、`rebase=false`、`merge_commit=true`＝只允許 merge commit。另有行為證據：直推 main 收到 `GH006 Protected branch update failed`） |
+| 從 issue 開分支 | `gh issue develop <N> --base main`，分支名 `<N>-<slug>` | ⬜ 未實測（可核對：PR #2 的 `headRefName` 為 `1-forges-github-phase1`，符合 `<N>-<slug>` 命名。不可核對：分支以何種方式建立，forge／repo 內無紀錄可查——`gh issue develop` 與手動 `git branch` 產生的分支在此無從區分） |
+| 分支保護 | main：必經 PR、只允許 merge commit、禁 force push、dismiss stale approvals、required approvals 0 | ✅ 實測 2026-09-09（五項逐一讀回：`gh api repos/AugustusHsu/agent-devflow/branches/main/protection` 回 `pr_required=true`、`force_push_allowed=false`、`dismiss_stale=true`、`approvals=0`；`gh api repos/AugustusHsu/agent-devflow` 回 `squash=false`、`rebase=false`、`merge_commit=true`＝只允許 merge commit） |
 | tag 保護 | rulesets；無法依角色限制建立者 | ⬜ 未實測 |
 | 開 PR | `gh pr create --base main --head <branch> --title … --body-file <填好的 templates/pr.md>` | ✅ 實測 2026-09-09（PR #2 實際指令：`gh pr create --base main --head 1-forges-github-phase1 --title … --body-file /tmp/pr1.md`。限制：正文取自填好的 `templates/pr.md`，但此對應關係未經獨立讀回——`gh pr view 2 --body` 與模板的逐行比對尚未做） |
 | 審查證據（`R3`／`R5`） | `gh pr review <N> --comment --body`（已驗證）／`--approve`（未測）／`--request-changes`（未測）；review 原生綁 commit（已驗證） | ⬜ 未實測（`gh pr view 2 --json reviews` 讀回 PR #2 兩則 review 的 state 皆為 `COMMENTED`＝`--comment`：chatgpt-codex-connector 一則、AugustusHsu 一則，兩則原生綁在 `6eb62d4`，commit oid 讀得回。「review 綁 commit」這個性質成立，但值欄所列的 `--approve`／`--request-changes` 一個都沒跑過，依 `R7` 全格取最保守者） |
@@ -19,7 +19,7 @@
 | 合併後刪分支（`C1`）——顯式指令 | 同上目的的替代方法，改由指令刪除：`gh pr merge --delete-branch` ／ `git push origin --delete <branch>` | ⬜ 未實測（forge／repo 內查不到這兩個指令被執行的紀錄；PR #2 的最終狀態——`git ls-remote --heads origin` 只剩 `refs/heads/main`——與任一種刪除方式相容，不足以支持其中任何一個） |
 | CI 位置 | `.github/workflows/` | ⬜ 未實測 |
 | 人類站（`D3`） | GitHub Pages：`gh-pages` 分支或 Actions 部署 | ⬜ 未實測 |
-| 故障退路（`F3`） | 標「結果未定」後逐項讀回，再決定重送或收手：`gh pr view <N> --json state,mergedAt,mergeCommit,headRefOid`（PR 狀態與目標 sha）、`gh pr checks <N>`（CI）、`git ls-remote --heads origin`（遠端分支）、`git merge-base --is-ancestor <head> origin/main`（是否其實已合入）。其中 `gh pr checks` 從未跑過；其餘三項曾在正常流程用過，但整套退路未在 forge 回錯／逾時情境下演練 | ⬜ 未實測 |
+| 故障退路（`F3`） | 標「結果未定」後逐項讀回，再決定重送或收手：`gh pr view <N> --json state,mergedAt,mergeCommit,headRefOid`（PR 狀態與目標 sha）、`gh pr checks <N>`（CI）、`git ls-remote --heads origin`（遠端分支）、`git merge-base --is-ancestor <head> origin/main`（是否其實已合入）。forge／repo 內查不到這套退路在故障情境下被執行的紀錄；其中 `gh pr checks` 連正常流程的執行紀錄也查不到 | ⬜ 未實測 |
 
 ## 已知限制（文件推導，待實測）
 
