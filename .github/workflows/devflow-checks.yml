@@ -3,25 +3,42 @@
 # G4：新規則要求的檢查器尚不存在時先列為「建議」，工具可執行且正反測試通過後才升為必需關卡。
 # 本檔每一項檢查都有自己的開關（下面的 GATES）：True＝必需關卡，False＝建議（只報告不擋）。
 #
-# ── 為什麼必需關卡只有兩項 ────────────────────────────────────────────────
-# 四輪審查各找到 7、8、7、2 個缺口。診斷是範圍問題：把「任意 markdown 的語意
+# ── 為什麼必需關卡只有一項 ────────────────────────────────────────────────
+# 五輪審查各找到 7、8、7、2、4 個缺口。診斷是範圍問題：把「任意 markdown 的語意
 # 正確性」當成關卡，攻擊面就是整個 GFM ＋ HTML 的表面積，補不完。
 # 準則：required 的第一條是「不能擋合法 PR」。**只要舉得出一個會誤擋合法內容的例子，
-# 就不能當關卡**，這一項的價值再高也一樣。第三輪曾用「三輪都沒被找到假陽性」當理由
-# 把 refs 留在關卡——那是錯的推論，第四輪一次就找到了。沒被找到不等於沒有。
+# 就不能當關卡**，這一項的價值再高也一樣——會誤擋的 required 比沒有 required 更糟，
+# 它會讓人學會用 admin 權限繞過。第三輪曾用「三輪都沒被找到假陽性」當理由把 refs
+# 留在關卡，那是錯的推論：沒被找到不等於沒有，第四輪一次就找到了。
+# 所以判準改成可操作的形式：**一項要留在 required，得先由作者自己舉不出誤擋的例子。**
+# 舉得出來就降級，不要等審查者來舉。
 # 其餘降為建議，先讓 Phase 1 的出口達成；結構性強化拆到 issue #22。
 #
-# ── 擋得住什麼（必需關卡，2 項）──────────────────────────────────────────
+# ── 擋得住什麼（必需關卡，1 項）──────────────────────────────────────────
 #   * V1 frontmatter version 四碼
-#       攻擊面＝YAML frontmatter，有限。值由 PyYAML 解析，重複 key（含 "version" 加引號
-#       的寫法）、anchor／alias、區塊純量（含換行）都涵蓋。V4 要求規格文檔每次變更都
-#       bump，每個文檔 PR 都碰。
-#   * 規則 ID 唯一定義
-#       攻擊面＝WORKFLOW.md 內的清單項 ＋ 開頭的 code span，由 AST 判定。縮排、巢狀、
-#       粗體、blockquote、雙反引號都涵蓋；判定刻意往「多認」偏——誤報看得見，
-#       漏報是沉默的。它不掃其他檔案，所以不會碰到非規則代號那個問題。
+#       掃描範圍嚴格等於 V4 的適用對象：devflow/WORKFLOW.md 與 docs/spec/*/spec.md。
+#       別的 .md 就算有 frontmatter version 也完全不看——V4 明寫「第三方版本、工具
+#       版本、issue 編號保持原值」，拿四碼制去擋 README 的 `version: 3` 是把規則套到
+#       範圍外。devflow/templates/spec.md 是模板不是規格文檔，同樣不在範圍內。
+#       值一律用原生 yaml.safe_load 取，和真正讀這個檔案的 parser 一致；重複 key 的
+#       偵測獨立用 compose 做，不 construct，才不會把合法的 merge key 弄成非法。
+#       這一項的輸入定義域是「一到兩個已知檔案的一個欄位」，而那兩個檔案帶四碼版本
+#       正是 V4／S1 明文要求的——所以「合法但會被擋的內容」在定義上不存在。
+#       作者實測 18 種合法寫法（含 merge key、anchor、!!str、摺疊純量、註解、BOM、
+#       CRLF、... 收尾、巢狀同名 key、多位數、草稿 0.0.0.0、深層路徑）零誤擋。
 #
 # ── 擋不住什麼（已知不完備，不要假裝完備）──────────────────────────────
+#   * 【同一個規則 ID 被定義兩次 —— 沒有任何必需關卡在擋。】
+#     dupid 本來是關卡，第五輪被審查者找到一個假陽性（清單項只含 fence 時會吃到
+#     清單外的段落）。那個 bug 已修，但作者接著自己又找到三個修不掉的：
+#       - 附錄用清單解釋既有規則：「- `R3` 常被誤讀成…」
+#       - 加一節「規則索引」把所有 ID 列一遍
+#       - blockquote 引述既有條文
+#     三者都是人會自然寫進 WORKFLOW.md 的東西，而 WORKFLOW.md 的定義寫法就是
+#     「- `ID` 說明」，散文和定義在語法上分不出來。要分得出來就得知道「哪幾節裡的
+#     清單項才是定義」——那是分節 schema，屬 issue #22。所以降為建議。
+#     它現在只報告：CI log 會列出來，但不會擋人。dupid 的 📝 需要人判斷是真重複
+#     還是散文，不要當成一定有錯。
 #   * 【改 ID 後別的檔案還指著舊號 —— 沒有任何必需關卡在擋。】
 #     refs 這一項本來就是為這個失效而存在的，但它會把 `M5`（Apple 晶片）、`C5`
 #     （RFC 分類）這種合法的非規則代號判成懸空規則引用。WORKFLOW.md:7 只寫「引用規則
@@ -32,8 +49,12 @@
 #     「此處 ID 形狀的 code span 一律是規則引用」的檔案集合。在那之前，改動規則 ID 的
 #     PR（#12／#17）建議手動跑一次 DEVFLOW_GATE_REFS=1。
 #   * 另外四項建議同樣只報告不擋：fenced code block 未關閉、對照表形狀、
-#     相對連結有效性、R9 狀態欄三值。四輪審查的缺口幾乎都落在這些項目裡，
+#     相對連結有效性、R9 狀態欄三值。五輪審查的缺口幾乎都落在這些項目裡，
 #     因為它們驗的是「任意 markdown 內容」。每項都能用 GATES 或環境變數單獨打開驗證。
+#   * 【V1 的「進位歸零」沒驗】0.0.2.0 → 0.0.3.7 會通過。要驗它得跟 base 上的版本
+#     比對（新的資料來源），而「該 bump 哪一位」依 V2／V3 是 normative／editorial 的
+#     語意判斷，檢查器判不了。只驗「形式上有歸零」會擋掉合法的多位同時變更，
+#     製造新的假陽性。留在 issue #22，本輪不做半套。
 #   * 從未定義過的規則家族（例如 `Q3`）連建議都不會報：前綴集合＝基線 ∪ 現有定義的
 #     前綴。放寬成「任何 ID 形狀」只會讓上面那個誤擋問題更嚴重。
 #   * 權威檔案清單、raw HTML 內容、對照表的分節 schema —— 都在 issue #22，本輪不做。
@@ -95,7 +116,7 @@ jobs:
           # 驗證用：DEVFLOW_GATE_<KEY>=1 可單獨打開一項，環境變數只能加嚴不能放寬。
           GATES = {
               "version": True,    # V1 frontmatter version 四碼
-              "dupid":   True,    # 規則 ID 唯一定義
+              "dupid":   False,   # 規則 ID 唯一定義（散文與定義分不出來，見檔頭）
               "refs":    False,   # 規則 ID 無懸空引用（會誤擋非規則代號，見檔頭）
               "fence":   False,   # fenced code block 未關閉
               "table":   False,   # 對照表形狀（#17 分節定案前會誤擋，見 issue #22）
@@ -210,8 +231,11 @@ jobs:
                       continue
                   for j in range(i + 1, len(tokens)):
                       tj = tokens[j]
-                      if tj.type == "list_item_open":
-                          break          # 已經進到子項，這個 item 自己沒有 inline 開頭
+                      if tj.type in ("list_item_open", "list_item_close"):
+                          # list_item_open：已經進到子項。list_item_close：這個 item 結束了
+                          # ——少了它，清單項只含 fence（沒有 inline）時會一路吃到清單外面
+                          # 的段落，把那裡的引用當成本項的開頭。
+                          break
                       if tj.type != "inline":
                           continue
                       first = None
@@ -333,22 +357,24 @@ jobs:
 
 
           # ── frontmatter：界定是字面掃描（慣例，非 markdown 語法），值交給 PyYAML ──
-          class DupKeyLoader(yaml.SafeLoader):
-              pass
-
-
-          def _no_dup(loader, node, deep=False):
-              seen = []
+          def duplicate_version_key(fm):
+              """頂層是不是寫了不只一個 version key。
+              只 compose 不 construct：一旦 construct 就會攔截到 merge key（<<: *d）
+              而讓合法的 YAML 變成非法——偵測重複和解析值必須分開做。
+              看 node.value 而不是解析後的 dict，"version" 這種加引號的寫法才抓得到。"""
+              try:
+                  node = yaml.compose(fm)
+              except yaml.YAMLError:
+                  return False          # 真的壞掉的話由 safe_load 去報
+              if not isinstance(node, yaml.MappingNode):
+                  return False
+              n = 0
               for k, _v in node.value:
-                  key = loader.construct_object(k, deep=deep)
-                  if key in seen:
-                      raise yaml.YAMLError("重複的 key：%r" % (key,))
-                  seen.append(key)
-              return yaml.SafeLoader.construct_mapping(loader, node, deep)
-
-
-          DupKeyLoader.add_constructor(
-              yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _no_dup)
+                  if (isinstance(k, yaml.ScalarNode)
+                          and k.tag != "tag:yaml.org,2002:merge"
+                          and k.value == "version"):
+                      n += 1
+              return n > 1
 
 
           def frontmatter(lines):
@@ -395,27 +421,36 @@ jobs:
           print("── V1：frontmatter version 為四碼 a.b.c.d（%s）" % tag("version"))
           VER_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+")
           SPEC_RE = re.compile(r"docs/spec/[^/]+/spec\.md")
-          for f in md_files:
-              # 必須有 version 的只有規則本體與規格（V4 的適用對象）。其餘檔案有 version
-              # 才驗；沒有、或 frontmatter 本身有問題，都不是這一節要管的事。
-              required = (f == RULES_FILE) or bool(SPEC_RE.fullmatch(f))
+          # 掃描範圍＝V4 的適用對象，一個字都不能寬：規則本體與規格文檔。
+          # V4 明寫「第三方版本、工具版本、issue 編號保持原值」，所以別的 .md 就算有
+          # frontmatter version 也一律不管——那是它自己的版號，不是四碼制的。
+          # devflow/templates/spec.md 是「模板」不是「規格文檔」，同樣不在適用對象內：
+          # 它的 version 是給人複製的佔位值，拿四碼制去擋它是把規則套到範圍外。
+          version_targets = [f for f in md_files
+                             if f == RULES_FILE or SPEC_RE.fullmatch(f)]
+          if not version_targets:
+              die("找不到任何 V4 適用對象，repo 佈局與檢查器假設不符")
+          for f in version_targets:
               state, fm = frontmatter(docs[f]["lines"])
               if state != "ok":
-                  if required:
-                      report("version", "%s 的 frontmatter %s（V1／S1）"
-                             % (f, "沒有關閉" if state == "unclosed" else "不存在"))
+                  report("version", "%s 的 frontmatter %s（V1／S1）"
+                         % (f, "沒有關閉" if state == "unclosed" else "不存在"))
                   continue
+              # 取值一律用原生 safe_load，才會和真正讀這個檔案的 parser 一致
+              # （merge key、anchor／alias、各種 scalar 樣式都由它處理）。
               try:
-                  data = yaml.load(fm, Loader=DupKeyLoader)
+                  data = yaml.safe_load(fm)
               except yaml.YAMLError as e:
-                  # 重複 key（含 "version" 這種加引號的寫法）在這裡就被擋下來。
-                  if required:
-                      report("version", "%s 的 frontmatter 不是合法 YAML：%s"
-                             % (f, str(e).strip().replace("\n", " ")))
+                  report("version", "%s 的 frontmatter 不是合法 YAML：%s"
+                         % (f, str(e).strip().replace("\n", " ")))
                   continue
+              # 重複 key 的偵測獨立做：只看 mapping node 的 key 清單，不 construct，
+              # 才不會把合法的 merge key（<<: *d）連帶弄成非法。
+              if duplicate_version_key(fm):
+                  report("version", "%s 的 frontmatter 有多個 version key"
+                                    "（YAML 實際生效的是最後一個）" % f)
               if not isinstance(data, dict) or "version" not in data:
-                  if required:
-                      report("version", "%s 的 frontmatter 缺 version（V1／S1）" % f)
+                  report("version", "%s 的 frontmatter 缺 version（V1／S1）" % f)
                   continue
               value = data["version"]
               if not isinstance(value, str):
