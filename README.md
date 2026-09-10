@@ -69,7 +69,7 @@ docs/guide/               人類專用
   **最新 attempt** 的 `conclusion` ＝ `success`，且 log 實際印出 advisory。
   同一個 head 上可以有多個 workflow 的 run，同一筆 run 也可以有多個 attempt（`run_attempt`），
   所以判定時要把 **run ID 記進該 PR 或 issue**，只說「head 上有成功的 run」指認不了是哪一筆。
-  五個欄位在分支刪除、PR 合併後仍查得到：
+  這些條件在分支刪除、PR 合併後仍查得到：
   `gh api "repos/<owner>/<repo>/actions/runs?head_sha=<sha>" --jq '.workflow_runs[] | {id, path, event, head_sha, run_attempt, conclusion}'`。
   判定不看 Actions 實際 checkout 的 merge ref，也不看合併後 main 的 commit——
   三者可以是同一份 tree 但不同 commit SHA（例：`2daafca` 與 `d64d214` 的 tree 都是 `403faa5`）。
@@ -81,8 +81,9 @@ docs/guide/               人類專用
     事後無從回推當時執行的是哪一份檔案。補上這段輸出動的是 `.github/workflows/`，
     是 #26 實作時的前置工作。
   - **條件一**：正、反兩個 run 的 log 印出的 blob 相同——同一份檢查器，才談得上正反驗證。
-  - **條件二**：負向案例相對正向案例**只新增目標項的違規**；其他項可以報 `📝` advisory，
-    但不得出現 `❌`、不得共同造成 `exit 1`。證據：正負兩份輸入的 diff、目標項的 `❌`、
+  - **條件二**：正向案例是**合法輸入**：無任何 `❌`，最新 attempt 的 `conclusion` ＝ `success`（檢查器 exit 0）。
+  - **條件三**：負向案例相對正向案例**只新增目標項的違規**；其他項可以報 `📝` advisory，
+    但不得出現 `❌`，`exit 1` 只能由目標項造成。證據：正負兩份輸入的 diff、目標項的 `❌`、
     其他項至多 `📝`，且 exit 為 1 不是 2（`exit 2` ＝檢查器本身無法執行）。
 
 ## 不做的事
