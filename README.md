@@ -3,8 +3,9 @@
 給 AI coding agent 用的開發流程套件：規格建版 → 拆任務 → 開發 → 審查 → 合併 → 收尾，
 以及失敗與退版路徑。做成可安裝到任何專案的一組規則、對照表與模板。本 repo 用自己的流程開發自己。
 
-> 現況：`stage: 0`（bootstrap）。規則本體 `devflow/WORKFLOW.md` 為 `0.0.0.0` 草稿；
-> 對照表全部「未實測」。下一步是 Phase 1（見下）。
+> 現況：`stage: 0`（bootstrap）。規則本體 `devflow/WORKFLOW.md` 為 `0.0.2.0`；
+> 對照表仍是舊的二值標記（`✅ 實測`／`⬜ 未實測`）、絕大多數格子未實測，
+> 待 #17 的職位／分節結構落地後，再由 #15 依 `R9` 三值重做。下一步是 Phase 1（見下）。
 
 ## 設計要點
 
@@ -41,21 +42,26 @@ devflow/
 CLAUDE.md AGENTS.md       只含 devflow:begin/end 區塊（由 templates/entry-block.md 產生）
 docs/spec/                本 repo 自己的規格（dogfood）
 docs/guide/               人類專用
+.github/workflows/        devflow-checks.yml：七項檢查目前全為建議，只寫進 log，不擋任何 PR
 ```
 
 ## 執行順序
 
+各 Phase 的「出口」是**該階段的能力已驗證**，驗證與試跑一律發生在升 `stage` 之前：`stage` 只標示已驗證的能力，
+不是權限開關（`ST4`）。因此「演練或驗證某項能力」與「把它設為 normative 強制」是兩件事，後者另有自己的條件。
+
 | Phase | 內容 | 出口 |
 |---|---|---|
 | 0 | 本 README、`devflow.yml`、WORKFLOW.md 草稿、對照表骨架、模板、入口區塊 | 使用者審過 WORKFLOW.md，直推 main |
-| 1 | GitHub 設定（main 保護、labels）逐格實測；驗 coder headless 與 worktree 交接；check 先跑通再設 required | `stage: 1`；自動合併保持關閉 |
-| 2 | 第一個端到端任務：把入口區塊安全插入既有 CLAUDE.md／AGENTS.md（含客製內容、重跑、碰撞測試）；再跑 2–3 個有價值的任務；萃取 Hermes skill | 整條鏈跑通並可接手 |
-| 3 | 用 W0 開發 W1：規格核准 → 實作 → 依 W0 審查 → 啟用；演練檢查器尚未就緒、執行中規格變更、回復 | `stage: 2`；能改流程、能停、能退 |
+| 1 | GitHub 設定（main 保護、labels）逐格實測；驗 coder headless 與 worktree 交接；CI workflow 在合併候選 head 成功回報且 log 產出 advisory（本階段不設 required；任何檢查升為 required 前，須以**同一版 workflow** 留下合法輸入成功與非法輸入失敗兩個 run） | `stage: 1`；自動合併保持關閉 |
+| 2 | 第一個端到端任務：把入口區塊安全插入**其他專案**既有的 CLAUDE.md／AGENTS.md（含客製內容、重跑、碰撞測試）——本 repo 自己的入口區塊已存在，這裡開發的是可安裝到別處的能力；再跑 2–3 個有價值的任務；萃取 Hermes skill | 整條鏈跑通並可接手 |
+| 3 | 用現行流程（W0）開發下一版流程（W1）：規格核准 → 實作 → 依 W0 審查 → 啟用；演練檢查器尚未就緒、執行中規格變更、回復 | `stage: 2`；能改流程、能停、能退 |
 | 4 | 隔離專案測安裝／升級／回復；Claude Code 與 Codex 各跑一次；GitLab 唯讀盤點；發 `v0.0.0.1`＋MkDocs＋mike | 有可安全安裝的固定版本 |
 | 5 | 導入 AI_Server_SuperOD：先確認正本與 GitLab 當前能力，選低風險模組增量導入，跑一個真實 MR | GitLab 上一條可查證的交付鏈 |
 | 6 | 受控平行：兩個低耦合任務、兩個 worktree、合併序列化、單邊失敗與精準清理 | `stage: 3` |
 
 ## 不做的事
 
-DAG／wave 排程器、多路審查 panel、每張單一份審查報告檔、工單鏡像、wiki 投影、預先寫好的工具。
+DAG／wave 排程器、多路審查 panel、每張單一份審查報告檔、工單鏡像、wiki 投影、
+超出當前 stage 需要的工具（`.github/workflows/` 的檢查器維持在「只報告、不擋」）。
 封存舊 repo、清舊 worktree、改動 SuperOD 既有結構，都不在本計畫內。
