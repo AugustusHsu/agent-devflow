@@ -63,15 +63,27 @@ docs/guide/               人類專用
 
 ### Phase 1 第三出口的判定方式
 
-- **本階段要達成的**：導入 `.github/workflows/devflow-checks.yml` 的 PR，以**該 PR 最終 head commit**
-  （`gh pr view <N> --json headRefOid`）觸發的 `pull_request` run 成功結束，且 log 實際印出 advisory。
-  判定只看這個 run：不看 Actions 實際 checkout 的 merge ref，也不看合併後 main 的 commit——
+- **本階段要達成的**：導入 `.github/workflows/devflow-checks.yml` 的 PR，在其**最終 head commit**
+  （`gh pr view <N> --json headRefOid`）上留下一筆同時滿足以下五項的 run——
+  `path` ＝ `.github/workflows/devflow-checks.yml`、`event` ＝ `pull_request`、`head_sha` ＝ 該 commit、
+  **最新 attempt** 的 `conclusion` ＝ `success`，且 log 實際印出 advisory。
+  同一個 head 上可以有多個 workflow 的 run，同一筆 run 也可以有多個 attempt（`run_attempt`），
+  所以判定時要把 **run ID 記進該 PR 或 issue**，只說「head 上有成功的 run」指認不了是哪一筆。
+  五個欄位在分支刪除、PR 合併後仍查得到：
+  `gh api "repos/<owner>/<repo>/actions/runs?head_sha=<sha>" --jq '.workflow_runs[] | {id, path, event, head_sha, run_attempt, conclusion}'`。
+  判定不看 Actions 實際 checkout 的 merge ref，也不看合併後 main 的 commit——
   三者可以是同一份 tree 但不同 commit SHA（例：`2daafca` 與 `d64d214` 的 tree 都是 `403faa5`）。
 - **本階段不設 required**：七項檢查一律只報告（`G4`——工具可執行且正反測試通過後，才升為必需關卡）。
-- **日後要把某一項升為 required 時**（不屬 Phase 1）：須以**同一份 workflow 檔**
-  （兩次 `git rev-parse <sha>:.github/workflows/devflow-checks.yml` 得到同一個 blob）留下兩個 run——
-  一個合法輸入成功，一個**只違反該項**的非法輸入失敗，且失敗確實由該項的判定造成：
-  不是其他項擋下的，也不是檢查器本身無法執行（`exit 2`）。
+- **日後要把某一項升為 required 時**（不屬 Phase 1；現有七項的 required 目標記在 #22）：
+  - **前提**：workflow 須先把「這次實際 checkout 的 commit SHA」與「該 commit 上
+    `devflow-checks.yml` 的 blob id」印進 log。**現在沒有印**，而 `pull_request` 事件跑的是 GitHub
+    生成的 merge commit，該 commit 在 PR 合併後就查不到（`refs/pull/<N>/merge` 隨之消失），
+    事後無從回推當時執行的是哪一份檔案。補上這段輸出動的是 `.github/workflows/`，
+    是 #26 實作時的前置工作。
+  - **條件一**：正、反兩個 run 的 log 印出的 blob 相同——同一份檢查器，才談得上正反驗證。
+  - **條件二**：負向案例相對正向案例**只新增目標項的違規**；其他項可以報 `📝` advisory，
+    但不得出現 `❌`、不得共同造成 `exit 1`。證據：正負兩份輸入的 diff、目標項的 `❌`、
+    其他項至多 `📝`，且 exit 為 1 不是 2（`exit 2` ＝檢查器本身無法執行）。
 
 ## 不做的事
 
