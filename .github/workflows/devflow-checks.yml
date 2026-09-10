@@ -3,7 +3,13 @@
 # G4：新規則要求的檢查器尚不存在時先列為「建議」，工具可執行且正反測試通過後才升為必需關卡。
 # 所以本檔分兩段：
 #   必需關卡 —— 對當前 main 全部通過，且每一項都構造得出失敗，orchestrator 可據此設 required。
-#   建議     —— 檢查器已可執行，但 repo 內容尚未遷移，只報告不擋。
+#   建議     —— 檢查器已可執行，但 repo 內容尚未遷移，只報告不擋。升級靠 R9_BLOCKING 開關，
+#                不是靠註解叫人搬程式碼。
+#
+# 檢查器用 python3 而不是 grep／awk：markdown 與 YAML 是有結構的，行導向的位元組比對
+# 會同時產生假陰性（正確的字串出現在錯誤的位置，例如 code fence 內的假表頭）與假陽性
+# （`R3foo` 被截成 `R3`）。python3 是 ubuntu-latest 的既有工具；真的不存在時
+# `python3` 這一行會直接讓 step 失敗，不會靜默通過。
 name: devflow checks
 
 on:
@@ -21,139 +27,428 @@ jobs:
 
       - name: 規則檢查
         run: |
-          # GitHub 預設用 `bash -e {0}`；本腳本要跑完所有檢查再一次回報，故關掉 -e。
-          set +e -u -o pipefail
+          set -euo pipefail
+          python3 - <<'PY'
+          # -*- coding: utf-8 -*-
+          """devflow 規則檢查。exit 0 通過／1 檢查失敗／2 檢查器本身無法執行。"""
+          import os
+          import re
+          import subprocess
+          import sys
+          from urllib.parse import unquote
 
-          tmp="$(mktemp -d)"
-          err="$tmp/err"
-          : > "$err"
+          # ── 設定 ──────────────────────────────────────────────────────────
+          RULES_FILE = "devflow/WORKFLOW.md"
+          TABLE_DIRS = ("devflow/forges/", "devflow/coders/", "devflow/orchestrators/")
+          TABLE_HEADER = ["面向", "值", "狀態"]
+          # R9 的三值，用詞以 devflow/WORKFLOW.md 的 R9 為準。
+          R9_STATUSES = ("✅ 可用", "📝 已宣稱", "⬜ 未測")
+          # 三值後面可以接補充（R9 要求 ✅ 附驗證方式、📝 標明是哪一種），
+          # 但必須是「三值 ＋ 分隔符」，不能是「✅ 可用性佳」這種黏著詞。
+          R9_SEPS = " \t（(：:，,。、；;）)"
+          # 規則家族前綴的基線。實際使用的集合是「基線 ∪ WORKFLOW.md 現有定義的前綴」：
+          # 加新家族會自動納入檢查，整個家族被刪掉時基線仍擋得住懸空引用。
+          BASELINE_PREFIXES = {"I", "S", "V", "L", "R", "M", "F", "C", "G", "B", "ST", "P", "D"}
 
-          fail() { printf '  ❌ %s\n' "$1" >> "$err"; printf '  ❌ %s\n' "$1"; }
-          pass() { printf '  ✅ %s\n' "$1"; }
+          # G4 升級開關。對照表依 R9 遷移完成後，把下面的 False 改成 True，
+          # 建議段即成為必需關卡。環境變數只能加嚴、不能放寬，供升級前試跑。
+          R9_BLOCKING = False or os.environ.get("DEVFLOW_R9_BLOCKING") == "1"
 
-          # 前置：底下大量用 grep -P；PCRE 不可用時要炸掉，不能靜默通過。
-          if ! printf 'x' | grep -qP 'x'; then
-            echo "❌ grep -P（PCRE）不可用，檢查無法執行"
-            exit 2
-          fi
+          errors = []
+          advisories = []
 
-          git ls-files '*.md' > "$tmp/md"
 
-          echo "── 1. V1：frontmatter version 為四碼 a.b.c.d"
-          while IFS= read -r f; do
-            [ -n "$f" ] || continue
-            ver="$(awk 'NR==1 && $0!="---" {exit}
-                        NR>1 && $0=="---" {exit}
-                        NR>1 && /^version:/ {sub(/^version:[ \t]*/,""); print; exit}' "$f")"
-            case "$f" in
-              devflow/WORKFLOW.md|docs/spec/*/spec.md)
-                # V4／S1：這兩類檔案必須有 version，缺了就是錯，不是「沒有就跳過」。
-                if [ -z "$ver" ]; then
-                  fail "$f 缺 frontmatter version（V1／S1）"
+          def die(msg):
+              print("💥 檢查器無法執行：%s" % msg)
+              sys.exit(2)
+
+
+          def err(msg, detail=()):
+              errors.append(msg)
+              print("  ❌ %s" % msg)
+              for d in detail:
+                  print("      %s" % d)
+
+
+          def adv(msg, detail=()):
+              # R9_BLOCKING 打開時，建議段走的是和 err 同一條路，不是另一條。
+              if R9_BLOCKING:
+                  err(msg, detail)
+                  return
+              advisories.append(msg)
+              print("  📝 %s" % msg)
+              detail = list(detail)
+              for d in detail[:5]:
+                  print("       %s" % d)
+              if len(detail) > 5:
+                  print("       …（另有 %d 筆同類，升為關卡後會全部列出）" % (len(detail) - 5))
+
+
+          def ok(msg):
+              print("  ✅ %s" % msg)
+
+
+          # ── 取得受版控的檔案（NUL 分隔，檔名含空白也不會被拆開）────────────
+          def tracked():
+              p = subprocess.run(["git", "ls-files", "-z"], stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+              if p.returncode != 0:
+                  die("git ls-files 失敗（exit %d）：%s"
+                      % (p.returncode, p.stderr.decode("utf-8", "replace").strip()))
+              out = []
+              for raw in p.stdout.split(b"\0"):
+                  if not raw:
+                      continue
+                  try:
+                      out.append(raw.decode("utf-8"))
+                  except UnicodeDecodeError:
+                      die("受版控的檔名不是 UTF-8：%r" % raw)
+              return out
+
+
+          def read_lines(path):
+              try:
+                  with open(path, encoding="utf-8") as fh:
+                      return fh.read().split("\n")
+              except OSError as e:
+                  die("讀不到 %s：%s" % (path, e))
+              except UnicodeDecodeError as e:
+                  die("%s 不是合法 UTF-8：%s" % (path, e))
+
+
+          # ── markdown 結構 ─────────────────────────────────────────────────
+          FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*(\S*)")
+
+
+          def scan_fences(lines):
+              """回傳 (每行是否在 fenced code block 內, 未關閉的起始行號或 -1)。"""
+              mask = [False] * len(lines)
+              marker = None
+              start = -1
+              for i, line in enumerate(lines):
+                  m = FENCE.match(line)
+                  if marker is None:
+                      if m:
+                          marker, start = m.group(1), i
+                          mask[i] = True
+                  else:
+                      mask[i] = True
+                      if (m and m.group(1)[0] == marker[0]
+                              and len(m.group(1)) >= len(marker) and not m.group(2)):
+                          marker = None
+              return mask, (start if marker is not None else -1)
+
+
+          CELL_SPLIT = re.compile(r"(?<!\\)\|")
+          DELIM_CELL = re.compile(r"^:?-+:?$")
+
+
+          def row_cells(line):
+              """把 markdown 表格列切成儲存格；不是表格列回傳 None。跳過 \\| 轉義。"""
+              s = line.strip()
+              if not s.startswith("|"):
+                  return None
+              parts = CELL_SPLIT.split(s)
+              if parts and parts[0].strip() == "":
+                  parts = parts[1:]
+              if parts and parts[-1].strip() == "":
+                  parts = parts[:-1]
+              return [p.strip() for p in parts]
+
+
+          def find_tables(lines, mask):
+              """找出真正的表格：表頭列的下一行必須是同欄數的分隔列，且兩行都不在 code fence 內。"""
+              tables = []
+              i = 0
+              while i < len(lines) - 1:
+                  if mask[i] or mask[i + 1]:
+                      i += 1
+                      continue
+                  head = row_cells(lines[i])
+                  delim = row_cells(lines[i + 1])
+                  if (head and delim and len(head) == len(delim)
+                          and all(DELIM_CELL.match(c) for c in delim)):
+                      body = []
+                      j = i + 2
+                      while j < len(lines) and not mask[j]:
+                          cells = row_cells(lines[j])
+                          if cells is None:
+                              break
+                          body.append((j + 1, cells))
+                          j += 1
+                      tables.append({"line": i + 1, "header": head, "body": body})
+                      i = j
+                      continue
+                  i += 1
+              return tables
+
+
+          # ── frontmatter（YAML 語意：重複 key 取最後、剝引號、砍行內註解）──
+          FM_KEY = re.compile(r"^([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*:[ \t]?(.*)$")
+
+
+          def frontmatter(lines):
+              """回傳 ('none'|'unclosed'|'ok', 內容行)。"""
+              if not lines or lines[0].strip() != "---":
+                  return "none", []
+              for j in range(1, len(lines)):
+                  if lines[j].rstrip() in ("---", "..."):
+                      return "ok", lines[1:j]
+              return "unclosed", []
+
+
+          def scalar(raw):
+              v = raw.strip()
+              if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+                  return v[1:-1]
+              return re.split(r"[ \t]+#", v, maxsplit=1)[0].strip()
+
+
+          def fm_values(fm_lines, key):
+              """frontmatter 內某個頂層 key 的所有出現（依序）。"""
+              vals = []
+              for line in fm_lines:
+                  m = FM_KEY.match(line)
+                  if m and m.group(1) == key:
+                      vals.append(scalar(m.group(2)))
+              return vals
+
+
+          try:
+              import yaml as _yaml
+          except ImportError:
+              _yaml = None
+
+          # ── 前置 sanity：不在 repo 內或抓不到檔案時要炸掉，不能靜默跳過 ────
+          files = tracked()
+          md_files = [f for f in files if f.endswith(".md")]
+          table_files = sorted(f for f in md_files if f.startswith(TABLE_DIRS))
+          if not files:
+              die("git ls-files 沒有回傳任何受版控的檔案（不在 git work tree 內？）")
+          if RULES_FILE not in files:
+              die("找不到受版控的 %s，repo 佈局與檢查器假設不符" % RULES_FILE)
+          if not table_files:
+              die("在 %s 下找不到任何對照表" % "／".join(TABLE_DIRS))
+          print("檢查器：python %s／PyYAML 交叉驗證 %s／受版控 md %d 個／對照表 %d 個"
+                % (sys.version.split()[0], "開" if _yaml else "關（未安裝）",
+                   len(md_files), len(table_files)))
+
+          # 先把每個 md 的行與 fence 遮罩算好，後面各項共用。
+          docs = {}
+          for f in md_files:
+              lines = read_lines(f)
+              mask, unclosed = scan_fences(lines)
+              docs[f] = {"lines": lines, "mask": mask, "unclosed": unclosed}
+
+          print()
+          print("── 0. markdown 的 fenced code block 都有關閉")
+          # 未關閉的 fence 會讓底下所有「排除 code fence」的檢查誤把內容當成程式碼而略過，
+          # 是一條真實的繞過路徑，所以它自己必須是關卡。
+          bad_fence = [(f, d["unclosed"] + 1) for f, d in sorted(docs.items()) if d["unclosed"] >= 0]
+          if bad_fence:
+              for f, ln in bad_fence:
+                  err("%s:%d 的 fenced code block 沒有關閉" % (f, ln))
+          else:
+              ok("%d 個 md 檔的 code fence 都成對" % len(md_files))
+
+          print()
+          print("── 1. V1：frontmatter version 為四碼 a.b.c.d")
+          VER_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$")
+          SPEC_RE = re.compile(r"^docs/spec/[^/]+/spec\.md$")
+          for f in md_files:
+              required = (f == RULES_FILE) or bool(SPEC_RE.match(f))
+              state, fm = frontmatter(docs[f]["lines"])
+              if state == "unclosed":
+                  err("%s 的 frontmatter 沒有關閉" % f)
                   continue
-                fi
-                ;;
-              *)
-                [ -n "$ver" ] || continue
-                ;;
-            esac
-            if printf '%s' "$ver" | grep -qP '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
-              pass "$f version=$ver"
-            else
-              fail "$f version=「$ver」不是四碼 a.b.c.d（V1）"
-            fi
-          done < "$tmp/md"
+              if state == "none":
+                  if required:
+                      err("%s 缺 frontmatter（V1／S1）" % f)
+                  continue
+              vals = fm_values(fm, "version")
+              if not vals:
+                  if required:
+                      err("%s 的 frontmatter 缺 version（V1／S1）" % f)
+                  continue
+              if len(vals) > 1:
+                  # YAML 取最後一個；兩個 version key 本身就是壞的，不能只看第一個。
+                  err("%s 的 frontmatter 有 %d 個 version key：%s（YAML 實際生效的是最後一個）"
+                      % (f, len(vals), "、".join("「%s」" % v for v in vals)))
+              value = vals[-1]
+              if _yaml is not None:
+                  try:
+                      data = _yaml.safe_load("\n".join(fm))
+                  except Exception as e:
+                      err("%s 的 frontmatter 不是合法 YAML：%s" % (f, e))
+                      continue
+                  if not isinstance(data, dict):
+                      err("%s 的 frontmatter 不是 mapping" % f)
+                      continue
+                  ref = data.get("version")
+                  if ref is None or str(ref) != value:
+                      # 我的取值和真正的 YAML parser 不同 → 檢查器有問題，要炸不要猜。
+                      err("%s 的 version 取值與 YAML parser 不一致：本檢查器「%s」／PyYAML「%s」"
+                          % (f, value, ref))
+                      continue
+              if VER_RE.match(value):
+                  ok("%s version=%s" % (f, value))
+              else:
+                  err("%s version=「%s」不是四碼 a.b.c.d（V1）" % (f, value))
 
-          echo "── 2. 規則 ID 無重複定義（WORKFLOW.md）"
-          grep -oP '^- `\K[A-Z]+[0-9]+' devflow/WORKFLOW.md | sort > "$tmp/defined"
-          dup="$(uniq -c "$tmp/defined" | awk '$1>1 {print $2}')"
-          if [ -n "$dup" ]; then
-            fail "重複定義的規則 ID：$(printf '%s' "$dup" | tr '\n' ' ')"
-            grep -nP "^- \`($(printf '%s' "$dup" | paste -sd'|'))\`" devflow/WORKFLOW.md | sed 's/^/      /'
-          else
-            pass "$(wc -l < "$tmp/defined") 條規則 ID 無重複"
-          fi
+          print()
+          print("── 2. 規則 ID 無重複定義（%s）" % RULES_FILE)
+          # 定義行：行首的 markdown bullet（- * +）＋（可選粗體）＋ `ID`，數字後必須緊接反引號。
+          DEF_RE = re.compile(r"^[-*+][ \t]+(?:\*\*|__)?`([A-Z]{1,4}[0-9]+)`")
+          defined = {}
+          rd = docs[RULES_FILE]
+          for i, line in enumerate(rd["lines"]):
+              if rd["mask"][i]:
+                  continue
+              m = DEF_RE.match(line)
+              if m:
+                  defined.setdefault(m.group(1), []).append(i + 1)
+          dups = {k: v for k, v in defined.items() if len(v) > 1}
+          if dups:
+              for rid in sorted(dups):
+                  err("規則 ID `%s` 被定義 %d 次" % (rid, len(dups[rid])),
+                      ["%s:%d:%s" % (RULES_FILE, n, rd["lines"][n - 1]) for n in dups[rid]])
+          elif not defined:
+              err("在 %s 找不到任何規則定義，檢查器的定義樣式可能已與檔案脫節" % RULES_FILE)
+          else:
+              ok("%d 條規則 ID，無重複定義" % len(defined))
 
-          echo "── 3. 規則 ID 無懸空引用（repo 內 md 反引號引用的 ID 都要有定義）"
-          sort -u "$tmp/defined" > "$tmp/defined-u"
-          xargs -a "$tmp/md" grep -ohP '`\K(I|S|V|L|R|M|F|C|G|B|ST|P|D)[0-9]+(?=`)' \
-            | sort -u > "$tmp/refd"
-          dangling="$(comm -13 "$tmp/defined-u" "$tmp/refd")"
-          if [ -n "$dangling" ]; then
-            for id in $dangling; do
-              fail "引用了未定義的規則 ID \`$id\`："
-              xargs -a "$tmp/md" grep -nP "\`$id\`" | sed 's/^/      /'
-            done
-          else
-            pass "$(wc -l < "$tmp/refd") 個被引用的 ID 全部有定義"
-          fi
+          print()
+          print("── 3. 規則 ID 無懸空引用（md 內的 `ID` 都要有定義）")
+          prefixes = set(BASELINE_PREFIXES)
+          for rid in defined:
+              prefixes.add(re.match(r"^([A-Z]{1,4})", rid).group(1))
+          CODE_SPAN = re.compile(r"`([^`\n]+)`")
+          ID_SPAN = re.compile(r"^([A-Z]{1,4})([0-9]+)$")
+          refs = {}
+          nref = 0
+          for f in md_files:
+              d = docs[f]
+              for i, line in enumerate(d["lines"]):
+                  if d["mask"][i]:
+                      continue
+                  for span in CODE_SPAN.findall(line):
+                      m = ID_SPAN.match(span)
+                      if not m or m.group(1) not in prefixes:
+                          continue
+                      nref += 1
+                      refs.setdefault(span, []).append((f, i + 1, line.strip()))
+          dangling = sorted(r for r in refs if r not in defined)
+          if dangling:
+              for rid in dangling:
+                  err("引用了未定義的規則 ID `%s`" % rid,
+                      ["%s:%d:%s" % (f, n, t) for f, n, t in refs[rid]])
+          else:
+              ok("%d 處引用、%d 個相異 ID（含 %s 的定義行本身），全部有定義"
+                 % (nref, len(refs), RULES_FILE))
 
-          echo "── 4. 對照表表頭（狀態欄存在，R9 才有落點）"
-          for f in devflow/forges/*.md devflow/coders/*.md devflow/orchestrators/*.md; do
-            if grep -qF '| 面向 | 值 | 狀態 |' "$f"; then
-              pass "$f 有標準表頭"
-            else
-              fail "$f 缺標準表頭 \`| 面向 | 值 | 狀態 |\`"
-            fi
-          done
+          print()
+          print("── 4. 對照表有真正的 %s 表頭" % "｜".join(TABLE_HEADER))
+          tables_of = {}
+          for f in table_files:
+              d = docs[f]
+              tables = find_tables(d["lines"], d["mask"])
+              # 要求「三欄都在」而不是「完全相等」：R10 的受測環境日後可能獨立成欄，
+              # 完全相等會把那次合法的遷移變成假陽性。
+              std = [t for t in tables if all(h in t["header"] for h in TABLE_HEADER)]
+              tables_of[f] = std
+              if std:
+                  ok("%s:%d 有標準表頭（%d 個資料列）" % (f, std[0]["line"], len(std[0]["body"])))
+              else:
+                  found = ["%s:%d %s" % (f, t["line"], " | ".join(t["header"])) for t in tables]
+                  err("%s 沒有帶分隔列的真表格用 %s 當表頭"
+                      % (f, " | ".join(TABLE_HEADER)),
+                      found or ["（整個檔案找不到任何有分隔列的表格）"])
 
-          echo "── 5. markdown 相對連結指向存在的路徑"
-          while IFS= read -r f; do
-            [ -n "$f" ] || continue
-            d="$(dirname "$f")"
-            grep -oP '\]\(\K[^)]+' "$f" | while IFS= read -r link; do
-              case "$link" in
-                http://*|https://*|mailto:*|'#'*) continue ;;
-              esac
-              target="${link%%#*}"
-              [ -n "$target" ] || continue
-              case "$target" in
-                /*) path=".${target}" ;;
-                *)  path="$d/$target" ;;
-              esac
-              [ -e "$path" ] || printf '%s -> %s\n' "$f" "$link" >> "$tmp/linkbad"
-            done
-          done < "$tmp/md"
-          if [ -s "$tmp/linkbad" ]; then
-            fail "有相對連結指向不存在的路徑："
-            sed 's/^/      /' "$tmp/linkbad"
-          else
-            pass "所有相對連結都指得到"
-          fi
+          print()
+          print("── 5. markdown 相對連結指向存在的路徑")
+          # 角括號形式 ](<a b.md>) 允許空白，裸形式不允許；兩種都要接，
+          # 只認裸形式會漏掉前者（假陰性），不做 percent-decode 則會誤判 %20（假陽性）。
+          TITLE = r"(?:[ \t]+(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?"
+          INLINE_ANGLE = re.compile(r"\]\([ \t]*<([^>\n]*)>" + TITLE + r"[ \t]*\)")
+          INLINE_BARE = re.compile(r"\]\([ \t]*([^)<>\s]+)" + TITLE + r"[ \t]*\)")
+          REFDEF = re.compile(r"^ {0,3}\[[^\]]+\]:[ \t]*(?:<([^>\n]*)>|(\S+))"
+                              + TITLE + r"[ \t]*$")
+          SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
+          broken = []
+          nlink = 0
+          for f in md_files:
+              d = docs[f]
+              base = os.path.dirname(f)
+              for i, line in enumerate(d["lines"]):
+                  if d["mask"][i]:
+                      continue
+                  targets = INLINE_ANGLE.findall(line) + INLINE_BARE.findall(line)
+                  rm = REFDEF.match(line)
+                  if rm:
+                      targets.append(rm.group(1) if rm.group(1) is not None else rm.group(2))
+                  for t in targets:
+                      if t.startswith("#") or SCHEME.match(t):
+                          continue
+                      path = unquote(t.split("#", 1)[0])
+                      if not path:
+                          continue
+                      nlink += 1
+                      full = path[1:] if path.startswith("/") else os.path.join(base, path)
+                      if not os.path.exists(os.path.normpath(full)):
+                          broken.append("%s:%d -> %s" % (f, i + 1, t))
+          if broken:
+              err("有相對連結指向不存在的路徑", broken)
+          else:
+              ok("%d 條相對連結（含 reference-style 定義）都指得到" % nlink)
 
-          echo
-          echo "── 建議（G4，本輪不阻擋）：R9 對照表狀態欄遷移"
-          # 檢查器本身已可執行、正反測試都過，但對照表的狀態欄還沒依 R9 遷移到三值，
-          # 而 devflow/ 不在加這支 CI 的 write scope 內，現在設成關卡會擋死每個 PR。
-          # 兩項都清空後，把這一段搬進上面的必需關卡（G4）。
-          advisory=0
+          print()
+          print("── R9：對照表狀態欄取三值之一（%s）" % (
+              "必需關卡" if R9_BLOCKING else "建議，G4，本輪不阻擋"))
+          # 檢查器已可執行且正反測試通過，但對照表的狀態欄還沒依 R9 遷移到三值，
+          # 而 devflow/ 不在加這支 CI 的 write scope 內：現在設成關卡會擋死每個 PR。
+          # 遷移完成後把上面的 R9_BLOCKING 改成 True 即可，adv() 走的就是 err() 那條路。
+          def status_ok(cell):
+              for tok in R9_STATUSES:
+                  if cell == tok:
+                      return True
+                  if cell.startswith(tok) and cell[len(tok)] in R9_SEPS:
+                      return True
+              return False
 
-          for f in devflow/forges/*.md devflow/coders/*.md devflow/orchestrators/*.md; do
-            bad="$(grep -nP '^\|' "$f" \
-                    | grep -vP '^[0-9]+:\|\s*面向\s*\|' \
-                    | grep -vP '^[0-9]+:\|[\s:-]+\|' \
-                    | grep -vP '\|\s*(✅|📝|⬜)[^|]*\|\s*$')"
-            if [ -n "$bad" ]; then
-              advisory=1
-              echo "  📝 $f 有資料列的狀態欄不是 ✅／📝／⬜ 開頭："
-              printf '%s\n' "$bad" | sed 's/^/       /'
-            fi
-          done
+          OLD_TOKENS = ("✅ 實測", "⬜ 未實測", "⬜ 未實作")
+          r9_clean = True
+          for f in table_files:
+              d = docs[f]
+              for t in tables_of.get(f, []):
+                  col = t["header"].index("狀態")
+                  bad = [(n, c[col] if col < len(c) else "（缺欄）") for n, c in t["body"]
+                         if col >= len(c) or not status_ok(c[col])]
+                  if bad:
+                      r9_clean = False
+                      adv("%s 有 %d 列的狀態欄不是 %s"
+                          % (f, len(bad), "／".join(R9_STATUSES)),
+                          ["%s:%d 狀態欄=「%s」" % (f, n, v) for n, v in bad])
+              # 表格以外的敘述句也會宣告舊的二值制度，一併報。
+              prose = []
+              for i, line in enumerate(d["lines"]):
+                  if d["mask"][i] or row_cells(line) is not None:
+                      continue
+                  if any(tok in line for tok in OLD_TOKENS):
+                      prose.append("%s:%d:%s" % (f, i + 1, line.strip()))
+              if prose:
+                  r9_clean = False
+                  adv("%s 的敘述句仍用二值用語" % f, prose)
+          if r9_clean:
+              ok("對照表狀態欄全部合 R9"
+                 + ("" if R9_BLOCKING else " —— 可把 R9_BLOCKING 改成 True 升為必需關卡（G4）"))
 
-          old="$(grep -rnP '(✅ 實測|⬜ 未實測|⬜ 未實作)' \
-                   devflow/forges devflow/coders devflow/orchestrators)"
-          if [ -n "$old" ]; then
-            advisory=1
-            echo "  📝 $(printf '%s\n' "$old" | wc -l) 處仍是二值用語（✅ 實測／⬜ 未實測／⬜ 未實作）；"
-            echo "     R9 已改三值 ✅ 可用／📝 已宣稱／⬜ 未測。"
-          fi
-
-          [ "$advisory" -eq 0 ] && echo "  ✅ 對照表已合 R9 —— 可把本段升為必需關卡（G4）"
-
-          echo
-          if [ -s "$err" ]; then
-            echo "===== 必需關卡失敗 ====="
-            cat "$err"
-            exit 1
-          fi
-          echo "===== 必需關卡全部通過 ====="
+          print()
+          if errors:
+              print("===== 必需關卡失敗（%d 項）=====" % len(errors))
+              for m in errors:
+                  print("  ❌ %s" % m)
+              sys.exit(1)
+          print("===== 必需關卡全部通過 =====")
+          if advisories:
+              print("（另有 %d 項建議，依 G4 本輪不阻擋）" % len(advisories))
+          PY
