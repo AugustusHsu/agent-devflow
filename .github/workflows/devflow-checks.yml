@@ -3,31 +3,39 @@
 # G4：新規則要求的檢查器尚不存在時先列為「建議」，工具可執行且正反測試通過後才升為必需關卡。
 # 本檔每一項檢查都有自己的開關（下面的 GATES）：True＝必需關卡，False＝建議（只報告不擋）。
 #
-# ── 為什麼必需關卡只有三項 ────────────────────────────────────────────────
-# 三輪審查各找到 7、8、7 個缺口，沒有收斂。診斷是範圍問題：把「任意 markdown 的語意
+# ── 為什麼必需關卡只有兩項 ────────────────────────────────────────────────
+# 四輪審查各找到 7、8、7、2 個缺口。診斷是範圍問題：把「任意 markdown 的語意
 # 正確性」當成關卡，攻擊面就是整個 GFM ＋ HTML 的表面積，補不完。
-# 所以必需關卡只留同時滿足三條的項目：攻擊面是有限可窮舉的形狀、每個 PR 都會碰、
-# 三輪審查沒有在它身上找到假陽性。其餘降為建議，先讓 Phase 1 的出口達成。
-# 結構性強化（權威檔案清單、raw HTML、對照表分節 schema）拆到 issue #22。
+# 準則：required 的第一條是「不能擋合法 PR」。**只要舉得出一個會誤擋合法內容的例子，
+# 就不能當關卡**，這一項的價值再高也一樣。第三輪曾用「三輪都沒被找到假陽性」當理由
+# 把 refs 留在關卡——那是錯的推論，第四輪一次就找到了。沒被找到不等於沒有。
+# 其餘降為建議，先讓 Phase 1 的出口達成；結構性強化拆到 issue #22。
 #
-# ── 擋得住什麼（必需關卡，3 項）──────────────────────────────────────────
+# ── 擋得住什麼（必需關卡，2 項）──────────────────────────────────────────
 #   * V1 frontmatter version 四碼
 #       攻擊面＝YAML frontmatter，有限。值由 PyYAML 解析，重複 key（含 "version" 加引號
-#       的寫法）、anchor／alias 都涵蓋。V4 要求規格文檔每次變更都 bump，每個文檔 PR 都碰。
+#       的寫法）、anchor／alias、區塊純量（含換行）都涵蓋。V4 要求規格文檔每次變更都
+#       bump，每個文檔 PR 都碰。
 #   * 規則 ID 唯一定義
-#       攻擊面＝清單項 ＋ code span，由 AST 判定。縮排、巢狀、粗體、blockquote、
-#       雙反引號都涵蓋；判定刻意往「多認」偏——誤報看得見，漏報是沉默的。
-#   * 規則 ID 無懸空引用
-#       攻擊面同上。它擋的是 WORKFLOW.md 改號後別的檔案還指著舊號，而那正是 I5
-#       （一個事實只住一處）爛掉的樣子。三輪下來零假陽性。
+#       攻擊面＝WORKFLOW.md 內的清單項 ＋ 開頭的 code span，由 AST 判定。縮排、巢狀、
+#       粗體、blockquote、雙反引號都涵蓋；判定刻意往「多認」偏——誤報看得見，
+#       漏報是沉默的。它不掃其他檔案，所以不會碰到非規則代號那個問題。
 #
 # ── 擋不住什麼（已知不完備，不要假裝完備）──────────────────────────────
-#   * 降為建議的四項只報告不擋：fenced code block 未關閉、對照表形狀、
-#     相對連結有效性、R9 狀態欄三值。三輪審查的缺口幾乎都落在這四項裡，
+#   * 【改 ID 後別的檔案還指著舊號 —— 沒有任何必需關卡在擋。】
+#     refs 這一項本來就是為這個失效而存在的，但它會把 `M5`（Apple 晶片）、`C5`
+#     （RFC 分類）這種合法的非規則代號判成懸空規則引用。WORKFLOW.md:7 只寫「引用規則
+#     一律用 ID」，並沒有反向把所有這種形狀的 code span 保留給規則命名空間——所以那是
+#     誤擋，不是使用者誤用。它現在是建議：CI log 會列出來，但**不會擋人，也沒有任何
+#     機制保證有人讀**。實際擋這個失效的只剩人工審查（R4）。
+#     升回必需關卡的條件（issue #22）：建立保留命名空間，或把掃描範圍限定到可以宣告
+#     「此處 ID 形狀的 code span 一律是規則引用」的檔案集合。在那之前，改動規則 ID 的
+#     PR（#12／#17）建議手動跑一次 DEVFLOW_GATE_REFS=1。
+#   * 另外四項建議同樣只報告不擋：fenced code block 未關閉、對照表形狀、
+#     相對連結有效性、R9 狀態欄三值。四輪審查的缺口幾乎都落在這些項目裡，
 #     因為它們驗的是「任意 markdown 內容」。每項都能用 GATES 或環境變數單獨打開驗證。
-#   * 從未定義過的規則家族（例如 `Q3`）不在懸空引用的檢查範圍：前綴集合＝基線 ∪
-#     現有定義的前綴。這是刻意取捨——放寬成「任何 ID 形狀」會讓 `RFC2119` 這類
-#     code span 變成誤報。改號、刪規則這兩個真正的失效模式仍然涵蓋。
+#   * 從未定義過的規則家族（例如 `Q3`）連建議都不會報：前綴集合＝基線 ∪ 現有定義的
+#     前綴。放寬成「任何 ID 形狀」只會讓上面那個誤擋問題更嚴重。
 #   * 權威檔案清單、raw HTML 內容、對照表的分節 schema —— 都在 issue #22，本輪不做。
 #   * frontmatter 的界定（首行 --- 到下一個 ---）仍是字面掃描；那是慣例不是 markdown
 #     語法，沒有 parser 可問。界定出來的內容才交給 PyYAML。
@@ -88,7 +96,7 @@ jobs:
           GATES = {
               "version": True,    # V1 frontmatter version 四碼
               "dupid":   True,    # 規則 ID 唯一定義
-              "refs":    True,    # 規則 ID 無懸空引用
+              "refs":    False,   # 規則 ID 無懸空引用（會誤擋非規則代號，見檔頭）
               "fence":   False,   # fenced code block 未關閉
               "table":   False,   # 對照表形狀（#17 分節定案前會誤擋，見 issue #22）
               "link":    False,   # 相對連結有效性
@@ -112,7 +120,9 @@ jobs:
           # 規則家族前綴的基線。實際集合是「基線 ∪ WORKFLOW.md 現有定義的前綴」：
           # 加新家族自動納入，整個家族被刪掉時基線仍擋得住懸空引用。
           BASELINE_PREFIXES = {"I", "S", "V", "L", "R", "M", "F", "C", "G", "B", "ST", "P", "D"}
-          ID_RE = re.compile(r"^([A-Z]{1,4})[0-9]+$")
+          # 一律用 fullmatch，不用 match：Python 的 $ 會匹配「字串最後一個換行之前」，
+          # 所以 ^…$ ＋ match() 會讓 "0.0.2.0\n" 這種含換行的值矇混過關。
+          ID_RE = re.compile(r"([A-Z]{1,4})[0-9]+")
 
           MD = MarkdownIt("commonmark").enable("table")
           errors = []
@@ -216,7 +226,7 @@ jobs:
                           break
                       if first is not None and first.type == "code_inline":
                           content = first.content.strip()
-                          if ID_RE.match(content):
+                          if ID_RE.fullmatch(content):
                               out.append((content, locate(lines, t, "`%s`" % content)
                                           or locate(lines, t)))
                       break
@@ -342,12 +352,14 @@ jobs:
 
 
           def frontmatter(lines):
-              """回傳 ('none'|'unclosed'|'ok', 內容字串)。"""
+              """回傳 ('none'|'unclosed'|'ok', 內容字串)。
+              結尾要補回換行：YAML 區塊純量（version: | ）的收尾語意取決於最後一行有沒有
+              換行，少了它檢查器看到的值就和真正讀這個檔案的 parser 不一樣。"""
               if not lines or lines[0].strip() != "---":
                   return "none", ""
               for j in range(1, len(lines)):
                   if lines[j].rstrip() in ("---", "..."):
-                      return "ok", "\n".join(lines[1:j])
+                      return "ok", "\n".join(lines[1:j]) + "\n"
               return "unclosed", ""
 
 
@@ -381,12 +393,12 @@ jobs:
 
           print()
           print("── V1：frontmatter version 為四碼 a.b.c.d（%s）" % tag("version"))
-          VER_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$")
-          SPEC_RE = re.compile(r"^docs/spec/[^/]+/spec\.md$")
+          VER_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+")
+          SPEC_RE = re.compile(r"docs/spec/[^/]+/spec\.md")
           for f in md_files:
               # 必須有 version 的只有規則本體與規格（V4 的適用對象）。其餘檔案有 version
               # 才驗；沒有、或 frontmatter 本身有問題，都不是這一節要管的事。
-              required = (f == RULES_FILE) or bool(SPEC_RE.match(f))
+              required = (f == RULES_FILE) or bool(SPEC_RE.fullmatch(f))
               state, fm = frontmatter(docs[f]["lines"])
               if state != "ok":
                   if required:
@@ -409,10 +421,12 @@ jobs:
               if not isinstance(value, str):
                   report("version", "%s version=%r 不是字串（四碼要寫成 a.b.c.d 或加引號）"
                          % (f, value))
-              elif VER_RE.match(value):
+              elif VER_RE.fullmatch(value):
                   ok("%s version=%s" % (f, value))
               else:
-                  report("version", "%s version=「%s」不是四碼 a.b.c.d（V1）" % (f, value))
+                  # 用 %r：值可能含換行（version: | 的區塊純量），裸印會把輸出撐破，
+                  # 也看不出來問題正是那個看不見的換行。
+                  report("version", "%s version=%r 不是四碼 a.b.c.d（V1）" % (f, value))
 
           print()
           print("── 規則 ID 無重複定義（%s，%s）" % (RULES_FILE, tag("dupid")))
@@ -436,12 +450,12 @@ jobs:
           print("── 規則 ID 無懸空引用（md 內的 `ID` 都要有定義，%s）" % tag("refs"))
           prefixes = set(BASELINE_PREFIXES)
           for rid in defined:
-              prefixes.add(ID_RE.match(rid).group(1))
+              prefixes.add(ID_RE.fullmatch(rid).group(1))
           refs = {}
           nref = 0
           for f in md_files:
               for content, line in code_spans(docs[f]["tokens"], docs[f]["lines"]):
-                  m = ID_RE.match(content)
+                  m = ID_RE.fullmatch(content)
                   if not m or m.group(1) not in prefixes:
                       continue
                   nref += 1
