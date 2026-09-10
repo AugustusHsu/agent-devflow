@@ -17,9 +17,7 @@ jobs:
   devflow-checks:
     runs-on: ubuntu-latest
     steps:
-      # TODO(orchestrator)：依本 repo 慣例改 pin 成 commit sha。
-      # 派工環境無網路可查 v4 當前指向哪個 sha，不瞎猜，先用 tag。
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: 規則檢查
         run: |
