@@ -9,7 +9,7 @@
 | 建 issue／留言／label | `gh issue create` ／ `gh issue comment` ／ `gh issue edit --add-label`（增量） | ⬜ 未實測 |
 | 標準 label | `spec`、`process`、`bypass`、`blocked` | ✅ 實測 2026-09-09（`gh label list` 列出 spec／process／bypass／blocked） |
 | 從 issue 開分支 | `gh issue develop <N> --base main`，分支名 `<N>-<slug>` | ⬜ 未實測 |
-| 分支保護 | main：必經 PR、只允許 merge commit、禁 force push、dismiss stale approvals、required approvals 0 | ✅ 實測 2026-09-09（直推 main 收到 `GH006 Protected branch update failed`） |
+| 分支保護 | main：必經 PR、只允許 merge commit、禁 force push、dismiss stale approvals、required approvals 0 | ✅ 實測 2026-09-11（五項逐一讀回，第三者現在照跑即可重現；受測環境：`gh` 對 `AugustusHsu/agent-devflow` 具 admin 權限——protection 端點對非 admin 回 404。第 1、3、4、5 項：`gh api repos/AugustusHsu/agent-devflow/branches/main/protection --jq '{pr: (.required_pull_request_reviews != null), force: .allow_force_pushes.enabled, dismiss: .required_pull_request_reviews.dismiss_stale_reviews, approvals: .required_pull_request_reviews.required_approving_review_count}'` 期望輸出 `{"approvals":0,"dismiss":true,"force":false,"pr":true}`，四鍵依序對應 required approvals 0／dismiss stale approvals／禁 force push／必經 PR。第 2 項：`gh api repos/AugustusHsu/agent-devflow --jq '{merge: .allow_merge_commit, squash: .allow_squash_merge, rebase: .allow_rebase_merge}'` 期望輸出 `{"merge":true,"rebase":false,"squash":false}`＝只允許 merge commit） |
 | tag 保護 | rulesets；無法依角色限制建立者 | ⬜ 未實測 |
 | 開 PR | `gh pr create --base main --body-file <templates/pr.md 填好>` | ⬜ 未實測 |
 | 審查證據（`R3`／`R5`） | `gh pr review <N> --approve\|--request-changes --body`；review 原生綁 commit | ⬜ 未實測 |
