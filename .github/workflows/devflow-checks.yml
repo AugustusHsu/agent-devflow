@@ -1,0 +1,161 @@
+# 本 repo 的第一個 CI。規則本體是 devflow/WORKFLOW.md，檢查的對象也是它。
+#
+# G4：新規則要求的檢查器尚不存在時先列為「建議」，工具可執行且正反測試通過後才升為必需關卡。
+# 所以本檔分兩段：
+#   必需關卡 —— 對當前 main 全部通過，且每一項都構造得出失敗，orchestrator 可據此設 required。
+#   建議     —— 檢查器已可執行，但 repo 內容尚未遷移，只報告不擋。
+name: devflow checks
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  devflow-checks:
+    runs-on: ubuntu-latest
+    steps:
+      # TODO(orchestrator)：依本 repo 慣例改 pin 成 commit sha。
+      # 派工環境無網路可查 v4 當前指向哪個 sha，不瞎猜，先用 tag。
+      - uses: actions/checkout@v4
+
+      - name: 規則檢查
+        run: |
+          # GitHub 預設用 `bash -e {0}`；本腳本要跑完所有檢查再一次回報，故關掉 -e。
+          set +e -u -o pipefail
+
+          tmp="$(mktemp -d)"
+          err="$tmp/err"
+          : > "$err"
+
+          fail() { printf '  ❌ %s\n' "$1" >> "$err"; printf '  ❌ %s\n' "$1"; }
+          pass() { printf '  ✅ %s\n' "$1"; }
+
+          # 前置：底下大量用 grep -P；PCRE 不可用時要炸掉，不能靜默通過。
+          if ! printf 'x' | grep -qP 'x'; then
+            echo "❌ grep -P（PCRE）不可用，檢查無法執行"
+            exit 2
+          fi
+
+          git ls-files '*.md' > "$tmp/md"
+
+          echo "── 1. V1：frontmatter version 為四碼 a.b.c.d"
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            ver="$(awk 'NR==1 && $0!="---" {exit}
+                        NR>1 && $0=="---" {exit}
+                        NR>1 && /^version:/ {sub(/^version:[ \t]*/,""); print; exit}' "$f")"
+            case "$f" in
+              devflow/WORKFLOW.md|docs/spec/*/spec.md)
+                # V4／S1：這兩類檔案必須有 version，缺了就是錯，不是「沒有就跳過」。
+                if [ -z "$ver" ]; then
+                  fail "$f 缺 frontmatter version（V1／S1）"
+                  continue
+                fi
+                ;;
+              *)
+                [ -n "$ver" ] || continue
+                ;;
+            esac
+            if printf '%s' "$ver" | grep -qP '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+              pass "$f version=$ver"
+            else
+              fail "$f version=「$ver」不是四碼 a.b.c.d（V1）"
+            fi
+          done < "$tmp/md"
+
+          echo "── 2. 規則 ID 無重複定義（WORKFLOW.md）"
+          grep -oP '^- `\K[A-Z]+[0-9]+' devflow/WORKFLOW.md | sort > "$tmp/defined"
+          dup="$(uniq -c "$tmp/defined" | awk '$1>1 {print $2}')"
+          if [ -n "$dup" ]; then
+            fail "重複定義的規則 ID：$(printf '%s' "$dup" | tr '\n' ' ')"
+            grep -nP "^- \`($(printf '%s' "$dup" | paste -sd'|'))\`" devflow/WORKFLOW.md | sed 's/^/      /'
+          else
+            pass "$(wc -l < "$tmp/defined") 條規則 ID 無重複"
+          fi
+
+          echo "── 3. 規則 ID 無懸空引用（repo 內 md 反引號引用的 ID 都要有定義）"
+          sort -u "$tmp/defined" > "$tmp/defined-u"
+          xargs -a "$tmp/md" grep -ohP '`\K(I|S|V|L|R|M|F|C|G|B|ST|P|D)[0-9]+(?=`)' \
+            | sort -u > "$tmp/refd"
+          dangling="$(comm -13 "$tmp/defined-u" "$tmp/refd")"
+          if [ -n "$dangling" ]; then
+            for id in $dangling; do
+              fail "引用了未定義的規則 ID \`$id\`："
+              xargs -a "$tmp/md" grep -nP "\`$id\`" | sed 's/^/      /'
+            done
+          else
+            pass "$(wc -l < "$tmp/refd") 個被引用的 ID 全部有定義"
+          fi
+
+          echo "── 4. 對照表表頭（狀態欄存在，R9 才有落點）"
+          for f in devflow/forges/*.md devflow/coders/*.md devflow/orchestrators/*.md; do
+            if grep -qF '| 面向 | 值 | 狀態 |' "$f"; then
+              pass "$f 有標準表頭"
+            else
+              fail "$f 缺標準表頭 \`| 面向 | 值 | 狀態 |\`"
+            fi
+          done
+
+          echo "── 5. markdown 相對連結指向存在的路徑"
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            d="$(dirname "$f")"
+            grep -oP '\]\(\K[^)]+' "$f" | while IFS= read -r link; do
+              case "$link" in
+                http://*|https://*|mailto:*|'#'*) continue ;;
+              esac
+              target="${link%%#*}"
+              [ -n "$target" ] || continue
+              case "$target" in
+                /*) path=".${target}" ;;
+                *)  path="$d/$target" ;;
+              esac
+              [ -e "$path" ] || printf '%s -> %s\n' "$f" "$link" >> "$tmp/linkbad"
+            done
+          done < "$tmp/md"
+          if [ -s "$tmp/linkbad" ]; then
+            fail "有相對連結指向不存在的路徑："
+            sed 's/^/      /' "$tmp/linkbad"
+          else
+            pass "所有相對連結都指得到"
+          fi
+
+          echo
+          echo "── 建議（G4，本輪不阻擋）：R9 對照表狀態欄遷移"
+          # 檢查器本身已可執行、正反測試都過，但對照表的狀態欄還沒依 R9 遷移到三值，
+          # 而 devflow/ 不在加這支 CI 的 write scope 內，現在設成關卡會擋死每個 PR。
+          # 兩項都清空後，把這一段搬進上面的必需關卡（G4）。
+          advisory=0
+
+          for f in devflow/forges/*.md devflow/coders/*.md devflow/orchestrators/*.md; do
+            bad="$(grep -nP '^\|' "$f" \
+                    | grep -vP '^[0-9]+:\|\s*面向\s*\|' \
+                    | grep -vP '^[0-9]+:\|[\s:-]+\|' \
+                    | grep -vP '\|\s*(✅|📝|⬜)[^|]*\|\s*$')"
+            if [ -n "$bad" ]; then
+              advisory=1
+              echo "  📝 $f 有資料列的狀態欄不是 ✅／📝／⬜ 開頭："
+              printf '%s\n' "$bad" | sed 's/^/       /'
+            fi
+          done
+
+          old="$(grep -rnP '(✅ 實測|⬜ 未實測|⬜ 未實作)' \
+                   devflow/forges devflow/coders devflow/orchestrators)"
+          if [ -n "$old" ]; then
+            advisory=1
+            echo "  📝 $(printf '%s\n' "$old" | wc -l) 處仍是二值用語（✅ 實測／⬜ 未實測／⬜ 未實作）；"
+            echo "     R9 已改三值 ✅ 可用／📝 已宣稱／⬜ 未測。"
+          fi
+
+          [ "$advisory" -eq 0 ] && echo "  ✅ 對照表已合 R9 —— 可把本段升為必需關卡（G4）"
+
+          echo
+          if [ -s "$err" ]; then
+            echo "===== 必需關卡失敗 ====="
+            cat "$err"
+            exit 1
+          fi
+          echo "===== 必需關卡全部通過 ====="
