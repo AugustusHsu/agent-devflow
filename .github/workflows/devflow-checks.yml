@@ -1,0 +1,671 @@
+# 本 repo 的第一個 CI。規則本體是 devflow/WORKFLOW.md，檢查的對象也是它。
+#
+# G4：新規則要求的檢查器尚不存在時先列為「建議」，工具可執行且正反測試通過後才升為必需關卡。
+# 本檔每一項檢查都有自己的開關（下面的 GATES）：True＝必需關卡，False＝建議（只報告不擋）。
+# 目前七項全部是 False——為什麼停在「建議」這一步，見下面的停損說明。
+#
+# 它現在的價值，誠實地說：CI 這條路通了（相依安裝、AST 解析、報告格式、
+# 逐項開關、65 項回歸測試都在），以及在 log 裡提供七類發現供人閱讀，
+# 外加可用 DEVFLOW_GATE_<KEY>=1 當手動檢查工具。強制力則是零。
+#
+# ── ⚠️ 這個 check 目前不擋任何 PR ─────────────────────────────────────────
+# GATES 七項全部是 False。它會跑、會把發現印在 log 裡，但**不是 gate**：
+# 任何違規都 exit 0，不影響合併。這是使用者裁決的停損結果，不是暫時狀態。
+#
+# 停損的理由，由輕到重：
+#
+#   一、六輪審查，每一輪都在當時的 required 項目上找到假陽性（誤擋合法內容）。
+#       發現數 7、8、7、2、4、2，沒有收斂。一個會誤擋合法 PR 的 required 比沒有
+#       required 更糟——它會讓人學會用 admin 權限繞過，那等於把保護整個拆掉。
+#
+#   二、判準本身錯過兩次。第三輪用「三輪都沒被找到假陽性」當理由把 refs 留在關卡，
+#       第四輪一次就找到；第五輪改成「作者自己舉不出誤擋例子」才留 version，
+#       第六輪審查者仍舉出一個（YAML document suffix 後接註解）。
+#       結論：作者舉不出來，不代表不存在。
+#
+#   三、【最根本】devflow.yml 是 stage: 0，而 V1／V4 在第 3 節、S1 在第 2 節，
+#       依 WORKFLOW.md 第 0 節「第 0、1、13 節永遠生效；其餘各節依 stage 啟用」
+#       與 ST2「規格建版：加上第 2、3、9 節」——這三條規則在 stage: 0 下**還沒生效**。
+#       我們花了六輪，把一條當前不在有效規則集內的規則做成 required gate。
+#       把未生效的規則變成 gate，本身就是錯的，跟實作品質無關。
+#
+# required 的目標移到 issue #22，而且**應該等 stage 進到 2 之後再談**——
+# 在那之前，V1／V4／S1 都還不是有效規則，沒有東西可以拿來當 gate 的依據。
+#
+# ── 這七項檢查各自在報告什麼（都只報告，不擋）────────────────────────────
+#   * version：frontmatter 的 version 是不是四碼 a.b.c.d
+#       掃描對象是「devflow/WORKFLOW.md ＋ 受版控的 docs/spec/<feature>/spec.md」。
+#       這不等於 V4 的適用對象：V4 還包含 kit release tag `v<a.b.c.d>`，而本檢查器
+#       完全不讀 tag。spec 的數量也不是固定的一兩個，feature 增加就跟著增加。
+#       值用原生 yaml.safe_load 取；重複 key 用 compose 看 node 偵測，不 construct，
+#       才不會把合法的 merge key 弄成非法。
+#       曾經宣稱「合法但會被擋的內容在定義上不存在」——**那是錯的，已被反例推翻**：
+#       第六輪的 `... # frontmatter end` 是 YAML 1.2.2 §9.1.2 允許的 document suffix，
+#       卻被判成 frontmatter 沒關閉。該 bug 已修，但這件事證明了這種宣稱不可靠。
+#
+# ── 擋不住什麼（已知不完備，不要假裝完備）──────────────────────────────
+#   * 【全部。這個 check 不擋任何東西。】以下各條說的是「連報告都報不到」，
+#     或「報告了但沒有任何強制力」。
+#   * 【同一個規則 ID 被定義兩次 —— 沒有東西在擋。】
+#     dupid 本來是關卡，第五輪被審查者找到一個假陽性（清單項只含 fence 時會吃到
+#     清單外的段落）。那個 bug 已修，但作者接著自己又找到三個修不掉的：
+#       - 附錄用清單解釋既有規則：「- `R3` 常被誤讀成…」
+#       - 加一節「規則索引」把所有 ID 列一遍
+#       - blockquote 引述既有條文
+#     三者都是人會自然寫進 WORKFLOW.md 的東西，而 WORKFLOW.md 的定義寫法就是
+#     「- `ID` 說明」，散文和定義在語法上分不出來。要分得出來就得知道「哪幾節裡的
+#     清單項才是定義」——那是分節 schema，屬 issue #22（同樣要等 stage 2）。
+#     它現在只報告：CI log 會列出來，但不會擋人。dupid 的 📝 需要人判斷是真重複
+#     還是散文，不要當成一定有錯。
+#   * 【改 ID 後別的檔案還指著舊號 —— 沒有東西在擋。】
+#     refs 這一項本來就是為這個失效而存在的，但它會把 `M5`（Apple 晶片）、`C5`
+#     （RFC 分類）這種合法的非規則代號判成懸空規則引用。WORKFLOW.md:7 只寫「引用規則
+#     一律用 ID」，並沒有反向把所有這種形狀的 code span 保留給規則命名空間——所以那是
+#     誤擋，不是使用者誤用。它現在是建議：CI log 會列出來，但**不會擋人，也沒有任何
+#     機制保證有人讀**。實際擋這個失效的只剩人工審查（R4）。
+#     升為關卡的條件（issue #22，且要等 stage 2）：建立保留命名空間，或把掃描範圍限定到可以宣告
+#     「此處 ID 形狀的 code span 一律是規則引用」的檔案集合。在那之前，改動規則 ID 的
+#     PR（#12／#17）建議手動跑一次 DEVFLOW_GATE_REFS=1。
+#   * 另外四項：fenced code block 未關閉、對照表形狀、相對連結有效性、R9 狀態欄三值。
+#     六輪審查的缺口幾乎都落在這些項目裡，因為它們驗的是「任意 markdown 內容」。
+#     每項都能用 DEVFLOW_GATE_<KEY>=1 單獨打開，當成手動檢查工具跑。
+#   * 【V1 的「進位歸零」沒驗】0.0.2.0 → 0.0.3.7 會通過。要驗它得跟 base 上的版本
+#     比對（新的資料來源），而「該 bump 哪一位」依 V2／V3 是 normative／editorial 的
+#     語意判斷，檢查器判不了。只驗「形式上有歸零」會擋掉合法的多位同時變更，
+#     製造新的假陽性。留在 issue #22，本輪不做半套。
+#   * 從未定義過的規則家族（例如 `Q3`）連建議都不會報：前綴集合＝基線 ∪ 現有定義的
+#     前綴。放寬成「任何 ID 形狀」只會讓上面那個誤擋問題更嚴重。
+#   * 權威檔案清單、raw HTML 內容、對照表的分節 schema —— 都在 issue #22，本輪不做。
+#   * frontmatter 的界定（首行 --- 到下一個 --- 或 ...，兩者後面都可以接註解）仍是
+#     字面掃描；那是慣例不是 markdown 語法，沒有 parser 可問。界定出來的內容才交給
+#     PyYAML。這一段的邊界寫法若還有沒想到的，仍可能誤判。
+#   * GitHub 的算繪器不等於 markdown-it；兩者對極端輸入可能有差異。
+#   * 只看受版控的 .md。非 markdown 檔、PR body、commit 訊息都不在範圍內。
+#   * G5：required check 由 PR 分支上的 workflow 定義產生——想繞過的人可以直接改本檔。
+#     本檢查器擋的是失誤，不是蓄意規避；後者由審查擋。
+name: devflow checks
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  devflow-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: 準備檢查器相依
+        run: |
+          set -euo pipefail
+          # 檢查器硬性要求這兩個模組，沒有 fallback 解析路徑：兩套解析＝兩種行為，
+          # 而實際在 CI 跑的會是比較弱的那一套。runner 上已有就用現成的，沒有才裝。
+          # TODO(orchestrator)：要更嚴的供應鏈保證可改用 --require-hashes ＋ requirements 檔。
+          if ! python3 -c 'import markdown_it, yaml' 2>/dev/null; then
+            python3 -m pip install --quiet --disable-pip-version-check \
+              'markdown-it-py==3.0.0' 'PyYAML==6.0.1'
+          fi
+
+      - name: 規則檢查
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          # -*- coding: utf-8 -*-
+          """devflow 規則檢查。exit 0 通過／1 必需關卡失敗／2 檢查器本身無法執行。"""
+          import os
+          import re
+          import subprocess
+          import sys
+          from urllib.parse import unquote
+
+          try:
+              import yaml
+              from markdown_it import MarkdownIt
+              import markdown_it
+          except ImportError as e:
+              print("💥 檢查器無法執行：缺少相依模組 %s" % e.name)
+              sys.exit(2)
+
+          # ── 關卡開關 ──────────────────────────────────────────────────────
+          # True＝必需關卡（失敗就擋）；False＝建議（只報告）。
+          # 目前七項全部是 False：本檔不擋任何 PR，理由見檔頭的停損說明。
+          # 驗證用：DEVFLOW_GATE_<KEY>=1 可單獨打開一項，環境變數只能加嚴不能放寬。
+          GATES = {
+              "version": False,   # V1 frontmatter version 四碼（stage: 0 下 V1／V4 未生效）
+              "dupid":   False,   # 規則 ID 唯一定義（散文與定義分不出來，見檔頭）
+              "refs":    False,   # 規則 ID 無懸空引用（會誤擋非規則代號，見檔頭）
+              "fence":   False,   # fenced code block 未關閉
+              "table":   False,   # 對照表形狀（#17 分節定案前會誤擋，見 issue #22）
+              "link":    False,   # 相對連結有效性
+              "r9":      False,   # R9 對照表狀態欄三值
+          }
+          for _k in GATES:
+              if os.environ.get("DEVFLOW_GATE_" + _k.upper()) == "1":
+                  GATES[_k] = True
+
+          # ── 設定 ──────────────────────────────────────────────────────────
+          RULES_FILE = "devflow/WORKFLOW.md"
+          TABLE_DIRS = ("devflow/forges/", "devflow/coders/", "devflow/orchestrators/")
+          TABLE_HEADER = ["面向", "值", "狀態"]
+          STATUS_COL = "狀態"
+          # R9 的三值，用詞以 devflow/WORKFLOW.md 的 R9 為準。
+          R9_STATUSES = ("✅ 可用", "📝 已宣稱", "⬜ 未測")
+          # 三值後面可以接補充（R9 要求 ✅ 附驗證方式、📝 標明是哪一種），
+          # 但必須是「三值 ＋ 分隔符」，不能是「✅ 可用性佳」這種黏著詞。
+          R9_SEPS = " \t（(：:，,。、；;）)"
+          OLD_TOKENS = ("✅ 實測", "⬜ 未實測", "⬜ 未實作")
+          # 規則家族前綴的基線。實際集合是「基線 ∪ WORKFLOW.md 現有定義的前綴」：
+          # 加新家族自動納入，整個家族被刪掉時基線仍擋得住懸空引用。
+          BASELINE_PREFIXES = {"I", "S", "V", "L", "R", "M", "F", "C", "G", "B", "ST", "P", "D"}
+          # 一律用 fullmatch，不用 match：Python 的 $ 會匹配「字串最後一個換行之前」，
+          # 所以 ^…$ ＋ match() 會讓 "0.0.2.0\n" 這種含換行的值矇混過關。
+          ID_RE = re.compile(r"([A-Z]{1,4})[0-9]+")
+
+          MD = MarkdownIt("commonmark").enable("table")
+          errors = []
+          advisories = []
+
+
+          def die(msg):
+              print("💥 檢查器無法執行：%s" % msg)
+              sys.exit(2)
+
+
+          def report(gate, msg, detail=()):
+              """依 GATES 決定這一項是擋還是只報告。兩條路都走同一個 detail。"""
+              detail = list(detail)
+              if GATES[gate]:
+                  errors.append(msg)
+                  print("  ❌ %s" % msg)
+                  for d in detail:
+                      print("      %s" % d)
+                  return
+              advisories.append(msg)
+              print("  📝 %s" % msg)
+              for d in detail[:5]:
+                  print("       %s" % d)
+              if len(detail) > 5:
+                  print("       …（另有 %d 筆同類，升為關卡後會全部列出）" % (len(detail) - 5))
+
+
+          def ok(msg):
+              print("  ✅ %s" % msg)
+
+
+          def tag(gate):
+              return "必需關卡" if GATES[gate] else "建議"
+
+
+          # ── 取得受版控的檔案（NUL 分隔，檔名含空白也不會被拆開）────────────
+          def tracked():
+              p = subprocess.run(["git", "ls-files", "-z"], stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+              if p.returncode != 0:
+                  die("git ls-files 失敗（exit %d）：%s"
+                      % (p.returncode, p.stderr.decode("utf-8", "replace").strip()))
+              out = []
+              for raw in p.stdout.split(b"\0"):
+                  if not raw:
+                      continue
+                  try:
+                      out.append(raw.decode("utf-8"))
+                  except UnicodeDecodeError:
+                      die("受版控的檔名不是 UTF-8：%r" % raw)
+              return out
+
+
+          def read_text(path):
+              # utf-8-sig：BOM 對 GitHub 的算繪無影響，不該讓 frontmatter 偵測失效。
+              try:
+                  with open(path, encoding="utf-8-sig") as fh:
+                      return fh.read()
+              except OSError as e:
+                  die("讀不到 %s：%s" % (path, e))
+              except UnicodeDecodeError as e:
+                  die("%s 不是合法 UTF-8：%s" % (path, e))
+
+
+          # ── 從 AST 取事實：不用正規式猜「這是不是表格／清單項／程式碼」──────
+          def locate(lines, tok, needle=None):
+              """回傳 1-based 行號。有 needle 就在 token 涵蓋的行裡找它。"""
+              if not tok.map:
+                  return None
+              start, end = tok.map
+              if needle:
+                  for n in range(start, min(end, len(lines))):
+                      if needle in lines[n]:
+                          return n + 1
+              return start + 1
+
+
+          def rule_definitions(tokens, lines):
+              """清單項開頭是 `ID` 的都算定義——縮排、巢狀、粗體、blockquote 一律算。
+              寧可多認（誤報看得見）也不少認（漏報是沉默的）。"""
+              out = []
+              for i, t in enumerate(tokens):
+                  if t.type != "list_item_open":
+                      continue
+                  for j in range(i + 1, len(tokens)):
+                      tj = tokens[j]
+                      if tj.type in ("list_item_open", "list_item_close"):
+                          # list_item_open：已經進到子項。list_item_close：這個 item 結束了
+                          # ——少了它，清單項只含 fence（沒有 inline）時會一路吃到清單外面
+                          # 的段落，把那裡的引用當成本項的開頭。
+                          break
+                      if tj.type != "inline":
+                          continue
+                      first = None
+                      for c in tj.children or []:
+                          # 粗體／斜體／連結的開標記，以及它們前後產生的空 text token，
+                          # 都不算「開頭」——`R3` 被 ** 包起來仍然是定義。
+                          if c.type in ("strong_open", "em_open", "s_open", "link_open"):
+                              continue
+                          if c.type == "text" and not c.content.strip():
+                              continue
+                          first = c
+                          break
+                      if first is not None and first.type == "code_inline":
+                          content = first.content.strip()
+                          if ID_RE.fullmatch(content):
+                              out.append((content, locate(lines, t, "`%s`" % content)
+                                          or locate(lines, t)))
+                      break
+              return out
+
+
+          def code_spans(tokens, lines):
+              """所有行內 code span。程式碼區塊裡的內容不會產生 inline token，天然排除。"""
+              for t in tokens:
+                  if t.type != "inline":
+                      continue
+                  for c in t.children or []:
+                      if c.type == "code_inline":
+                          content = c.content.strip()
+                          yield content, (locate(lines, t, "`%s`" % content) or locate(lines, t))
+
+
+          def tables_of(tokens, lines):
+              out = []
+              cur = sect = row = None
+              for t in tokens:
+                  if t.type == "table_open":
+                      cur = {"line": locate(lines, t), "header": [], "header_line": None,
+                             "body": []}
+                  elif t.type == "table_close":
+                      if cur is not None:
+                          out.append(cur)
+                      cur = sect = row = None
+                  elif t.type == "thead_open":
+                      sect = "head"
+                  elif t.type == "tbody_open":
+                      sect = "body"
+                  elif t.type == "tr_open":
+                      row = {"line": locate(lines, t), "cells": []}
+                  elif t.type == "tr_close":
+                      if cur is not None and row is not None:
+                          if sect == "head":
+                              cur["header"] = row["cells"]
+                              cur["header_line"] = row["line"]
+                          else:
+                              cur["body"].append(row)
+                      row = None
+                  elif t.type == "inline" and row is not None:
+                      row["cells"].append(t.content.strip())
+              return out
+
+
+          def link_targets(tokens, env, lines):
+              """行內連結、圖片、以及未被使用的 reference 定義。跨行、成對括號、
+              角括號形式都由 parser 處理，不是我在猜。"""
+              out = []
+              for t in tokens:
+                  if t.type != "inline":
+                      continue
+                  ln = locate(lines, t)
+                  for c in t.children or []:
+                      if c.type == "link_open":
+                          href = c.attrGet("href")
+                          if href:
+                              out.append((href, ln))
+                      elif c.type == "image":
+                          src = c.attrGet("src")
+                          if src:
+                              out.append((src, ln))
+              for label, ref in (env.get("references") or {}).items():
+                  href = (ref or {}).get("href")
+                  if not href:
+                      continue
+                  ln = None
+                  for n, line in enumerate(lines):
+                      if line.lstrip().lower().startswith("[%s]:" % label.lower()):
+                          ln = n + 1
+                          break
+                  out.append((href, ln))
+              return out
+
+
+          def strip_containers(s):
+              """剝掉 blockquote 標記與縮排，只留這一行真正的內容。
+              引言區塊裡的 fence 收尾寫成「> ```」，不剝就會被誤判成沒關閉。"""
+              prev = None
+              while prev != s:
+                  prev = s
+                  s = s.lstrip()
+                  if s.startswith(">"):
+                      s = s[1:]
+              return s.strip()
+
+
+          def unclosed_fence(tokens, lines):
+              """fence token 的最後一行不是合格的收尾標記，就是沒關閉。用 parser 自己的切分。
+              收尾標記必須同字元、且不短於開頭——```` 開就不能用 ``` 關。"""
+              for t in tokens:
+                  if t.type != "fence" or not t.map:
+                      continue
+                  end = t.map[1]
+                  if end < 1 or end > len(lines):
+                      return t.map[0] + 1
+                  cand = strip_containers(lines[end - 1])
+                  mark = t.markup or "```"
+                  if not cand or set(cand) != {mark[0]} or len(cand) < len(mark):
+                      return t.map[0] + 1
+              return None
+
+
+          # ── frontmatter：界定是字面掃描（慣例，非 markdown 語法），值交給 PyYAML ──
+          def duplicate_version_key(fm):
+              """頂層是不是寫了不只一個 version key。
+              只 compose 不 construct：一旦 construct 就會攔截到 merge key（<<: *d）
+              而讓合法的 YAML 變成非法——偵測重複和解析值必須分開做。
+              看 node.value 而不是解析後的 dict，"version" 這種加引號的寫法才抓得到。"""
+              try:
+                  node = yaml.compose(fm)
+              except yaml.YAMLError:
+                  return False          # 真的壞掉的話由 safe_load 去報
+              if not isinstance(node, yaml.MappingNode):
+                  return False
+              n = 0
+              for k, _v in node.value:
+                  if (isinstance(k, yaml.ScalarNode)
+                          and k.tag != "tag:yaml.org,2002:merge"
+                          and k.value == "version"):
+                      n += 1
+              return n > 1
+
+
+          # 開頭與結束標記後面都可以接註解：YAML 1.2.2 §9.1.2 的 document suffix 允許
+          # 「... # 註解」。只比對「rstrip 後完全等於 --- 或 ...」會把合法寫法誤判成
+          # 沒關閉——這一項是規則沒有規定的限制，不該由檢查器發明。
+          FM_OPEN_RE = re.compile(r"---[ \t]*(?:#.*)?")
+          FM_TERM_RE = re.compile(r"(?:---|\.\.\.)[ \t]*(?:#.*)?")
+
+
+          def frontmatter(lines):
+              """回傳 ('none'|'unclosed'|'ok', 內容字串)。
+              結尾要補回換行：YAML 區塊純量（version: | ）的收尾語意取決於最後一行有沒有
+              換行，少了它檢查器看到的值就和真正讀這個檔案的 parser 不一樣。"""
+              if not lines or not FM_OPEN_RE.fullmatch(lines[0].rstrip()):
+                  return "none", ""
+              for j in range(1, len(lines)):
+                  if FM_TERM_RE.fullmatch(lines[j].rstrip()):
+                      return "ok", "\n".join(lines[1:j]) + "\n"
+              return "unclosed", ""
+
+
+          # ── 前置 sanity：不在 repo 內或抓不到檔案時要炸掉，不能靜默跳過 ────
+          files = tracked()
+          md_files = [f for f in files if f.endswith(".md")]
+          table_files = sorted(f for f in md_files if f.startswith(TABLE_DIRS))
+          if not files:
+              die("git ls-files 沒有回傳任何受版控的檔案（不在 git work tree 內？）")
+          if RULES_FILE not in files:
+              die("找不到受版控的 %s，repo 佈局與檢查器假設不符" % RULES_FILE)
+          if not table_files:
+              die("在 %s 下找不到任何對照表" % "／".join(TABLE_DIRS))
+          print("檢查器：python %s／markdown-it-py %s／PyYAML %s／受版控 md %d 個／對照表 %d 個"
+                % (sys.version.split()[0], markdown_it.__version__, yaml.__version__,
+                   len(md_files), len(table_files)))
+          print("必需關卡：%s ／ 建議：%s"
+                % ("、".join(k for k in GATES if GATES[k]) or "（無）",
+                   "、".join(k for k in GATES if not GATES[k]) or "（無）"))
+
+          docs = {}
+          for f in md_files:
+              text = read_text(f)
+              lines = text.split("\n")
+              env = {}
+              try:
+                  tokens = MD.parse(text, env)
+              except Exception as e:
+                  die("markdown-it 解析 %s 失敗：%s" % (f, e))
+              docs[f] = {"lines": lines, "tokens": tokens, "env": env}
+
+          print()
+          print("── V1：frontmatter version 為四碼 a.b.c.d（%s）" % tag("version"))
+          VER_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+")
+          SPEC_RE = re.compile(r"docs/spec/[^/]+/spec\.md")
+          # 掃描範圍：規則本體與規格文檔。注意這不等於 V4 的適用對象——
+          # V4 還包含 kit release tag v<a.b.c.d>，本檢查器完全不讀 tag（見檔頭）。
+          # V4 明寫「第三方版本、工具版本、issue 編號保持原值」，所以別的 .md 就算有
+          # frontmatter version 也一律不管——那是它自己的版號，不是四碼制的。
+          # devflow/templates/spec.md 是「模板」不是「規格文檔」，同樣不在適用對象內：
+          # 它的 version 是給人複製的佔位值，拿四碼制去擋它是把規則套到範圍外。
+          version_targets = [f for f in md_files
+                             if f == RULES_FILE or SPEC_RE.fullmatch(f)]
+          if not version_targets:
+              die("找不到任何 V4 適用對象，repo 佈局與檢查器假設不符")
+          for f in version_targets:
+              state, fm = frontmatter(docs[f]["lines"])
+              if state != "ok":
+                  report("version", "%s 的 frontmatter %s（V1／S1）"
+                         % (f, "沒有關閉" if state == "unclosed" else "不存在"))
+                  continue
+              # 取值一律用原生 safe_load，才會和真正讀這個檔案的 parser 一致
+              # （merge key、anchor／alias、各種 scalar 樣式都由它處理）。
+              try:
+                  data = yaml.safe_load(fm)
+              except yaml.YAMLError as e:
+                  report("version", "%s 的 frontmatter 不是合法 YAML：%s"
+                         % (f, str(e).strip().replace("\n", " ")))
+                  continue
+              # 重複 key 的偵測獨立做：只看 mapping node 的 key 清單，不 construct，
+              # 才不會把合法的 merge key（<<: *d）連帶弄成非法。
+              if duplicate_version_key(fm):
+                  report("version", "%s 的 frontmatter 有多個 version key"
+                                    "（YAML 實際生效的是最後一個）" % f)
+              if not isinstance(data, dict) or "version" not in data:
+                  report("version", "%s 的 frontmatter 缺 version（V1／S1）" % f)
+                  continue
+              value = data["version"]
+              if not isinstance(value, str):
+                  report("version", "%s version=%r 不是字串（四碼要寫成 a.b.c.d 或加引號）"
+                         % (f, value))
+              elif VER_RE.fullmatch(value):
+                  ok("%s version=%s" % (f, value))
+              else:
+                  # 用 %r：值可能含換行（version: | 的區塊純量），裸印會把輸出撐破，
+                  # 也看不出來問題正是那個看不見的換行。
+                  report("version", "%s version=%r 不是四碼 a.b.c.d（V1）" % (f, value))
+
+          print()
+          print("── 規則 ID 無重複定義（%s，%s）" % (RULES_FILE, tag("dupid")))
+          rd = docs[RULES_FILE]
+          defined = {}
+          for rid, line in rule_definitions(rd["tokens"], rd["lines"]):
+              defined.setdefault(rid, []).append(line)
+          dups = {k: v for k, v in defined.items() if len(v) > 1}
+          if dups:
+              for rid in sorted(dups):
+                  report("dupid", "規則 ID `%s` 被定義 %d 次" % (rid, len(dups[rid])),
+                         ["%s:%s:%s" % (RULES_FILE, n, rd["lines"][n - 1].strip())
+                          for n in dups[rid] if n])
+          elif not defined:
+              report("dupid", "在 %s 找不到任何規則定義，檢查器的假設可能已與檔案脫節"
+                     % RULES_FILE)
+          else:
+              ok("%d 條規則 ID，無重複定義" % len(defined))
+
+          print()
+          print("── 規則 ID 無懸空引用（md 內的 `ID` 都要有定義，%s）" % tag("refs"))
+          prefixes = set(BASELINE_PREFIXES)
+          for rid in defined:
+              prefixes.add(ID_RE.fullmatch(rid).group(1))
+          refs = {}
+          nref = 0
+          for f in md_files:
+              for content, line in code_spans(docs[f]["tokens"], docs[f]["lines"]):
+                  m = ID_RE.fullmatch(content)
+                  if not m or m.group(1) not in prefixes:
+                      continue
+                  nref += 1
+                  refs.setdefault(content, []).append((f, line))
+          dangling = sorted(r for r in refs if r not in defined)
+          if dangling:
+              for rid in dangling:
+                  report("refs", "引用了未定義的規則 ID `%s`" % rid,
+                         ["%s:%s:%s" % (f, n, docs[f]["lines"][n - 1].strip() if n else "?")
+                          for f, n in refs[rid]])
+          else:
+              ok("%d 處引用、%d 個相異 ID（含 %s 的定義行本身），全部有定義"
+                 % (nref, len(refs), RULES_FILE))
+
+          print()
+          print("── markdown 的 fenced code block 都有關閉（%s）" % tag("fence"))
+          bad_fence = [(f, unclosed_fence(docs[f]["tokens"], docs[f]["lines"]))
+                       for f in sorted(docs)]
+          bad_fence = [(f, n) for f, n in bad_fence if n]
+          if bad_fence:
+              for f, n in bad_fence:
+                  report("fence", "%s:%d 的 fenced code block 沒有關閉" % (f, n))
+          else:
+              ok("%d 個 md 檔的 code fence 都成對" % len(md_files))
+
+          print()
+          print("── 對照表的形狀（%s）" % tag("table"))
+          # fail closed：這一節的每條斷言都是「檢查器沒看懂這個檔案」的絆線。
+          # 但「一個檔案剛好一張表」會誤擋 #17 的分節結構，所以本輪只報告不擋；
+          # 分節 schema 定案後在 issue #22 一起處理。
+          status_tables = {}          # f -> [(table, 狀態欄索引), ...]，供 R9 用
+          for f in table_files:
+              d = docs[f]
+              tables = tables_of(d["tokens"], d["lines"])
+              usable = []
+              for t in tables:
+                  if t["header"].count(STATUS_COL) == 1 and t["body"]:
+                      usable.append((t, t["header"].index(STATUS_COL)))
+              status_tables[f] = usable
+              if len(tables) != 1:
+                  report("table", "%s 必須剛好有一張表，實際有 %d 張" % (f, len(tables)),
+                         ["%s:%s 表頭=%s（%d 個資料列）"
+                          % (f, t["line"], " | ".join(t["header"]), len(t["body"]))
+                          for t in tables] or ["（整個檔案找不到任何表格）"])
+                  continue
+              t = tables[0]
+              missing = [h for h in TABLE_HEADER if h not in t["header"]]
+              if missing:
+                  report("table", "%s:%s 的表頭缺少 %s（實際表頭：%s）"
+                         % (f, t["header_line"], "／".join(missing), " | ".join(t["header"])))
+              elif t["header"].count(STATUS_COL) != 1:
+                  report("table", "%s:%s 有 %d 個「%s」欄，無法判定哪一欄才是狀態"
+                         % (f, t["header_line"], t["header"].count(STATUS_COL), STATUS_COL))
+              elif not t["body"]:
+                  report("table", "%s:%s 的表沒有任何資料列" % (f, t["header_line"]))
+              else:
+                  col = t["header"].index(STATUS_COL)
+                  short = [r for r in t["body"] if len(r["cells"]) <= col]
+                  if short:
+                      report("table", "%s 有 %d 列缺狀態欄" % (f, len(short)),
+                             ["%s:%s 只有 %d 欄" % (f, r["line"], len(r["cells"]))
+                              for r in short])
+                  else:
+                      ok("%s:%s 一張表、%d 個資料列、狀態欄在第 %d 欄"
+                         % (f, t["header_line"], len(t["body"]), col + 1))
+
+          print()
+          print("── markdown 相對連結指向存在的路徑（%s）" % tag("link"))
+          SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
+          broken = []
+          nlink = 0
+          for f in md_files:
+              d = docs[f]
+              base = os.path.dirname(f)
+              for target, line in link_targets(d["tokens"], d["env"], d["lines"]):
+                  if target.startswith("#") or SCHEME.match(target):
+                      continue
+                  # URL 的順序是 path?query#fragment；兩者都不是路徑的一部分。
+                  path = unquote(target.split("#", 1)[0].split("?", 1)[0])
+                  if not path:
+                      continue
+                  nlink += 1
+                  full = path[1:] if path.startswith("/") else os.path.join(base, path)
+                  full = os.path.normpath(full)
+                  if full.startswith(".."):
+                      broken.append("%s:%s -> %s（逃出 repo 之外）" % (f, line, target))
+                  elif not os.path.exists(full):
+                      broken.append("%s:%s -> %s" % (f, line, target))
+          if broken:
+              report("link", "有相對連結指向不存在或 repo 之外的路徑", broken)
+          else:
+              ok("%d 條相對連結（含 reference 定義、圖片）都指得到" % nlink)
+
+          print()
+          print("── R9：對照表狀態欄取三值之一（%s）" % tag("r9"))
+          # 對照表的狀態欄還沒依 R9 遷移到三值，而 devflow/ 不在本工單的 write scope 內：
+          # 現在設成關卡會擋死每個 PR。遷移完成後把 GATES["r9"] 改成 True。
+          # 這一節不依賴上面「剛好一張表」的斷言，所以 #17 分節之後仍然有效。
+          def status_ok(cell):
+              for tok in R9_STATUSES:
+                  if cell == tok:
+                      return True
+                  if cell.startswith(tok) and cell[len(tok)] in R9_SEPS:
+                      return True
+              return False
+
+          r9_clean = True
+          for f in table_files:
+              usable = status_tables.get(f) or []
+              if not usable:
+                  r9_clean = False
+                  report("r9", "%s 找不到可判讀狀態欄的表（形狀那一節已報）" % f)
+                  continue
+              body_lines = set()
+              for t, col in usable:
+                  body_lines |= {r["line"] for r in t["body"]} | {t["header_line"]}
+                  bad = [r for r in t["body"] if not status_ok(r["cells"][col])]
+                  if bad:
+                      r9_clean = False
+                      report("r9", "%s:%s 有 %d 列的狀態欄不是 %s"
+                             % (f, t["header_line"], len(bad), "／".join(R9_STATUSES)),
+                             ["%s:%s 狀態欄=「%s」" % (f, r["line"], r["cells"][col])
+                              for r in bad])
+              # 表格以外的敘述句也會宣告舊的二值制度，一併報。
+              prose = ["%s:%d:%s" % (f, n + 1, line.strip())
+                       for n, line in enumerate(docs[f]["lines"])
+                       if (n + 1) not in body_lines and any(o in line for o in OLD_TOKENS)]
+              if prose:
+                  r9_clean = False
+                  report("r9", "%s 的敘述句仍用二值用語" % f, prose)
+          if r9_clean:
+              ok("對照表狀態欄全部合 R9"
+                 + ("" if GATES["r9"] else " —— 可把 GATES[\"r9\"] 改成 True 升為必需關卡（G4）"))
+
+          print()
+          if errors:
+              print("===== 必需關卡失敗（%d 項）=====" % len(errors))
+              for m in errors:
+                  print("  ❌ %s" % m)
+              if advisories:
+                  print("（另有 %d 項建議，不影響本次結果）" % len(advisories))
+              sys.exit(1)
+          if not [k for k in GATES if GATES[k]]:
+              print("===== 沒有任何必需關卡：本次檢查不擋任何 PR =====")
+              print("（%d 項建議；要讓某一項擋人，把 GATES 裡它的 False 改成 True）"
+                    % len(advisories))
+          else:
+              print("===== 必需關卡全部通過 =====")
+              if advisories:
+                  print("（另有 %d 項建議，依 G4 本輪不阻擋）" % len(advisories))
+          PY
