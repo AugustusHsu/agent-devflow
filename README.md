@@ -3,8 +3,8 @@
 給 AI coding agent 用的開發流程套件：規格建版 → 拆任務 → 開發 → 審查 → 合併 → 收尾，
 以及失敗與退版路徑。做成可安裝到任何專案的一組規則、對照表與模板。本 repo 用自己的流程開發自己。
 
-> 現況：`stage: 0`（bootstrap）。規則本體 `devflow/WORKFLOW.md` 為 `0.0.0.0` 草稿；
-> 對照表全部「未實測」。下一步是 Phase 1（見下）。
+> 現況：`stage: 0`（bootstrap）。規則本體 `devflow/WORKFLOW.md` 為 `0.0.2.0`；
+> 對照表待依 `R9` 三值重做（issue #15）。下一步是 Phase 1（見下）。
 
 ## 設計要點
 
@@ -34,6 +34,7 @@
 
 ```
 devflow.yml               三個自變數、stage、merge、docs
+.github/workflows/        CI（目前七項檢查全為建議，不擋 PR；見該檔檔頭）
 devflow/
   WORKFLOW.md             規則本體（規則帶 ID）
   forges/ coders/ orchestrators/   衍生值對照表，每格標實測狀態
@@ -48,7 +49,7 @@ docs/guide/               人類專用
 | Phase | 內容 | 出口 |
 |---|---|---|
 | 0 | 本 README、`devflow.yml`、WORKFLOW.md 草稿、對照表骨架、模板、入口區塊 | 使用者審過 WORKFLOW.md，直推 main |
-| 1 | GitHub 設定（main 保護、labels）逐格實測；驗 coder headless 與 worktree 交接；check 先跑通再設 required | `stage: 1`；自動合併保持關閉 |
+| 1 | GitHub 設定（main 保護、labels）逐格實測；驗 coder headless 與 worktree 交接；CI check 跑通並有正反 run 紀錄 | `stage: 1`；自動合併保持關閉 |
 | 2 | 第一個端到端任務：把入口區塊安全插入既有 CLAUDE.md／AGENTS.md（含客製內容、重跑、碰撞測試）；再跑 2–3 個有價值的任務；萃取 Hermes skill | 整條鏈跑通並可接手 |
 | 3 | 用 W0 開發 W1：規格核准 → 實作 → 依 W0 審查 → 啟用；演練檢查器尚未就緒、執行中規格變更、回復 | `stage: 2`；能改流程、能停、能退 |
 | 4 | 隔離專案測安裝／升級／回復；Claude Code 與 Codex 各跑一次；GitLab 唯讀盤點；發 `v0.0.0.1`＋MkDocs＋mike | 有可安全安裝的固定版本 |
