@@ -11,7 +11,7 @@ orchestrator: hermes   # none | hermes | paperclip（省略＝none）
 #   1 單線（issue → worktree → PR → 審查 → merge）
 #   2 規格建版（規格先合入 main，任務從 diff 推導）
 #   3 平行（多 worktree、多 coder）
-stage: 0
+stage: 1
 
 # 誰按合併（WORKFLOW.md M2）：human | orchestrator（後者需有機械 guard 驗 M1，否則視同 human）
 merge: human
