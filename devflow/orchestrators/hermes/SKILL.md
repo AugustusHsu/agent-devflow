@@ -119,22 +119,36 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 
 ### 10. 收尾（`C1`～`C4`、`F4`）
 
-`C1` 七步照序執行，判準見條文；Hermes 側指令：
+`C1` 七步照序執行，判準見條文；每步 exit 非 0 或註解所列情況即停、不進下一步。Hermes 側指令（在主 checkout 執行，每段可整段貼入）：
 
 ```bash
+# (1) 兩項全驗；state 非 MERGED 而 merge-base 為 0 → 結果未定（F3）
 git fetch origin main
-git merge-base --is-ancestor <head sha> origin/main      # (1)
-gh pr view <PR-N> --json state,mergedAt,mergeCommit      # (1) 兩項全驗
-systemctl --user is-active coder-<N>.scope                # (2)
-systemctl --user kill --signal=TERM coder-<N>.scope       # (2) 仍 active 時停止
-git -C ../<repo>.worktrees/<N> status --porcelain         # (3)
-git worktree remove ../<repo>.worktrees/<N>               # (4)
-git branch -d <N>-<slug>                                  # (5)
-OID=$(git ls-remote --heads origin <N>-<slug> | cut -f1)  # (6) 空則跳過
-git merge-base --is-ancestor "$OID" origin/main           # (6)
-git push origin --delete <N>-<slug>                       # (6)
-git ls-remote --heads origin <N>-<slug>                   # (7)
-gh issue view <N> --json state                            # C2
+git merge-base --is-ancestor <head sha> origin/main
+gh pr view <PR-N> --json state,mergedAt,mergeCommit
+
+# (2) 仍 active 才 kill；kill 後等到不再 active（逾時＝仍 active，停）；判定依 hermes.md 「中斷交接」格
+[ "$(systemctl --user is-active coder-<N>.scope)" = active ] && systemctl --user kill --signal=TERM coder-<N>.scope
+timeout 30 sh -c 'until ! systemctl --user -q is-active coder-<N>.scope; do sleep 1; done'
+systemctl --user is-active coder-<N>.scope                    # 須為 inactive
+
+# (3) 非空 → 逐項判是否須保留；有須保留者 → 停，依 F4
+git -C ../<repo>.worktrees/<N> status --porcelain
+
+# (4)(5) 被拒不強制：(4) 回 (3) 重判，確認無需保留後加 --force；(5) 主 checkout 先 git merge --ff-only origin/main 再重試
+git worktree remove ../<repo>.worktrees/<N>
+git branch -d <N>-<slug>
+
+# (6) ls-remote 非 0 → 結果未定（F3），停；0 且空 → 跳過；0 且非空 → 取 OID，祖先檢查為 0 才刪
+if OUT=$(git ls-remote --heads origin <N>-<slug>); then
+  [ -z "$OUT" ] || { git merge-base --is-ancestor "${OUT%%[[:space:]]*}" origin/main && git push origin --delete <N>-<slug>; }
+else echo "F3: ls-remote 失敗，停"; fi
+
+# (7) 非 0 → 結果未定（F3）；0 且非空 → 未刪成，停；0 且空＝C1 完成
+if OUT=$(git ls-remote --heads origin <N>-<slug>); then [ -z "$OUT" ] && echo "C1 完成" || echo "遠端分支仍在，停"; else echo "F3: ls-remote 失敗，停"; fi
+
+# C2：OPEN → gh issue close <N> 後再讀回
+gh issue view <N> --json state --jq .state
 ```
 
 - (1) 讀回 `MERGED`，依 `forges/github.md` 「已合併訊號（`C1`）」格；(2) 判定依 `hermes.md` 「中斷交接」格；(6)(7) 依 `forges/github.md` 「合併後刪分支（`C1`）」格；`C2` 讀回 `CLOSED`。
