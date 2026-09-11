@@ -1,6 +1,6 @@
 ---
 name: devflow-orchestrator
-description: "Use when devflow.yml sets orchestrator: hermes"
+description: "Use when devflow.yml binds seats.coordinator.filler to hermes"
 version: 0.1.0
 metadata:
   hermes:
@@ -16,7 +16,7 @@ metadata:
 
 ## 一、觸發
 
-- 專案根目錄有 `devflow.yml` 且 `orchestrator: hermes`。
+- 專案根目錄有 `devflow.yml` 且 `seats.coordinator.filler` 為 `hermes`。
 - 開工前讀 `stage`，只套用生效的節（`ST0`～`ST3`）；保護節依 `ST5`；stage 與權限的關係依 `ST4`。
 - 每個任務兩個基準 G／T（第 0 節），以 issue 上寫的為準。
 - 本檔改動的啟用邊界依 `G3`（`hermes.md` 「skill 啟用邊界（`G3`）」格；「session 開始載入」屬該表「已知事實」，待實測）。

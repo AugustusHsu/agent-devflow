@@ -9,12 +9,12 @@
 
 ## 設計要點
 
-- **三個自變數**（`devflow.yml`）：`forge`（github｜gitlab）、`coder`（claude-code｜codex）、`orchestrator`（none｜hermes｜paperclip）。其餘都是衍生值，由 `devflow/forges/`、`coders/`、`orchestrators/` 對照表提供，每格標實測狀態。
+- **自變數**（`devflow.yml`）：`forge`（github｜gitlab；平台，不是職位）與 `seats`——四個職位（`devflow/seats/`：implementer｜reviewer｜coordinator｜approver）各綁一個 `filler`（填充者：工具名，或 `human`＝由人填），選填 `model` 與 `reasoning`（思考程度；未填＝用工具預設）。其餘都是衍生值，由 `devflow/forges/`、`coders/`、`orchestrators/` 對照表提供，每格標實測狀態。
 - **工單只住 forge**；PR/MR 是審查與合併的載體；repo 內不放工單檔或審查報告副本。
 - **規格先建版**：規格文檔獨立 PR 合入，版本＝merge commit，文內四碼版本欄，不打 spec tag。任務由 diff＋影響分析推導，不由版本位數推導。
 - **兩個基準**：每個任務記錄治理基準 G（WORKFLOW.md 的 commit）與開發目標 T（規格的 commit）。規則變更依舊規則審查，合入後在下一個任務／session 邊界啟用——這是避免「改流程卡死自己」的核心機制。
 - **四碼版本** `a.b.c.d`，進位歸零：a 不相容、b 相容新增、c 修正、d 內容修訂。從 `0.0.0.0` 起；`stage` 不是版本號。
-- **coder 永遠在 worktree**（`../<repo>.worktrees/<N>`），主 checkout 只做協調。
+- **實作位（`seats/implementer.md`）永遠在 worktree**（`../<repo>.worktrees/<N>`），主 checkout 只做協調。
 - **合併預設由人按**（`merge: human`）；獨立審查建議異廠、不強制。
 - **Bypass 是有範圍的例外**：需當次授權、引用 `bypass` issue、寫明跳過哪條與恢復方式。
 - **文檔一個來源兩種投影**：`devflow/` 與 `docs/spec/` 給 agent（也給人看），`docs/guide/` 只給人。人類站等首個 release 再接 MkDocs＋mike；不做 wiki 投影。
@@ -34,7 +34,7 @@
 ## 佈局
 
 ```
-devflow.yml               三個自變數、stage、merge、docs
+devflow.yml               forge、seats（職位綁定）、stage、merge、docs
 devflow/
   WORKFLOW.md             規則本體（規則帶 ID）
   forges/ coders/ orchestrators/   衍生值對照表，每格標實測狀態
