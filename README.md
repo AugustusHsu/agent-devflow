@@ -42,19 +42,19 @@ devflow/
 CLAUDE.md AGENTS.md       只含 devflow:begin/end 區塊（由 templates/entry-block.md 產生）
 docs/spec/                本 repo 自己的規格（dogfood）
 docs/guide/               人類專用
-.github/workflows/        devflow-checks.yml：七項檢查目前全為建議，只寫進 log，不擋任何 PR
+.github/workflows/        devflow-checks.yml：九項檢查，`d2`／`i1` 為關卡（check 列入 branch protection），其餘七項建議只寫進 log
 ```
 
 ## 執行順序
 
 各 Phase 的「出口」是**該階段的能力已驗證**，驗證與試跑一律發生在升 `stage` 之前：`stage` 只標示已驗證的能力，
 不是權限開關（`ST4`）。因此「演練或驗證某項能力」與「把它設為 required check」是兩件事，
-後者另有自己的條件（`G4`）。
+後者另有自己的條件（前提與三條件，見「Phase 1 第三出口的判定方式」）。
 
 | Phase | 內容 | 出口 |
 |---|---|---|
 | 0 | 本 README、`devflow.yml`、WORKFLOW.md 草稿、對照表骨架、模板、入口區塊 | 使用者審過 WORKFLOW.md，直推 main |
-| 1 | GitHub 設定（main 保護、labels）逐格實測；驗 coder headless 與 worktree 交接；CI workflow 在 PR 最終 head 的 run 成功且 log 產出 advisory，本階段不設 required（判定方式見表下一節） | `stage: 1`；自動合併保持關閉 |
+| 1 | GitHub 設定（main 保護、labels）逐格實測；驗 coder headless 與 worktree 交接；CI workflow 在 PR 最終 head 的 run 成功且 log 產出 advisory；升 required 的判定方式見表下一節（Phase 1 內以 `i1` 走通） | `stage: 1`；自動合併保持關閉 |
 | 2 | 第一個端到端任務：把入口區塊安全插入**其他專案**既有的 CLAUDE.md／AGENTS.md（含客製內容、重跑、碰撞測試）——本 repo 自己的入口區塊已存在，這裡開發的是可安裝到別處的能力；再跑 2–3 個有價值的任務；萃取 Hermes skill | 整條鏈跑通並可接手 |
 | 3 | 用現行流程（W0）開發下一版流程（W1）：規格核准 → 實作 → 依 W0 審查 → 啟用；演練檢查器尚未就緒、執行中規格變更、回復 | `stage: 2`；能改流程、能停、能退 |
 | 4 | 隔離專案測安裝／升級／回復；Claude Code 與 Codex 各跑一次；GitLab 唯讀盤點；發 `v0.0.0.1`＋MkDocs＋mike | 有可安全安裝的固定版本 |
@@ -73,18 +73,33 @@ docs/guide/               人類專用
   `gh api "repos/<owner>/<repo>/actions/runs?head_sha=<sha>" --jq '.workflow_runs[] | {id, path, event, head_sha, run_attempt, conclusion}'`。
   判定不看 Actions 實際 checkout 的 merge ref，也不看合併後 main 的 commit——
   三者可以是同一份 tree 但不同 commit SHA（例：`2daafca` 與 `d64d214` 的 tree 都是 `403faa5`）。
-- **本階段不設 required**：七項檢查一律只報告（`G4`——工具可執行且正反測試通過後，才升為必需關卡）。
-- **日後要把某一項升為 required 時**（不屬 Phase 1；現有七項的 required 目標記在 #22）：
-  - **前提**：workflow 須先把「這次實際 checkout 的 commit SHA」與「該 commit 上
-    `devflow-checks.yml` 的 blob id」印進 log。**現在沒有印**，而 `pull_request` 事件跑的是 GitHub
-    生成的 merge commit，該 commit 在 PR 合併後就查不到（`refs/pull/<N>/merge` 隨之消失），
-    事後無從回推當時執行的是哪一份檔案。補上這段輸出動的是 `.github/workflows/`，
-    是 #26 實作時的前置工作。
+- **required 現況**（2026-09-11 起）：`devflow-checks` 已列入 main 的 branch protection
+  `required_status_checks`。九項檢查中 `d2`（入口區塊）、`i1`（head branch 名稱）為關卡——
+  `❌` 使檢查器 exit 1、check 變紅、擋合併；其餘七項 advisory，只寫進 log，不擋。
+  分界是定義域封不封閉，見 `devflow-checks.yml` 檔頭。
+- **升 required 的判定方式**（已於 `i1` 首次走通；日後其餘七項升級仍適用，各項的 required 目標記在 #22）：
+  - **前提**：workflow 把「這次實際 checkout 的 commit SHA」（`checkout_sha`）與「該 commit 上
+    `devflow-checks.yml` 的 blob id」（`checker_blob`）印進 log——PR #41 起印出。
+    `pull_request` 事件跑的是 GitHub 生成的 merge commit，該 commit 在 PR 合併後就查不到
+    （`refs/pull/<N>/merge` 隨之消失），沒有這兩行，事後無從回推當時執行的是哪一份檔案。
   - **條件一**：正、反兩個 run 的 log 印出的 blob 相同——同一份檢查器，才談得上正反驗證。
   - **條件二**：正向案例是**合法輸入**：無任何 `❌`，最新 attempt 的 `conclusion` ＝ `success`（檢查器 exit 0）。
   - **條件三**：負向案例相對正向案例**只新增目標項的違規**；其他項可以報 `📝` advisory，
     但不得出現 `❌`，`exit 1` 只能由目標項造成。證據：正負兩份輸入的 diff、目標項的 `❌`、
     其他項至多 `📝`，且 exit 為 1 不是 2（`exit 2` ＝檢查器本身無法執行）。
+  - **證據**（`i1`；兩 run 皆 `event` ＝ `pull_request`、attempt 1；原始紀錄在 #22 留言）：
+
+    | | 正向 | 負向 |
+    |---|---|---|
+    | PR | #41（head `4977b38`，已合併 `06ed4cc`） | #42（probe，空 commit `11d0fba`，分支 `probe-i1-negative`，已關不合併） |
+    | run | `34549823621` | `34550078594` |
+    | `checker_blob` | `0fb9116` | `0fb9116` |
+    | `conclusion` | `success` | `failure` |
+    | `❌` | 無 | 只有 `i1`（分支名不合 `<N>-<slug>`） |
+    | 其他項 | 12 項 `📝` | 同一組 `📝` |
+    | exit | 0 | 1 |
+
+    `d2` 未取負向 run：要動 `AGENTS.md`，而本 repo 自己的入口區塊超 30 行不是「合法輸入的最小變動」。
 
 ## 不做的事
 
