@@ -1,16 +1,22 @@
 # 本 repo 的第一個 CI。規則本體是 devflow/WORKFLOW.md，檢查的對象也是它。
 #
-# G4：新規則要求的檢查器尚不存在時先列為「建議」，工具可執行且正反測試通過後才升為必需關卡。
+# 一項檢查何時可以從「建議」升為「必需關卡」，依據是 README「Phase 1 第三出口的判定方式」
+# （正反兩個 run、同一份 blob、exit 1 只能由目標項造成）與 issue #26 的使用者裁決。
+# 注意不是 `G4`：`G4` 住第 9 節，依第 0 節與 `ST2` 要 stage 2 才生效，現在是 stage 1，
+# 不能引為依據。
 # 本檔每一項檢查都有自己的開關（下面的 GATES）：True＝必需關卡，False＝建議（只報告不擋）。
 # 九項裡兩項是 True（`d2`、`i1`），七項是 False——分界不是「哪一項比較重要」，
 # 而是**定義域封不封閉**，見下面兩節。
 #
 # ── ⚠️ 這個 check 擋什麼、不擋什麼 ───────────────────────────────────────
-# 會擋（exit 1）：`d2` 入口區塊行數、`i1` head branch 名稱。就這兩項。
+# 會擋（exit 1）：`d2` 入口區塊（標記各恰一個、順序正確、≤30 行）、`i1` head branch 名稱。
+# 就這兩項。
 # 不擋（exit 0，只把發現印在 log）：其餘七項，一律 advisory。
 #
-# 而且「GATES 是 True」只讓這個 check 自己變紅，**不等於它是 branch protection
-# 的 required status check**——後者是 repo 設定，要另外設，前提見下面「升 required 的前提」。
+# 「GATES 是 True」只讓這個 check 自己變紅，**不等於它是 branch protection 的
+# required status check**——後者是 repo 設定，要另外設，前提見下面「升 required 的前提」。
+# 但「平台沒有機械阻擋」不等於「可以合併」：`M1` 要求測試綠，紅叉的 PR 依治理流程
+# 不應合併。B 關卡的意思只是還沒有機器替人擋，不是放行。
 #
 # ── 那七項為什麼停在 advisory（PR #20 六輪的停損）─────────────────────────
 # 停損的理由，由輕到重：
@@ -43,20 +49,27 @@
 #   二、定義域封閉：失敗那七項的共同特徵是定義域含合法內容——`refs` 掃「任何檔案裡的
 #       任何 code span」，`dupid` 掃「WORKFLOW.md 裡的任何清單項」，`version` 掃
 #       「任意 YAML frontmatter」。這兩項不是：
-#         `d2`：CLAUDE.md／AGENTS.md 兩個已知檔案，兩個字面標記之間有幾行——
-#               一個整數比大小，不解析區塊內容、不看區塊外。
+#         `d2`：CLAUDE.md／AGENTS.md 兩個已知檔案，找出真正的兩個標記，驗它們各恰一個、
+#               順序正確、之間 ≤30 行。「哪一行才是真正的標記」**不是字面比對**：
+#               它依賴 markdown-it 的 html_block token 與 nesting level（頂層、且該
+#               token 只含標記那一行）。這是 `d2` 唯一的語法依賴，也是它誤擋的來源——
+#               審查中找到三個誤擋，修掉兩個（code fence 內、清單項內），一個修不掉
+#               （`<details><summary>` 後接空行），見「擋不住什麼」。
 #         `i1`：一個字串（GITHUB_HEAD_REF）符不符合 `<N>-<slug>`——
 #               不打 API、不看 issue 是否存在、不猜 slug 的字元集（見下面「不發明規則」）。
 #
-#   三、判準：「作者舉不出誤擋例子就留在關卡」被推翻過兩次，所以這裡不靠那個判準，
-#       靠的是「定義域裡沒有合法內容可誤擋」這個**結構性**理由。要推翻它，
-#       得舉出一個「合法且會被判違規」的輸入——那是對定義域的反例，不是對實作的反例。
+#   三、判準：「作者舉不出誤擋例子就留在關卡」被推翻過兩次，這裡也不例外——
+#       `d2` 的誤擋是審查者找到的，不是作者。留在關卡的理由不是「沒有誤擋」，
+#       是「誤擋的定義域窄（兩個已知檔案裡、區塊外、恰好用某種 raw HTML 寫法提到標記）、
+#       已知、有繞法（改用 code fence），且使用者裁決 B 關卡」。
+#       要再降級，得由人裁決，不由本檔自己改。
 #
 # ── 不發明規則：`i1` 的 slug 為什麼不限字元集 ─────────────────────────────
 # `I1` 的原文只有「分支名 `<N>-<slug>`」，沒有規定 slug 的字元集。
 # 收成 `^[0-9]+-[a-z0-9-]+$` 會擋掉 `26-封閉定義域`、`4-v0.0.2.0-bump`、`26-Fix-D2`——
 # 那是檢查器發明的限制，正是 refs 誤擋 `M5` 的同一個錯。
-# 所以只驗 WORKFLOW.md 真的寫了的部分：一個以上的數字、一個 `-`、非空的 slug。
+# 所以只驗 WORKFLOW.md 真的寫了的部分：一個正整數、一個 `-`、非空的 slug。
+# `<N>` 是 issue 號，issue 號從 1 起算，所以 `0-x` 不合——這不是發明，是 `<N>` 的定義。
 #
 # ── 升 required 的前提（README「Phase 1 第三出口的判定方式」）──────────────
 # 把某一項升成 branch protection 的 required status check，README 要求三個條件：
@@ -82,8 +95,9 @@
 # ── 擋不住什麼（已知不完備，不要假裝完備）──────────────────────────────
 #   * 【`d2`、`i1` 以外的全部。】以下各條說的是「連報告都報不到」，
 #     或「報告了但沒有任何強制力」。
-#   * 【`d2` 只驗行數。】區塊「內容」對不對、區塊外有沒有被安裝流程改到（D2 後半句），
-#     都要跟 base 比對或跟 templates/entry-block.md 比對，本檢查器不做。
+#   * 【`d2` 只驗形狀：標記各恰一個、順序正確、行數 ≤30。】區塊「內容」對不對、
+#     區塊外有沒有被安裝流程改到（D2 後半句），都要跟 base 比對或跟
+#     templates/entry-block.md 比對，本檢查器不做。
 #   * 【`d2` 不要求區塊存在。】D2 的原文是「入口檔只擁有這個區塊，≤30 行」，
 #     沒有說「入口檔必須有這個區塊」——別的專案可能只裝了 CLAUDE.md 沒有 AGENTS.md。
 #     所以檔案不在版控內、或檔案裡一個標記都沒有，都是 ⏭️ 略過，不是違規。
@@ -99,10 +113,12 @@
 #         </details>
 #     那個空行會關閉 <details> 起頭的 HTML block，裡面的標記於是變成**頂層**的
 #     html_block，和真正的標記在 AST 上完全一樣，分不出來——`d2` 會報「標記各兩個」。
-#     沒有空行的寫法（<details> 內直接接標記）不受影響，code fence 與縮排寫法也不受
-#     影響，都已測。要修得知道「這段 raw HTML 的作用範圍到哪」，那是 HTML parser
-#     的事，markdown-it 不提供，屬 issue #22 的 raw HTML 缺口。
-#     現況是 B 關卡（check 自己變紅，不擋合併），踩到時改用 code fence 貼範例即可。
+#     沒有空行的寫法（<details> 內直接接標記）不受影響，code fence、縮排、清單項內
+#     （nesting level > 0）的寫法也不受影響，都已測。要修得知道「這段 raw HTML 的
+#     作用範圍到哪」，那是 HTML parser 的事，markdown-it 不提供，屬 issue #22 的
+#     raw HTML 缺口。踩到時改用 code fence 貼範例即可。
+#     現況是 B 關卡：check 自己變紅、平台不機械阻擋；但依 `M1` 紅叉的 PR 不應合併，
+#     所以踩到的人要改寫法或找人裁決，不是直接按合併。
 #   * 【`i1` 只在 pull_request 事件有對象。】第 10 節的 bypass 是直推 main，不開 PR，
 #     所以不需要在 `i1` 裡開例外——它根本不會跑到。反過來說，走 bypass 進 main 的
 #     變更，`i1` 也擋不到。
@@ -238,9 +254,9 @@ jobs:
           # （sed -n '/begin/,/end/p' | wc -l，現況兩檔皆 15）。
           D2_MAX_LINES = 30
           # I1 的定義域：一個字串。只驗 WORKFLOW.md 真的寫了的部分——
-          # 一個以上的數字、一個 `-`、非空的 slug。slug 的字元集 I1 沒有規定，
-          # 收窄就是發明規則（見檔頭「不發明規則」）。一律 fullmatch。
-          BRANCH_RE = re.compile(r"[0-9]+-.+")
+          # 一個正整數（<N> 是 issue 號，從 1 起算，所以不收 0 開頭）、一個 `-`、非空的 slug。
+          # slug 的字元集 I1 沒有規定，收窄就是發明規則（見檔頭「不發明規則」）。一律 fullmatch。
+          BRANCH_RE = re.compile(r"[1-9][0-9]*-.+")
           TABLE_DIRS = ("devflow/forges/", "devflow/coders/", "devflow/orchestrators/")
           TABLE_HEADER = ["面向", "值", "狀態"]
           STATUS_COL = "狀態"
@@ -538,21 +554,24 @@ jobs:
 
           print()
           print("── D2：入口區塊 ≤%d 行（%s）" % (D2_MAX_LINES, tag("d2")))
-          # 定義域封閉：兩個已知檔案，兩個字面標記之間有幾行，一個整數比大小。
-          # 不解析區塊內容、不看區塊外，所以「合法內容被判違規」在這裡沒有著力點。
+          # 兩個已知檔案，找出真正的兩個標記，驗它們各恰一個、順序正確、之間 ≤30 行。
+          # 行數本身是一個整數比大小；但「哪一行才是真正的標記」是語法判斷，不是字面比對——
+          # D2 說區塊外是專案的內容，而專案的內容可以提到這兩個標記：寫安裝說明、用
+          # <details> 收起一份範例、在清單項裡列舉。那些是合法的，不該被當成第二個區塊。
           #
-          # 唯一的語法判斷是「哪一行才算一個標記」：D2 說區塊外是專案的內容，
-          # 而專案的內容可以提到這兩個標記——寫安裝說明、用 <details> 收起一份範例。
-          # 那些是合法的，不該被當成第二個區塊。判準取 markdown 的結構而不是字面：
-          # 標記是 HTML 註解，真正的標記會被 markdown-it 切成一個**只含它自己**的
-          # html_block；被包進 <div>／<details> 的標記則是那個較大 html_block 的一部分，
-          # 寫在 code fence 裡的根本不是 html_block。一個判準同時擋掉三種誤擋。
+          # 判準取 markdown-it 的結構：標記是 HTML 註解，真正的標記會被切成一個**頂層**
+          # （nesting level 0）且**只含它自己**的 html_block。
+          #   - 被包進 <div>／<details> 的標記，是那個較大 html_block 的一部分 → 排除
+          #   - 寫在 code fence／縮排區塊裡的，根本不是 html_block → 排除
+          #   - 寫在清單項、blockquote 裡的，level > 0 → 排除
+          # 已知漏網：<details><summary> 後接空行，空行關閉了 HTML block，接下來的標記
+          # 就回到頂層、自成 token，和真正的標記在 AST 上分不出來。見檔頭「擋不住什麼」。
 
           def marker_lines(doc):
-              """自成一個 html_block 的行號 → 該行內容（1-based）。"""
+              """頂層且自成一個 html_block 的行號 → 該行內容（1-based）。"""
               solo = {}
               for t in doc["tokens"]:
-                  if t.type != "html_block" or not t.map:
+                  if t.type != "html_block" or t.level != 0 or not t.map:
                       continue
                   body = [n for n in range(t.map[0], min(t.map[1], len(doc["lines"])))
                           if doc["lines"][n].strip()]
@@ -600,8 +619,9 @@ jobs:
           print()
           print("── I1：head branch 名為 <N>-<slug>（%s）" % tag("i1"))
           # 定義域封閉：一個字串比對一個 pattern。不打 API、不看 issue 是否存在。
-          # 檢查對象是 head branch，不是 base——所以 main 不會進到這裡（PR 的 head
-          # 不會是自己要合入的 main），不需要為它開例外。
+          # 檢查對象是 head branch，不是 base。同 repo 內 head 不會是 main；但 fork 的
+          # main 可以當 head 開 PR 進來，那時 GITHUB_HEAD_REF 就是 `main`，會被判 ❌——
+          # 這是預期行為：I1 要求一張 issue 對一條 `<N>-<slug>` 分支，fork 的 main 也不例外。
           head_ref = os.environ.get("GITHUB_HEAD_REF", "").strip()
           event_name = os.environ.get("GITHUB_EVENT_NAME", "")
           if not head_ref:
@@ -615,7 +635,7 @@ jobs:
               ok("head branch `%s` 合 <N>-<slug>" % head_ref)
           else:
               report("i1", "head branch `%s` 不合 I1 的 `<N>-<slug>`" % head_ref,
-                     ["`<N>` 是 issue 號（一個以上的數字），接一個 `-`，再接非空的 slug",
+                     ["`<N>` 是 issue 號（正整數，不以 0 開頭），接一個 `-`，再接非空的 slug",
                       "例：`26-closed-domain-checks`",
                       "slug 的字元集 I1 沒有規定，這裡不限"])
 
@@ -826,7 +846,8 @@ jobs:
                   report("r9", "%s 的敘述句仍用二值用語" % f, prose)
           if r9_clean:
               ok("對照表狀態欄全部合 R9"
-                 + ("" if GATES["r9"] else " —— 可把 GATES[\"r9\"] 改成 True 升為必需關卡（G4）"))
+                 + ("" if GATES["r9"] else
+                    " —— 可把 GATES[\"r9\"] 改成 True 升為必需關卡（前提見 README 第三出口的判定方式）"))
 
           print()
           if errors:
@@ -843,5 +864,5 @@ jobs:
           else:
               print("===== 必需關卡全部通過 =====")
               if advisories:
-                  print("（另有 %d 項建議，依 G4 本輪不阻擋）" % len(advisories))
+                  print("（另有 %d 項建議，未達升關卡前提，本輪不阻擋）" % len(advisories))
           PY
