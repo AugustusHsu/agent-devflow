@@ -2,16 +2,17 @@
 #
 # G4：新規則要求的檢查器尚不存在時先列為「建議」，工具可執行且正反測試通過後才升為必需關卡。
 # 本檔每一項檢查都有自己的開關（下面的 GATES）：True＝必需關卡，False＝建議（只報告不擋）。
-# 目前七項全部是 False——為什麼停在「建議」這一步，見下面的停損說明。
+# 九項裡兩項是 True（`d2`、`i1`），七項是 False——分界不是「哪一項比較重要」，
+# 而是**定義域封不封閉**，見下面兩節。
 #
-# 它現在的價值，誠實地說：CI 這條路通了（相依安裝、AST 解析、報告格式、
-# 逐項開關、65 項回歸測試都在），以及在 log 裡提供七類發現供人閱讀，
-# 外加可用 DEVFLOW_GATE_<KEY>=1 當手動檢查工具。強制力則是零。
+# ── ⚠️ 這個 check 擋什麼、不擋什麼 ───────────────────────────────────────
+# 會擋（exit 1）：`d2` 入口區塊行數、`i1` head branch 名稱。就這兩項。
+# 不擋（exit 0，只把發現印在 log）：其餘七項，一律 advisory。
 #
-# ── ⚠️ 這個 check 目前不擋任何 PR ─────────────────────────────────────────
-# GATES 七項全部是 False。它會跑、會把發現印在 log 裡，但**不是 gate**：
-# 任何違規都 exit 0，不影響合併。這是使用者裁決的停損結果，不是暫時狀態。
+# 而且「GATES 是 True」只讓這個 check 自己變紅，**不等於它是 branch protection
+# 的 required status check**——後者是 repo 設定，要另外設，前提見下面「升 required 的前提」。
 #
+# ── 那七項為什麼停在 advisory（PR #20 六輪的停損）─────────────────────────
 # 停損的理由，由輕到重：
 #
 #   一、六輪審查，每一輪都在當時的 required 項目上找到假陽性（誤擋合法內容）。
@@ -32,6 +33,41 @@
 # required 的目標移到 issue #22，而且**應該等 stage 進到 2 之後再談**——
 # 在那之前，V1／V4／S1 都還不是有效規則，沒有東西可以拿來當 gate 的依據。
 #
+# ── d2／i1 為什麼可以是關卡（issue #26）───────────────────────────────────
+# 停損的診斷不是「CI gate 做不到」，是「選錯了檢查對象」。上面三個理由對照：
+#
+#   一、生效性：`D2` 在第 13 節、`I1` 在第 1 節。依 WORKFLOW.md 第 0 節
+#       「第 0、1、13 節永遠生效」，這兩條在任何 stage 都是有效規則
+#       （devflow.yml 現在是 stage: 1）。理由三不成立。
+#
+#   二、定義域封閉：失敗那七項的共同特徵是定義域含合法內容——`refs` 掃「任何檔案裡的
+#       任何 code span」，`dupid` 掃「WORKFLOW.md 裡的任何清單項」，`version` 掃
+#       「任意 YAML frontmatter」。這兩項不是：
+#         `d2`：CLAUDE.md／AGENTS.md 兩個已知檔案，兩個字面標記之間有幾行——
+#               一個整數比大小，不解析區塊內容、不看區塊外。
+#         `i1`：一個字串（GITHUB_HEAD_REF）符不符合 `<N>-<slug>`——
+#               不打 API、不看 issue 是否存在、不猜 slug 的字元集（見下面「不發明規則」）。
+#
+#   三、判準：「作者舉不出誤擋例子就留在關卡」被推翻過兩次，所以這裡不靠那個判準，
+#       靠的是「定義域裡沒有合法內容可誤擋」這個**結構性**理由。要推翻它，
+#       得舉出一個「合法且會被判違規」的輸入——那是對定義域的反例，不是對實作的反例。
+#
+# ── 不發明規則：`i1` 的 slug 為什麼不限字元集 ─────────────────────────────
+# `I1` 的原文只有「分支名 `<N>-<slug>`」，沒有規定 slug 的字元集。
+# 收成 `^[0-9]+-[a-z0-9-]+$` 會擋掉 `26-封閉定義域`、`4-v0.0.2.0-bump`、`26-Fix-D2`——
+# 那是檢查器發明的限制，正是 refs 誤擋 `M5` 的同一個錯。
+# 所以只驗 WORKFLOW.md 真的寫了的部分：一個以上的數字、一個 `-`、非空的 slug。
+#
+# ── 升 required 的前提（README「Phase 1 第三出口的判定方式」）──────────────
+# 把某一項升成 branch protection 的 required status check，README 要求三個條件：
+#   條件一：正、反兩個 run 的 log 印出**相同的 blob id**——同一份檢查器才談得上正反驗證。
+#   條件二：正向是合法輸入，無任何 ❌、conclusion＝success（檢查器 exit 0）。
+#   條件三：負向相對正向**只新增目標項的違規**；其他項至多 📝，exit 1 只能由目標項造成
+#           （exit 2 不算——那是檢查器自己壞了）。
+# 前兩者的前提是 log 印得出「跑的是哪一份檔案」，所以本檔加了「記錄受測身分」那一步。
+# 條件三要的負向輸入落在 AGENTS.md／CLAUDE.md（`d2`）與分支名（`i1`）上，
+# 都不是本檔的變更——換句話說，改本檔的 PR 只產得出正向 run，負向 run 要另外造。
+#
 # ── 這七項檢查各自在報告什麼（都只報告，不擋）────────────────────────────
 #   * version：frontmatter 的 version 是不是四碼 a.b.c.d
 #       掃描對象是「devflow/WORKFLOW.md ＋ 受版控的 docs/spec/<feature>/spec.md」。
@@ -44,8 +80,20 @@
 #       卻被判成 frontmatter 沒關閉。該 bug 已修，但這件事證明了這種宣稱不可靠。
 #
 # ── 擋不住什麼（已知不完備，不要假裝完備）──────────────────────────────
-#   * 【全部。這個 check 不擋任何東西。】以下各條說的是「連報告都報不到」，
+#   * 【`d2`、`i1` 以外的全部。】以下各條說的是「連報告都報不到」，
 #     或「報告了但沒有任何強制力」。
+#   * 【`d2` 只驗行數。】區塊「內容」對不對、區塊外有沒有被安裝流程改到（D2 後半句），
+#     都要跟 base 比對或跟 templates/entry-block.md 比對，本檢查器不做。
+#   * 【`d2` 不要求區塊存在。】D2 的原文是「入口檔只擁有這個區塊，≤30 行」，
+#     沒有說「入口檔必須有這個區塊」——別的專案可能只裝了 CLAUDE.md 沒有 AGENTS.md。
+#     所以檔案不在版控內、或檔案裡一個標記都沒有，都是 ⏭️ 略過，不是違規。
+#     代價：把整個區塊刪掉的 PR，`d2` 不會擋（會在 log 印出 ⏭️）。
+#   * 【`i1` 只看 head branch 的形狀。】`<N>` 對不對應一個真實 issue 不驗（要打 API，
+#     且 issue 可能已關閉）；`I1` 的另外三個「＝」（一個 worktree、一個 coder）
+#     沒有任何機械來源可查。
+#   * 【`i1` 只在 pull_request 事件有對象。】第 10 節的 bypass 是直推 main，不開 PR，
+#     所以不需要在 `i1` 裡開例外——它根本不會跑到。反過來說，走 bypass 進 main 的
+#     變更，`i1` 也擋不到。
 #   * 【同一個規則 ID 被定義兩次 —— 沒有東西在擋。】
 #     dupid 本來是關卡，第五輪被審查者找到一個假陽性（清單項只含 fence 時會吃到
 #     清單外的段落）。那個 bug 已修，但作者接著自己又找到三個修不掉的：
@@ -98,6 +146,26 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      # README「Phase 1 第三出口的判定方式」把升 required 的前提定為：log 要印得出
+      # 「這次實際 checkout 的 commit」與「該 commit 上本檔的 blob id」。
+      # 為什麼非印不可：pull_request 事件跑的是 GitHub 生成的 merge commit，PR 合併後
+      # refs/pull/<N>/merge 隨之消失、該 commit 不可再取得（實測 PR #20 的 353194c：
+      # git cat-file 失敗、API 404）。事後無從回推當時執行的是哪一份檢查器，
+      # 「同一版 workflow 的正反兩個 run」就無法驗證。
+      # blob id 是內容定址：正、反兩個 run 印出同一個 blob，才成立 README 的條件一。
+      - name: 記錄受測身分
+        run: |
+          set -euo pipefail
+          echo "checkout_sha=$(git rev-parse HEAD)"
+          echo "checker_blob=$(git rev-parse HEAD:.github/workflows/devflow-checks.yml)"
+          echo "event=${GITHUB_EVENT_NAME:-}"
+          echo "head_ref=${GITHUB_HEAD_REF:-}"
+          echo "base_ref=${GITHUB_BASE_REF:-}"
+          # merge commit 事後查不到，但 PR head 查得到——判定用的是它（README 第三出口）。
+          echo "pr_head_sha=${PR_HEAD_SHA:-}"
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
       - name: 準備檢查器相依
         run: |
           set -euo pipefail
@@ -131,9 +199,11 @@ jobs:
 
           # ── 關卡開關 ──────────────────────────────────────────────────────
           # True＝必需關卡（失敗就擋）；False＝建議（只報告）。
-          # 目前七項全部是 False：本檔不擋任何 PR，理由見檔頭的停損說明。
+          # 前兩項是 True，其餘七項是 False。分界是定義域封不封閉，理由見檔頭。
           # 驗證用：DEVFLOW_GATE_<KEY>=1 可單獨打開一項，環境變數只能加嚴不能放寬。
           GATES = {
+              "d2":      True,    # D2 入口區塊 ≤30 行（第 13 節，永遠生效）
+              "i1":      True,    # I1 head branch 名為 <N>-<slug>（第 1 節，永遠生效）
               "version": False,   # V1 frontmatter version 四碼（stage: 0 下 V1／V4 未生效）
               "dupid":   False,   # 規則 ID 唯一定義（散文與定義分不出來，見檔頭）
               "refs":    False,   # 規則 ID 無懸空引用（會誤擋非規則代號，見檔頭）
@@ -148,6 +218,17 @@ jobs:
 
           # ── 設定 ──────────────────────────────────────────────────────────
           RULES_FILE = "devflow/WORKFLOW.md"
+          # D2 的定義域：兩個已知檔案、兩個字面標記。標記字串以 WORKFLOW.md 的 D2 為準。
+          ENTRY_FILES = ("CLAUDE.md", "AGENTS.md")
+          D2_BEGIN = "<!-- devflow:begin -->"
+          D2_END = "<!-- devflow:end -->"
+          # 行數含頭尾兩行標記，和 D2 的推導方式一致
+          # （sed -n '/begin/,/end/p' | wc -l，現況兩檔皆 15）。
+          D2_MAX_LINES = 30
+          # I1 的定義域：一個字串。只驗 WORKFLOW.md 真的寫了的部分——
+          # 一個以上的數字、一個 `-`、非空的 slug。slug 的字元集 I1 沒有規定，
+          # 收窄就是發明規則（見檔頭「不發明規則」）。一律 fullmatch。
+          BRANCH_RE = re.compile(r"[0-9]+-.+")
           TABLE_DIRS = ("devflow/forges/", "devflow/coders/", "devflow/orchestrators/")
           TABLE_HEADER = ["面向", "值", "狀態"]
           STATUS_COL = "狀態"
@@ -442,6 +523,85 @@ jobs:
               except Exception as e:
                   die("markdown-it 解析 %s 失敗：%s" % (f, e))
               docs[f] = {"lines": lines, "tokens": tokens, "env": env}
+
+          print()
+          print("── D2：入口區塊 ≤%d 行（%s）" % (D2_MAX_LINES, tag("d2")))
+          # 定義域封閉：兩個已知檔案，兩個字面標記之間有幾行，一個整數比大小。
+          # 不解析區塊內容、不看區塊外，所以「合法內容被判違規」在這裡沒有著力點。
+          #
+          # 唯一的語法判斷是「在 fenced code block 裡的標記不算數」：專案自己的內容
+          # （D2 說區塊外是專案的）可以用程式碼區塊示範這兩個標記——例如在 CLAUDE.md 裡寫
+          # 安裝說明。那是合法的，不該被當成第二個區塊。用 AST 的 fence／code_block
+          # token 排除，不是正規式猜。
+
+          def fenced_lines(doc):
+              """被 fenced／indented code block 涵蓋的 1-based 行號集合。"""
+              covered = set()
+              for t in doc["tokens"]:
+                  if t.type in ("fence", "code_block") and t.map:
+                      covered |= set(range(t.map[0] + 1, t.map[1] + 1))
+              return covered
+
+          def markers_in(doc, needle, covered):
+              return [n + 1 for n, line in enumerate(doc["lines"])
+                      if line.strip() == needle and (n + 1) not in covered]
+
+          for f in ENTRY_FILES:
+              # 不在版控內＝這個專案沒裝這個入口檔。D2 不要求它存在（見檔頭）。
+              if f not in files:
+                  print("  ⏭️ %s 不在版控內，略過" % f)
+                  continue
+              doc = docs[f]
+              covered = fenced_lines(doc)
+              begins = markers_in(doc, D2_BEGIN, covered)
+              ends = markers_in(doc, D2_END, covered)
+              # 一個標記都沒有＝這個檔案沒有 devflow 區塊，同上，不是違規。
+              if not begins and not ends:
+                  print("  ⏭️ %s 沒有 devflow 區塊，略過" % f)
+                  continue
+              # 以下都是「檔案讀得到、內容形狀不對」——那是內容違規（exit 1），
+              # 不是檢查器無法執行（exit 2）。exit 2 留給缺相依、不在 repo 內這類情況。
+              if len(begins) != 1 or len(ends) != 1:
+                  report("d2", "%s 的 devflow 標記不是剛好各一個（begin %d 個、end %d 個）"
+                         % (f, len(begins), len(ends)),
+                         ["%s:%d %s" % (f, n, D2_BEGIN) for n in begins]
+                         + ["%s:%d %s" % (f, n, D2_END) for n in ends]
+                         or ["（其中一個標記完全不存在，區塊沒有關閉）"])
+                  continue
+              begin, end = begins[0], ends[0]
+              if end < begin:
+                  report("d2", "%s 的 devflow 標記順序顛倒（end 在 %d 行、begin 在 %d 行）"
+                         % (f, end, begin))
+                  continue
+              n_lines = end - begin + 1
+              if n_lines > D2_MAX_LINES:
+                  report("d2", "%s 的入口區塊 %d 行，超過 D2 的 %d 行"
+                         % (f, n_lines, D2_MAX_LINES),
+                         ["%s:%d-%d（含頭尾兩行標記）" % (f, begin, end)])
+              else:
+                  ok("%s 的入口區塊 %d 行（%s:%d-%d）" % (f, n_lines, f, begin, end))
+
+          print()
+          print("── I1：head branch 名為 <N>-<slug>（%s）" % tag("i1"))
+          # 定義域封閉：一個字串比對一個 pattern。不打 API、不看 issue 是否存在。
+          # 檢查對象是 head branch，不是 base——所以 main 不會進到這裡（PR 的 head
+          # 不會是自己要合入的 main），不需要為它開例外。
+          head_ref = os.environ.get("GITHUB_HEAD_REF", "").strip()
+          event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+          if not head_ref:
+              if event_name == "pull_request":
+                  # pull_request 事件一定有 GITHUB_HEAD_REF。沒有＝執行環境和假設不符，
+                  # 這時「略過」會讓關卡靜默失效，所以炸掉（exit 2）而不是放行。
+                  die("pull_request 事件卻取不到 GITHUB_HEAD_REF，I1 沒有檢查對象")
+              print("  ⏭️ 非 pull_request 執行（event=%s），取不到 head branch，略過"
+                    % (event_name or "本機"))
+          elif BRANCH_RE.fullmatch(head_ref):
+              ok("head branch `%s` 合 <N>-<slug>" % head_ref)
+          else:
+              report("i1", "head branch `%s` 不合 I1 的 `<N>-<slug>`" % head_ref,
+                     ["`<N>` 是 issue 號（一個以上的數字），接一個 `-`，再接非空的 slug",
+                      "例：`26-closed-domain-checks`",
+                      "slug 的字元集 I1 沒有規定，這裡不限"])
 
           print()
           print("── V1：frontmatter version 為四碼 a.b.c.d（%s）" % tag("version"))
