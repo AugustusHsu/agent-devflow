@@ -91,6 +91,18 @@
 #   * 【`i1` 只看 head branch 的形狀。】`<N>` 對不對應一個真實 issue 不驗（要打 API，
 #     且 issue 可能已關閉）；`I1` 的另外三個「＝」（一個 worktree、一個 coder）
 #     沒有任何機械來源可查。
+#   * 【`d2` 有一個已知誤擋，修不掉。】入口檔的專案內容若這樣寫：
+#         <details><summary>範例</summary>
+#         （空行）
+#         <!-- devflow:begin --> … <!-- devflow:end -->
+#         （空行）
+#         </details>
+#     那個空行會關閉 <details> 起頭的 HTML block，裡面的標記於是變成**頂層**的
+#     html_block，和真正的標記在 AST 上完全一樣，分不出來——`d2` 會報「標記各兩個」。
+#     沒有空行的寫法（<details> 內直接接標記）不受影響，code fence 與縮排寫法也不受
+#     影響，都已測。要修得知道「這段 raw HTML 的作用範圍到哪」，那是 HTML parser
+#     的事，markdown-it 不提供，屬 issue #22 的 raw HTML 缺口。
+#     現況是 B 關卡（check 自己變紅，不擋合併），踩到時改用 code fence 貼範例即可。
 #   * 【`i1` 只在 pull_request 事件有對象。】第 10 節的 bypass 是直推 main，不開 PR，
 #     所以不需要在 `i1` 裡開例外——它根本不會跑到。反過來說，走 bypass 進 main 的
 #     變更，`i1` 也擋不到。
@@ -529,32 +541,36 @@ jobs:
           # 定義域封閉：兩個已知檔案，兩個字面標記之間有幾行，一個整數比大小。
           # 不解析區塊內容、不看區塊外，所以「合法內容被判違規」在這裡沒有著力點。
           #
-          # 唯一的語法判斷是「在 fenced code block 裡的標記不算數」：專案自己的內容
-          # （D2 說區塊外是專案的）可以用程式碼區塊示範這兩個標記——例如在 CLAUDE.md 裡寫
-          # 安裝說明。那是合法的，不該被當成第二個區塊。用 AST 的 fence／code_block
-          # token 排除，不是正規式猜。
+          # 唯一的語法判斷是「哪一行才算一個標記」：D2 說區塊外是專案的內容，
+          # 而專案的內容可以提到這兩個標記——寫安裝說明、用 <details> 收起一份範例。
+          # 那些是合法的，不該被當成第二個區塊。判準取 markdown 的結構而不是字面：
+          # 標記是 HTML 註解，真正的標記會被 markdown-it 切成一個**只含它自己**的
+          # html_block；被包進 <div>／<details> 的標記則是那個較大 html_block 的一部分，
+          # 寫在 code fence 裡的根本不是 html_block。一個判準同時擋掉三種誤擋。
 
-          def fenced_lines(doc):
-              """被 fenced／indented code block 涵蓋的 1-based 行號集合。"""
-              covered = set()
+          def marker_lines(doc):
+              """自成一個 html_block 的行號 → 該行內容（1-based）。"""
+              solo = {}
               for t in doc["tokens"]:
-                  if t.type in ("fence", "code_block") and t.map:
-                      covered |= set(range(t.map[0] + 1, t.map[1] + 1))
-              return covered
+                  if t.type != "html_block" or not t.map:
+                      continue
+                  body = [n for n in range(t.map[0], min(t.map[1], len(doc["lines"])))
+                          if doc["lines"][n].strip()]
+                  if len(body) == 1:
+                      solo[body[0] + 1] = doc["lines"][body[0]].strip()
+              return solo
 
-          def markers_in(doc, needle, covered):
-              return [n + 1 for n, line in enumerate(doc["lines"])
-                      if line.strip() == needle and (n + 1) not in covered]
+          def markers_in(solo, needle):
+              return sorted(n for n, text in solo.items() if text == needle)
 
           for f in ENTRY_FILES:
               # 不在版控內＝這個專案沒裝這個入口檔。D2 不要求它存在（見檔頭）。
               if f not in files:
                   print("  ⏭️ %s 不在版控內，略過" % f)
                   continue
-              doc = docs[f]
-              covered = fenced_lines(doc)
-              begins = markers_in(doc, D2_BEGIN, covered)
-              ends = markers_in(doc, D2_END, covered)
+              solo = marker_lines(docs[f])
+              begins = markers_in(solo, D2_BEGIN)
+              ends = markers_in(solo, D2_END)
               # 一個標記都沒有＝這個檔案沒有 devflow 區塊，同上，不是違規。
               if not begins and not ends:
                   print("  ⏭️ %s 沒有 devflow 區塊，略過" % f)
