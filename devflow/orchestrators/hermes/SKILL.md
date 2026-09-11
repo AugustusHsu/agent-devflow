@@ -127,10 +127,10 @@ git fetch origin main
 git merge-base --is-ancestor <head sha> origin/main
 gh pr view <PR-N> --json state,mergedAt,mergeCommit
 
-# (2) 仍 active 才 kill；kill 後等到不再 active（逾時＝仍 active，停）；判定依 hermes.md 「中斷交接」格
-[ "$(systemctl --user is-active coder-<N>.scope)" = active ] && systemctl --user kill --signal=TERM coder-<N>.scope
-timeout 30 sh -c 'until ! systemctl --user -q is-active coder-<N>.scope; do sleep 1; done'
-systemctl --user is-active coder-<N>.scope                    # 須為 inactive
+# (2) 仍 active 才 kill；等到讀回字串為 inactive（deactivating 不算；逾時 124 ＝ 未停，停）；判定依 hermes.md 「中斷交接」格
+[ "$(systemctl --user is-active coder-<N>.scope)" != active ] || systemctl --user kill --signal=TERM coder-<N>.scope
+timeout 30 sh -c 'until [ "$(systemctl --user is-active coder-<N>.scope)" = inactive ]; do sleep 1; done'
+[ "$(systemctl --user is-active coder-<N>.scope)" = inactive ] && echo inactive
 
 # (3) 非空 → 逐項判是否須保留；有須保留者 → 停，依 F4
 git -C ../<repo>.worktrees/<N> status --porcelain
@@ -142,10 +142,10 @@ git branch -d <N>-<slug>
 # (6) ls-remote 非 0 → 結果未定（F3），停；0 且空 → 跳過；0 且非空 → 取 OID，祖先檢查為 0 才刪
 if OUT=$(git ls-remote --heads origin <N>-<slug>); then
   [ -z "$OUT" ] || { git merge-base --is-ancestor "${OUT%%[[:space:]]*}" origin/main && git push origin --delete <N>-<slug>; }
-else echo "F3: ls-remote 失敗，停"; fi
+else echo "F3: ls-remote 失敗，停"; false; fi
 
 # (7) 非 0 → 結果未定（F3）；0 且非空 → 未刪成，停；0 且空＝C1 完成
-if OUT=$(git ls-remote --heads origin <N>-<slug>); then [ -z "$OUT" ] && echo "C1 完成" || echo "遠端分支仍在，停"; else echo "F3: ls-remote 失敗，停"; fi
+if OUT=$(git ls-remote --heads origin <N>-<slug>); then [ -z "$OUT" ] && echo "C1 完成" || { echo "遠端分支仍在，停"; false; }; else echo "F3: ls-remote 失敗，停"; false; fi
 
 # C2：OPEN → gh issue close <N> 後再讀回
 gh issue view <N> --json state --jq .state
