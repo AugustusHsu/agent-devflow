@@ -1,5 +1,5 @@
 ---
-version: 0.0.2.0
+version: 1.0.0.0
 ---
 
 # agent-devflow WORKFLOW
@@ -45,7 +45,7 @@ version: 0.0.2.0
 
 - `L1` 派工前 issue 必須有：目標與對應 AC、G、T、write scope、阻塞依賴、共用契約、外部資源；「未決事項」為空。模板 `templates/issue.md`。
 - `L2` 派工：從最新 main 建分支與 worktree；coder 收到 issue、G、T、worktree 路徑、驗證指令。
-- `L3` coder 遇未決事項：issue 留言 → 停（blocked），不猜。orchestrator 問人，答案寫回 issue，再重派。issue 留言是持久紀錄，提問通道只是通道。工作區內出現非本任務產生的檔案或工具生成物（MCP、編輯器、快取自動寫入者）同樣適用：回報，不自行 `add`、不自行刪除。
+- `L3` coder 遇未決事項不猜，依判準分兩路徑。停（blocked），任一命中即停：(a) 處置會落在 write scope 外（repo 設定、branch protection、`WORKFLOW.md`、其他任務的 worktree）或會改變 issue 明列的 AC；(b) issue 本體、規格、issue 留言互相矛盾。命中：issue 留言 → 停；orchestrator 問人，答案寫回 issue，再重派。續：未命中者為工程判斷，issue 留言記錄情況、暫定處置、位置後繼續，不停。issue 留言是持久紀錄，提問通道只是通道。工作區內出現非本任務產生的檔案或工具生成物（MCP、編輯器、快取自動寫入者）同樣適用：回報，不自行 `add`、不自行刪除。
 - `L4` 完成：測試綠 → push 分支 → 開 PR，引用 issue、G、T、head sha。模板 `templates/pr.md`。
 - `L5` 之後依序：審查（第 5 節）→ 合併（第 6 節）→ 收尾（第 8 節）。
 - `L6` 取消任務而分支已有 commit：先問人保留或丟棄，不得逕自刪除。
@@ -81,7 +81,7 @@ version: 0.0.2.0
 
 ## 8. 收尾（C）
 
-- `C1` 順序：確認來源 head 是 main 祖先（`git merge-base --is-ancestor`）→ 停止 coder 程序 → 檢查 worktree 無需保留的未提交／未追蹤內容 → `git worktree remove` → `git branch -d`（永不 `-D`）→ 刪遠端分支 → `git ls-remote --heads` 驗證。
+- `C1` 順序七步，每步判準成立才進下一步：(1) `git merge-base --is-ancestor <head> main` exit 0 → (2) 停止 coder 程序，已停與否依 `orchestrators/` 對照表判定 → (3) worktree 無需保留的未提交／未追蹤內容 → (4) `git worktree remove` → (5) `git branch -d`（永不 `-D`）→ (6) `git ls-remote --heads origin <branch>` 為空則跳過；非空則取其 OID，`git merge-base --is-ancestor <OID> main` exit 0 後 `git push origin --delete <branch>` → (7) `git ls-remote --heads origin <branch>` 為空＝成功。
 - `C2` 關 issue；forge 自動關閉也要讀回驗證。
 - `C3` 只清本次任務擁有的資源；其他活躍任務的 worktree、分支不動。blocked 或取消且成果未處置者保留並回報。
 - `C4` 「`git worktree list` 只剩主目錄」是成功收尾的判準，不是強清命令。
@@ -108,6 +108,7 @@ version: 0.0.2.0
 - `ST2` 規格建版：加上第 2、3、9 節；任務從規格推導。
 - `ST3` 平行：加上第 12 節。
 - `ST4` stage 只標示已驗證的能力，不是權限開關；降 stage 不放寬 main 保護、憑證或發布授權。
+- `ST5` 保護節自 stage 0 起生效，不依 stage：第 5 節（R）、第 8 節（C）、第 9 節 `G1`～`G3`、`G5`。`G4` 例外，屬能力門檻，依 `ST2`。
 
 ## 12. 平行（P）
 
@@ -119,6 +120,6 @@ version: 0.0.2.0
 ## 13. 文檔（D）
 
 - `D1` 一個來源、兩種投影：`devflow/`（agent 讀，也渲染給人）、`docs/spec/`（agent 與人）、`docs/guide/`（只給人）。規範只有一份，指南引用它。
-- `D2` 入口檔（CLAUDE.md／AGENTS.md）只擁有 `<!-- devflow:begin -->`…`<!-- devflow:end -->` 區塊，≤30 行；區塊外是專案的內容，安裝與升級不得改動。
+- `D2` 入口檔（CLAUDE.md／AGENTS.md）只擁有 `<!-- devflow:begin -->`…`<!-- devflow:end -->` 區塊，≤30 行；區塊須為入口檔的第一個 devflow 標記組，其前不得有任何 `<!-- devflow:begin -->` 或 `<!-- devflow:end -->` 行；區塊內容以 `devflow/templates/entry-block.md` 為準。區塊外是專案的內容，安裝與升級不得改動。
 - `D3` 人類站依 `devflow.yml` 的 `docs.site`／`docs.versioning`；版本跟 kit release。wiki 不當投影目標。
 - `D4` 超過 20 KB 的檔案不整份載入；先 `grep -n` 定位再局部讀。
