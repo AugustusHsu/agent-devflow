@@ -5,7 +5,8 @@
     python3 devflow/install.py <目標 repo 路徑> [--dry-run]
     python3 devflow/install.py --help
 
-    exit 0：成功（含 unchanged）；exit 1：內容碰撞（有 begin 無 end，AC-5）；
+    exit 0：成功（含 unchanged）；exit 1：內容碰撞（有 begin 無 end，AC-5；begin 之前有
+    落單 end、或只有 end 沒有 begin，AC-5b）；
     exit 2：無法執行（目標路徑不對、模板不合規、入口檔不是一般檔案或 dangling symlink、
     不可寫、讀取失敗）。exit 1／2 時不寫任何檔、stdout 全部抑制——可寫性在決策階段用
     os.access 前置檢查（dry-run 與實跑皆做，AC-10）；檢查後仍發生的 OSError（檢查與寫入
@@ -27,9 +28,12 @@ symlink 都是 exit 2，安裝器不替使用者決定該建到哪裡。
 - 與 CI **刻意不同**的一點：檔首 UTF-8 BOM（EF BB BF）不剝除，屬第一行內容，所以
   「BOM＋begin」的首行不是標記行；CI 以 utf-8-sig 讀檔會先剝 BOM。安裝器以 bytes 為準、
   不解碼整檔。差異只影響「BOM 開頭且首行為 begin」一種輸入，記 #22 待對齊。
-- 第一組＝檔案第一個 begin 標記行到其後第一個 end 標記行；begin 之前的落單 end 不算，
+- 第一組＝檔案第一個 begin 標記行到其後第一個 end 標記行。第一個 begin 之前若有任何 end
+  標記行（或全檔無 begin 但有 end）＝違反 `D2`（1.0.0.0：區塊須為第一個標記組、其前不得有
+  任何標記行）→ exit 1、不寫任何檔（AC-5b）——不替使用者清理，區塊外是專案的內容。
   第一組之後的任何標記行一律忽略（不計數、不報錯、不改動）。
-- CI 只驗第一組 ≤30 行；本檔用同一判準找第一組，並只對那一段做等值比對／取代。
+- CI 驗第一組 ≤30 行、begin 前無落單 end；本檔用同一判準找第一組，並只對那一段做
+  等值比對／取代。
 
 `D2` 上限來源：devflow/WORKFLOW.md 的 `D2`——入口區塊 ≤30 行（含頭尾兩行標記），
 與 CI 的 D2_MAX_LINES 同值。模板超過即 exit 2（AC-8）。
@@ -103,12 +107,18 @@ def is_marker(line, marker):
 
 
 def first_group(lines):
-    """回傳 (begin_idx, end_idx)，0-based；找不到的那一端是 None。與 CI entry_block() 同義。"""
+    """回傳 (stray_idx, begin_idx, end_idx)，0-based；不存在的那一項是 None。與 CI entry_block() 同義。
+
+    stray＝第一個 begin 之前（無 begin 則全檔）最早的 end 標記行：`D2` 說區塊前不得有任何
+    標記行，這是 AC-5b 的拒絕依據。begin／end 是第一組的兩端。
+    """
     begin = next((i for i, line in enumerate(lines) if is_marker(line, BEGIN)), None)
+    head = lines if begin is None else lines[:begin]
+    stray = next((i for i, line in enumerate(head) if is_marker(line, END)), None)
     if begin is None:
-        return None, None
+        return stray, None, None
     end = next((i for i in range(begin + 1, len(lines)) if is_marker(lines[i], END)), None)
-    return begin, end
+    return stray, begin, end
 
 
 # ── 模板 ─────────────────────────────────────────────────────────────
@@ -164,7 +174,7 @@ def decide(root, name, template):
 
     可寫性在這裡檢查（不是寫入時才發現）：將被寫入的既有檔查 os.access(W_OK)、將被建立的
     檔查其目錄；dry-run 與實跑皆走同一條路，exit code 與 stderr 才會一致（AC-10）。
-    unchanged 與 AC-5 的檔不會被寫入，不檢查。
+    unchanged 與 AC-5／AC-5b 的檔不會被寫入，不檢查。
     """
     path = root / name
     display = str(path)
@@ -181,9 +191,12 @@ def decide(root, name, template):
     except OSError as e:
         raise InstallError(2, "%s: 讀不到：%s" % (display, e))
     lines = split_lines(data)
-    begin, end = first_group(lines)
+    stray, begin, end = first_group(lines)
+    # AC-5b 先於 AC-5：落單 end 在檔案裡一定比 begin 早，先報最早的那個違規
+    if stray is not None:
+        raise InstallError(1, "%s:%d: stray devflow:end before begin" % (display, stray + 1))  # AC-5b
     if begin is None:
-        decision = Decision(name, display, "insert", data, template + b"\n" + data)  # AC-2
+        decision = Decision(name, display, "insert", data, template + b"\n" + data)  # AC-2（無任何標記行）
     elif end is None:
         raise InstallError(1, "%s:%d: devflow:begin without end" % (display, begin + 1))  # AC-5
     else:
@@ -267,8 +280,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         description="把 agent-devflow 入口區塊插入目標專案的 CLAUDE.md／AGENTS.md。"
                     "區塊外逐 byte 不變、重跑冪等、碰撞時報錯且不寫任何檔。",
-        epilog="模板：%s。exit 0 成功、1 內容碰撞（begin 無 end）、2 無法執行"
-               "（目標路徑、模板、非一般檔案／dangling symlink、不可寫）。" % TEMPLATE_PATH)
+        epilog="模板：%s。exit 0 成功、1 內容碰撞（begin 無 end、begin 前有落單 end）、"
+               "2 無法執行（目標路徑、模板、非一般檔案／dangling symlink、不可寫）。" % TEMPLATE_PATH)
     parser.add_argument("target", help="目標 repo 根目錄")
     parser.add_argument("--dry-run", action="store_true",
                         help="不寫檔；exit code 與 stderr 同實際執行，成功時 stdout 印 unified diff")

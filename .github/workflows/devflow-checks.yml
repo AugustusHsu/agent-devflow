@@ -9,7 +9,8 @@
 # 而是**定義域封不封閉**，見下面兩節。
 #
 # ── ⚠️ 這個 check 擋什麼、不擋什麼 ───────────────────────────────────────
-# 會擋（exit 1）：`d2` 入口區塊（第一個 begin 到其後第一個 end 這一段：缺 end 或 >30 行）、`i1` head branch 名稱。
+# 會擋（exit 1）：`d2` 入口區塊（第一個 begin 到其後第一個 end 這一段：缺 end 或 >30 行；
+#                 以及 begin 之前有落單的 end）、`i1` head branch 名稱。
 # 就這兩項。
 # 不擋（exit 0，只把發現印在 log）：其餘七項，一律 advisory。
 #
@@ -53,16 +54,20 @@
 #               **其後第一個** end 標記，驗這一段 ≤30 行。字面比對（strip 後整行等於
 #               標記），不看 markdown 結構、不看 nesting level、不看是否在 code block 內；
 #               這段之後的標記一律忽略。這是 issue #26 的使用者裁決（B）。
-#               定義域是「兩個已知檔案、兩個字面字串、第一次出現的位置」——沒有任何
-#               語法依賴，所以區塊**後面**的專案內容怎麼提到標記都不會誤擋。
+#               這段之前若有 end 標記行也 ❌——D2 1.0.0.0 明寫區塊前不得有任何標記行
+#               （issue #52）。定義域仍是「兩個已知檔案、兩個字面字串、第一次出現的位置」
+#               ——沒有任何語法依賴，所以區塊**後面**的專案內容怎麼提到標記都不會誤擋。
 #         `i1`：一個字串（GITHUB_HEAD_REF）符不符合 `<N>-<slug>`——
 #               不打 API、不看 issue 是否存在、不猜 slug 的字元集（見下面「不發明規則」）。
 #
 #   三、判準：「作者舉不出誤擋例子就留在關卡」被推翻過兩次。`d2` 這裡也走過一遍——
 #       前兩版用 markdown-it 找「真正的標記」，一版誤擋清單項裡的示例，修掉後下一版
 #       又漏擋「整個真區塊縮在清單項內」。教訓是 D2 原文沒有規定區塊在頂層，任何
-#       結構判準都是在發明規則。B 的字面判準把語法依賴歸零，代價只剩一種已知情況
-#       （示例放在真區塊前面），見「擋不住什麼」。要再降級，得由人裁決，不由本檔自己改。
+#       結構判準都是在發明規則。B 的字面判準把語法依賴歸零。原本還剩一種已知代價
+#       （示例放在真區塊前面會驗錯段）——D2 1.0.0.0 把「區塊須為第一個標記組、其前無
+#       標記行」寫進規則後，那不再是代價而是違規：begin 前的 end 由 `d2` ❌，完整的
+#       示例組放在前面則依 D2 定義**它就是**區塊（安裝器會把它換成模板），見「擋不住什麼」。
+#       要再降級，得由人裁決，不由本檔自己改。
 #
 # ── 不發明規則：`i1` 的 slug 為什麼不限字元集 ─────────────────────────────
 # `I1` 的原文只有「分支名 `<N>-<slug>`」，沒有規定 slug 的字元集。
@@ -95,23 +100,28 @@
 # ── 擋不住什麼（已知不完備，不要假裝完備）──────────────────────────────
 #   * 【`d2`、`i1` 以外的全部。】以下各條說的是「連報告都報不到」，
 #     或「報告了但沒有任何強制力」。
-#   * 【`d2` 只驗第一段：第一個 begin 到其後第一個 end，≤30 行；有 begin 無 end 也擋。】
+#   * 【`d2` 只驗第一段：第一個 begin 到其後第一個 end，≤30 行；有 begin 無 end 也擋；
+#     第一個 begin 之前有 end 標記行也擋。】
 #     區塊「內容」對不對、區塊外有沒有被安裝流程改到（D2 後半句），都要跟 base 比對
 #     或跟 templates/entry-block.md 比對，本檢查器不做。第一段之後再出現的標記
 #     一律忽略——第二個區塊、落單的標記，都不報。
 #   * 【`d2` 不要求區塊存在。】D2 的原文是「入口檔只擁有這個區塊，≤30 行」，
 #     沒有說「入口檔必須有這個區塊」——別的專案可能只裝了 CLAUDE.md 沒有 AGENTS.md。
 #     所以檔案不在版控內、或檔案裡一個標記都沒有，都是 ⏭️ 略過，不是違規。
+#     （只有 end 沒有 begin **不是**「一個標記都沒有」——那是 begin 前的落單 end，❌。）
 #     代價：把整個區塊刪掉的 PR，`d2` 不會擋（會在 log 印出 ⏭️）。
 #   * 【`i1` 只看 head branch 的形狀。】`<N>` 對不對應一個真實 issue 不驗（要打 API，
 #     且 issue 可能已關閉）；`I1` 的另外三個「＝」（一個 worktree、一個 coder）
 #     沒有任何機械來源可查。
-#   * 【`d2` 的已知代價：示例放在真區塊前面，驗到的是示例那段。】判準是「第一個
-#     begin 到其後第一個 end」，所以入口檔若在真正的區塊**之前**就出現一份示例
-#     （不論寫在 code fence、清單項還是 <details> 裡），`d2` 會把示例當成區塊：
-#     示例 ≤30 行就放行（真區塊沒被驗到），示例 >30 行或沒關就 ❌。
-#     這是使用者裁決 B 時已知並接受的代價——本 repo 與安裝模板都把區塊放在檔案開頭，
-#     示例自然在後面。踩到時把示例移到區塊後面即可。
+#   * 【示例放在真區塊前面：D2 1.0.0.0 起是違規，不是判準 B 的代價。】D2 明寫「區塊須為
+#     入口檔的第一個標記組，其前不得有任何 begin 或 end 行」。兩種形狀：
+#       - 示例只含 end（或 end 先於 begin）：`d2` ❌「有落單的 devflow:end 在 begin 之前」
+#         （issue #52 起），安裝器同判準 exit 1（install.py AC-5b）。
+#       - 示例是完整的 begin…end 組：依 D2 的定義**它就是**區塊——`d2` 驗它 ≤30 行，
+#         安裝器會把它換成模板、把後面「真正的」那份當專案內容留著。這裡沒有「驗錯段」，
+#         是檔案本身不合 D2；但「第一組內容不是模板」要跟 templates/entry-block.md 比對
+#         才看得出來，本檢查器不做（見本節第一條）。
+#     本 repo 與安裝模板都把區塊放在檔案開頭，示例自然在後面。踩到時把示例移到區塊後面。
 #     現況是 B 關卡：check 自己變紅、平台不機械阻擋；但依 `M1` 紅叉的 PR 不應合併，
 #     所以踩到的人要改寫法或找人裁決，不是直接按合併。
 #   * 【`i1` 只在 pull_request 事件有對象。】第 10 節的 bypass 是直推 main，不開 PR，
@@ -560,31 +570,44 @@ jobs:
           #
           # 這段之後的所有標記一律忽略：不計數、不報錯。專案自己的內容可以在區塊後面
           # 用任何寫法示範標記（清單項、blockquote、<details>、code fence），都不受影響。
-          # 代價：示例若放在真區塊**前面**，驗到的會是示例那段——見檔頭「擋不住什麼」。
+          # 這段之**前**則相反：D2（1.0.0.0 起）明寫「區塊須為第一個標記組，其前不得有任何
+          # begin 或 end 行」，所以第一個 begin 之前出現 end 標記行是違規，❌ 而不是略過；
+          # 沒有 begin 卻有 end 也一樣（安裝器同判準拒絕：install.py 的 AC-5b）。
 
           def entry_block(lines):
-              """回傳 (begin_line, end_line)，1-based；找不到的那一端是 None。"""
+              """回傳 (stray_end, begin_line, end_line)，1-based；不存在的那一項是 None。
+              stray_end＝第一個 begin 之前（沒有 begin 則全檔）最早的 end 標記行。"""
               begin = next((n + 1 for n, s in enumerate(lines)
                             if s.strip() == D2_BEGIN), None)
+              head = lines if begin is None else lines[:begin - 1]
+              stray = next((n + 1 for n, s in enumerate(head)
+                            if s.strip() == D2_END), None)
               if begin is None:
-                  return None, None
+                  return stray, None, None
               end = next((n + 1 for n, s in enumerate(lines[begin:], start=begin)
                           if s.strip() == D2_END), None)
-              return begin, end
+              return stray, begin, end
 
           for f in ENTRY_FILES:
               # 不在版控內＝這個專案沒裝這個入口檔。D2 不要求它存在（見檔頭）。
               if f not in files:
                   print("  ⏭️ %s 不在版控內，略過" % f)
                   continue
-              begin, end = entry_block(docs[f]["lines"])
-              # 沒有 begin＝這個檔案沒有 devflow 區塊，同上，不是違規。
-              # begin 之前若有落單的 end，也一併視同沒有區塊——它前面沒有 begin 可配。
+              stray, begin, end = entry_block(docs[f]["lines"])
+              # 以下都是「檔案讀得到、內容形狀不對」——那是內容違規（exit 1），
+              # 不是檢查器無法執行（exit 2）。exit 2 留給缺相依、不在 repo 內這類情況。
+              #
+              # 第一個 begin 之前有 end 標記行（含「只有 end 沒有 begin」）：D2 說區塊前不得有
+              # 任何標記行。只報最早的一行；不替人清理——區塊外是專案的內容。
+              if stray is not None:
+                  report("d2", "%s:%d 有落單的 devflow:end 在 begin 之前" % (f, stray),
+                         ["D2：區塊須為入口檔的第一個標記組，其前不得有任何 begin／end 行",
+                          "把那一行移到區塊後面（或刪掉）即可；區塊後的標記一律不驗"])
+                  continue
+              # 一個標記都沒有＝這個檔案沒有 devflow 區塊，同上，不是違規。
               if begin is None:
                   print("  ⏭️ %s 沒有 devflow 區塊，略過" % f)
                   continue
-              # 以下都是「檔案讀得到、內容形狀不對」——那是內容違規（exit 1），
-              # 不是檢查器無法執行（exit 2）。exit 2 留給缺相依、不在 repo 內這類情況。
               if end is None:
                   report("d2", "%s 的 devflow 區塊沒有關閉（%s:%d 有 begin，其後沒有 end）"
                          % (f, f, begin))
