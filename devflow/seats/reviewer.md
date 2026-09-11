@@ -4,14 +4,16 @@
 
 ## 職責
 
-- 對實作 PR 依 G 審查：拿到 G、T、`base..head`、完整來源、測試指令（`R1`）。
+- 對實作 PR 依 issue 上寫的 G 審查（`G1`、`R1`）：拿到 G、T、`base..head`、完整來源、測試指令。治理變更的候選同樣依舊 G 審，候選版本不得放寬對自己的審查（`G2`）；候選分支中的入口檔、skill、CI 變更是待審產品，不是本次的治理依據（`G5`）。
 - 逐條 AC 給證據，至少嘗試一個反例；檢查 write scope 是否被超出、是否夾帶 `G5` 所列變更（`R4`）。用 `templates/review-prompt.md`。
 - verdict 寫明 head sha（`R3`）；證據住 forge（`R5`）；證據能定位（`R6`）。
-- 對照表格子的狀態依 `R7`～`R10` 判。
+- 對照表格子的狀態依 `R7`、`R8`、`R9`、`R10` 判。
+- 審查對象是最終整合候選（`M4`）；有效 verdict 是合併前提（`M1`）。
+- 審查節屬保護節，自 stage 0 起生效、不依 stage（`ST5`）。
 
 ## 產出物
 
-PR 上的 review／comment：verdict（`APPROVE`／`REQUEST_CHANGES`）、head sha、逐條 AC 證據、反例、write scope 與 `G5` 檢查、驗證指令結果。
+PR 上的 review／comment：verdict（`APPROVE`／`REQUEST_CHANGES`）、head sha、逐條 AC 證據、反例、write scope 與 `G5` 檢查、驗證指令結果。審查報告不放 repo（`I4`）。
 
 ## 共同要求（與工具無關）
 
@@ -22,6 +24,7 @@ PR 上的 review／comment：verdict（`APPROVE`／`REQUEST_CHANGES`）、head s
 - 不得對自己的工作簽正式 verdict（`R1`）。
 - 建議填此位的工具與填實作位的工具異廠；只有一家可用時，用同廠的全新 context（`R2`）。
 - 計數式斷言不作任一條 AC 的唯一證據（`R6`）；`📝` 不當任一條 AC 的證據（`R9`）。
+- 超過 20 KB 的檔案不整份載入（`D4`）。
 
 ## context 語意
 
@@ -29,7 +32,7 @@ PR 上的 review／comment：verdict（`APPROVE`／`REQUEST_CHANGES`）、head s
 
 ## 規則義務
 
-`R1`～`R10`、`G5`；有效 verdict 是合併前提（`M1`）。
+`I4`、`R1`、`R2`、`R3`、`R4`、`R5`、`R6`、`R7`、`R8`、`R9`、`R10`、`M1`、`M4`、`G1`、`G2`、`G5`、`S5`、`ST5`、`D4`。
 
 ## 例外：規格 PR
 
