@@ -52,8 +52,11 @@ END = "<!-- devflow:end -->"
 ENTRY_FILES = ("CLAUDE.md", "AGENTS.md")
 D2_MAX_LINES = 30
 TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "entry-block.md"
-# AC-7：不做 YAML 解析，逐行取第一個匹配
-CODER_RE = re.compile(r"^coder:\s*([^\s#]+)")
+# AC-7：不做 YAML 解析。逐行取「鍵: 值」（值到空白或 # 為止，同舊 ^coder: 的取法），只靠
+# 空格縮排判巢狀，取 seats → implementer → filler 路徑上每層的第一個匹配。#68 起讀此路徑；
+# spec AC-7 仍寫 ^coder:，待修訂（見 #68 留言）。
+KEY_RE = re.compile(r"^( *)([A-Za-z_][\w.-]*):(?:\s*([^\s#]+))?")
+SEATS_PATH = ("seats", "implementer", "filler")
 
 
 class InstallError(Exception):
@@ -145,16 +148,34 @@ def load_template():
 # ── 目標檔集合（AC-7）────────────────────────────────────────────────
 
 
-def read_coder(root):
-    """devflow.yml 的 coder 值；任何讀不到／不匹配都回 None，永不報錯。"""
+def read_implementer(root):
+    """devflow.yml 的 seats.implementer.filler 值；任何讀不到／不匹配都回 None，永不報錯。
+
+    `seats:` 須在第 0 欄（同舊 ^coder: 的錨定）；`implementer:` 縮排大於 `seats:`、`filler:`
+    縮排大於 `implementer:`。縮排退回到某層鍵的欄位（或更外）＝離開該層；不在路徑上的鍵
+    （其他職位、其他頂層鍵）連同其子項整段略過。tab 不算縮排（與 YAML 同），含 tab 開頭的行
+    不匹配。
+    """
     try:
         text = (root / "devflow.yml").read_bytes().decode("utf-8")
     except (OSError, UnicodeDecodeError):
         return None
+    stack = []   # 目前所在各層：(鍵的縮排, 是否在 SEATS_PATH 上)；空＝頂層
     for line in text.splitlines():
-        m = CODER_RE.match(line)
-        if m:
-            return m.group(1)
+        m = KEY_RE.match(line)
+        if not m:
+            continue                                   # 空行、註解、非「鍵:」的行
+        indent, key, value = len(m.group(1)), m.group(2), m.group(3)
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+        if indent and not stack:
+            continue                                   # 頂層鍵不在第 0 欄：略過
+        depth = len(stack)
+        on_path = ((not stack or stack[-1][1]) and depth < len(SEATS_PATH)
+                   and key == SEATS_PATH[depth])
+        if on_path and depth == len(SEATS_PATH) - 1 and value is not None:
+            return value
+        stack.append((indent, on_path))
     return None
 
 
@@ -163,7 +184,7 @@ def choose_targets(root):
     present = [name for name in ENTRY_FILES if os.path.lexists(root / name)]
     if present:
         return present
-    return ["CLAUDE.md"] if read_coder(root) == "claude-code" else ["AGENTS.md"]
+    return ["CLAUDE.md"] if read_implementer(root) == "claude-code" else ["AGENTS.md"]
 
 
 # ── 決策（AC-1～AC-6、可寫性）───────────────────────────────────────

@@ -50,6 +50,15 @@ OLD_BLOCK = BEGIN_LINE + b"## old devflow block\n\nstale content\n" + END_LINE
 FIXED_MTIME = 1_000_000_000  # 2001-09-09，用來偵測「有沒有重寫檔案」
 
 
+def seats(filler):
+    """devflow.yml 片段：seats.implementer.filler（#68 起的結構；AC-7 只讀這一條路徑）。"""
+    return b"seats:\n  implementer:\n    filler: " + filler + b"\n"
+
+
+YML_CLAUDE = seats(b"claude-code")
+YML_CODEX = seats(b"codex")
+
+
 def block_of_lines(n):
     """含兩標記行共 n 行的區塊，尾端恰一個 \\n。"""
     body = b"".join(b"line %d\n" % i for i in range(n - 2))
@@ -513,15 +522,26 @@ def _():
 
 @case("AC-7-only-agents-ignores-devflow-yml")
 def _():
-    with project({"AGENTS.md": PREFIX, "devflow.yml": b"coder: claude-code\n"}) as p:
+    with project({"AGENTS.md": PREFIX, "devflow.yml": YML_CLAUDE}) as p:
         r = p.run()
         ok_run(r)
         expect(not p.exists("CLAUDE.md"), "devflow.yml only consulted when both are absent")
 
 
-@case("AC-7-none-coder-claude-code")
+@case("AC-7-none-implementer-claude-code")
 def _():
-    yml = b"forge: github\ncoder: claude-code     # claude-code | codex\nstage: 1\n"
+    # 本 repo devflow.yml 的形狀：其他頂層鍵、行尾註解、註解行、同層其他職位與選填欄位都在
+    yml = (b"forge: github          # github | gitlab\n"
+           b"\n"
+           b"# seat bindings\n"
+           b"seats:\n"
+           b"  implementer:               # \xe5\xaf\xa6\xe4\xbd\x9c\xe4\xbd\x8d (UTF-8 comment)\n"
+           b"    filler: claude-code      # claude-code | codex\n"
+           b"  reviewer:\n"
+           b"    filler: codex\n"
+           b"    model: gpt-5.6-sol\n"
+           b"    reasoning: high\n"
+           b"stage: 1\n")
     with project({"devflow.yml": yml}) as p:
         r = p.run()
         ok_run(r)
@@ -529,9 +549,9 @@ def _():
         expect(not p.exists("AGENTS.md"), "AGENTS.md must not be created")
 
 
-@case("AC-7-none-coder-codex")
+@case("AC-7-none-implementer-codex")
 def _():
-    with project({"devflow.yml": b"coder: codex\n"}) as p:
+    with project({"devflow.yml": YML_CODEX}) as p:
         r = p.run()
         ok_run(r)
         eq(p.read("AGENTS.md"), T, "AGENTS.md created")
@@ -547,9 +567,9 @@ def _():
         expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
 
 
-@case("AC-7-none-non-yaml-with-coder-line")
+@case("AC-7-none-non-yaml-with-seats-block")
 def _():
-    yml = b"{{{ this is: not: [yaml\ncoder: claude-code\n]]] ::: junk\n"
+    yml = b"{{{ this is: not: [yaml\n" + YML_CLAUDE + b"]]] ::: junk\n"
     with project({"devflow.yml": yml}) as p:
         r = p.run()
         ok_run(r)
@@ -559,7 +579,7 @@ def _():
 
 @case("AC-7-none-devflow-yml-not-utf8")
 def _():
-    with project({"devflow.yml": b"\xff\xfecoder: claude-code\n"}) as p:
+    with project({"devflow.yml": b"\xff\xfe" + YML_CLAUDE}) as p:
         r = p.run()
         ok_run(r)  # 永不報錯
         eq(p.read("AGENTS.md"), T, "undecodable devflow.yml → AGENTS.md")
@@ -575,21 +595,64 @@ def _():
         eq(p.read("AGENTS.md"), T, "unreadable devflow.yml → AGENTS.md")
 
 
-@case("AC-7-none-indented-coder-no-match")
+@case("AC-7-none-indented-seats-no-match")
 def _():
-    with project({"devflow.yml": b"tool:\n  coder: claude-code\n"}) as p:
+    with project({"devflow.yml": b"tool:\n  seats:\n    implementer:\n      filler: claude-code\n"}) as p:
         r = p.run()
         ok_run(r)
-        eq(p.read("AGENTS.md"), T, "^coder: is anchored at line start")
+        eq(p.read("AGENTS.md"), T, "seats: must be a top-level key at column 0")
         expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
 
 
-@case("AC-7-none-first-coder-line-wins")
+@case("AC-7-none-first-implementer-wins")
 def _():
-    with project({"devflow.yml": b"coder: codex\ncoder: claude-code\n"}) as p:
+    with project({"devflow.yml": YML_CODEX + b"  implementer:\n    filler: claude-code\n"}) as p:
         r = p.run()
         ok_run(r)
         eq(p.read("AGENTS.md"), T, "first match is codex")
+        expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
+
+
+@case("AC-7-none-filler-under-other-seat-no-match")
+def _():
+    # 正確的值出現在錯誤的位置：reviewer 的 filler 是 claude-code、implementer 是 codex
+    yml = b"seats:\n  reviewer:\n    filler: claude-code\n  implementer:\n    filler: codex\n"
+    with project({"devflow.yml": yml}) as p:
+        r = p.run()
+        ok_run(r)
+        eq(p.read("AGENTS.md"), T, "only seats.implementer.filler is read")
+        expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
+
+
+@case("AC-7-none-implementer-outside-seats-no-match")
+def _():
+    # implementer 巢在別的頂層鍵下、或 seats 區塊已被下一個頂層鍵關閉：都不算
+    for yml in (b"other:\n  implementer:\n    filler: claude-code\n",
+                b"seats:\n  reviewer:\n    filler: codex\nimplementer:\n  filler: claude-code\n"):
+        with project({"devflow.yml": yml}) as p:
+            r = p.run()
+            ok_run(r)
+            eq(p.read("AGENTS.md"), T, "implementer must be nested under seats")
+            expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
+
+
+@case("AC-7-none-tab-indent-no-match")
+def _():
+    # tab 不是 YAML 縮排；含 tab 開頭的行不匹配，仍永不報錯
+    with project({"devflow.yml": b"seats:\n\timplementer:\n\t\tfiller: claude-code\n"}) as p:
+        r = p.run()
+        ok_run(r)
+        eq(p.read("AGENTS.md"), T, "tab-indented lines do not match")
+        expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
+
+
+@case("AC-7-none-legacy-coder-key-ignored")
+def _():
+    # #68 廢除的舊鍵 coder:（不留別名）：即使值為 claude-code 也不得再被讀成 implementer
+    with project({"devflow.yml": b"coder: claude-code\n"}) as p:
+        r = p.run()
+        ok_run(r)
+        eq(p.read("AGENTS.md"), T, "legacy coder: key is not read")
         expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
 
 
@@ -627,7 +690,7 @@ def _():
 @case("AC-7-dangling-symlink-exit-2")
 def _():
     # lexists 真、exists 假：不替使用者決定建到哪；devflow.yml 也不會被拿來選檔
-    with project({"devflow.yml": b"coder: claude-code\n"}) as p:
+    with project({"devflow.yml": YML_CLAUDE}) as p:
         p.symlink("CLAUDE.md", "AGENTS.md")
         rd = p.run("--dry-run")
         rr = p.run()
@@ -912,7 +975,7 @@ def _():
 @case("AC-12-directory-not-writable-create-exit-2")
 def _():
     require_non_root()
-    with project({"devflow.yml": b"coder: claude-code\n"}) as p:
+    with project({"devflow.yml": YML_CLAUDE}) as p:
         os.chmod(p.root, 0o555)
         rd = p.run("--dry-run")
         rr = p.run()
@@ -927,7 +990,7 @@ def _():
 def _():
     # 0222：W_OK 真、X_OK 假——POSIX 建檔需 search 權限；只查 W_OK 會 dry-run 0／實跑 2
     require_non_root()
-    with project({"devflow.yml": b"coder: claude-code\n"}) as p:
+    with project({"devflow.yml": YML_CLAUDE}) as p:
         os.chmod(p.root, 0o222)
         rd = p.run("--dry-run")
         rr = p.run()

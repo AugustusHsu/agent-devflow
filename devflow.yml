@@ -1,10 +1,24 @@
 # agent-devflow 專案設定。本 repo 自己也是第一個消費者。
-# 只有 forge / coder / orchestrator 是自變數；其餘（PR/MR、CLI、入口檔、skills 目錄、派工方式）
+# 只有 forge 與 seats（各職位的綁定）是自變數；其餘（PR/MR、CLI、入口檔、skills 目錄、派工方式）
 # 都是衍生值，由 devflow/ 下的對照表產生，不在這裡寫。規則本體：devflow/WORKFLOW.md。
 
 forge: github          # github | gitlab
-coder: claude-code     # claude-code | codex
-orchestrator: hermes   # none | hermes | paperclip（省略＝none）
+
+# 職位綁定。職位名以 devflow/seats/ 的四個檔為準，不新增。每個職位一個 filler（填充者）：
+# 工具名（對照表在 devflow/coders/、orchestrators/）或 human（由人填）。
+# model／reasoning 選填，未填＝用該工具的預設；旗標怎麼寫住對照表，這裡只記意圖。
+# model 是 R10 受測環境的一部分：換模型後，舊模型下驗證的格子依 R9 降為 📝（#17 裁決 4）。
+seats:
+  implementer:               # 實作位
+    filler: claude-code      # claude-code | codex
+  reviewer:                  # 審查位；建議與 implementer 異廠（R2）。本 repo 審查一律顯式 pin，不讀工具的全域設定
+    filler: codex            # codex | claude-code
+    model: gpt-5.6-sol
+    reasoning: high          # 思考程度；值的寫法依工具
+  coordinator:               # 協調位；省略＝human（無工具，各步由人執行；對照表 orchestrators/none.md）
+    filler: hermes           # hermes | paperclip | human
+  approver:                  # 裁決位；人（seats/approver.md），無 model／reasoning
+    filler: human
 
 # 本 repo 套用到哪一層流程（不是版本號；定義見 WORKFLOW.md 第 11 節）：
 #   0 bootstrap（無流程，直推 main）
