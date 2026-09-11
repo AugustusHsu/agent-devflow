@@ -100,8 +100,8 @@ prompt 以 `templates/review-prompt.md` 為底，另加：
 
 - 完整 verdict 貼成 PR 留言（`R5`；`forges/github.md` 「審查證據（`R3`／`R5`）」格），另一則留摘要表：阻擋 → 處置。
 - `REQUEST_CHANGES` 分兩類：
-  - 實作阻擋 → coder `--resume` 修（步驟 4），同一 issue（`F1`）。
-  - T 的漏洞 → 依 `F2`。Hermes 側：問人、答案寫回 issue（`L3` 通道）→ T 修訂另開 PR 走步驟 6～9 → 合入後把 issue 的 T 更新為新 commit、影響分析留言 → 重派原任務。
+  - 實作阻擋 → coder `--resume` 修（步驟 4；`F1`）。
+  - T 的漏洞 → 依 `F2`。Hermes 側：問人、答案寫回原 issue（`L3` 通道）→ T 修訂作為新任務走步驟 1～10（新 issue／分支／worktree；原分支已承載開啟中的 PR，不再開第二張；原任務 coder 已停、worktree 依 `C3` 保留）→ 合入後把原 issue 的 T 更新為新 commit、影響分析留言 → 重派原任務。
 - head 變更後重審（`R3`）；下一輪 prompt 縮窄到變更處＋未通過的 AC。
 - `APPROVE` → 步驟 9。
 
@@ -126,11 +126,13 @@ git fetch origin main
 git merge-base --is-ancestor <head sha> origin/main      # (1)
 gh pr view <PR-N> --json state,mergedAt,mergeCommit      # (1) 兩項全驗
 systemctl --user is-active coder-<N>.scope                # (2)
+systemctl --user kill --signal=TERM coder-<N>.scope       # (2) 仍 active 時停止
 git -C ../<repo>.worktrees/<N> status --porcelain         # (3)
 git worktree remove ../<repo>.worktrees/<N>               # (4)
 git branch -d <N>-<slug>                                  # (5)
-git ls-remote --heads origin <N>-<slug>                   # (6)
-git push origin --delete <N>-<slug>                       # (6) 僅 ls-remote 非空且判準成立時
+OID=$(git ls-remote --heads origin <N>-<slug> | cut -f1)  # (6) 空則跳過
+git merge-base --is-ancestor "$OID" origin/main           # (6)
+git push origin --delete <N>-<slug>                       # (6)
 git ls-remote --heads origin <N>-<slug>                   # (7)
 gh issue view <N> --json state                            # C2
 ```
@@ -152,9 +154,7 @@ gh issue view <N> --json state                            # C2
 
 ## 五、規則改自己（`G2`）
 
-`WORKFLOW.md`、模板、對照表、本 skill 都是實作；變更流程依 `G2`。
-
-- Hermes 側：提案 issue（問題／案例／候選／建議，人逐項裁）→ 實作 PR 走步驟 6～9。
+- 流程依 `G2`。Hermes 側：提案 issue（問題／案例／候選／建議，人逐項裁）→ 實作單作為新任務走步驟 1～10。
 - 審查 prompt 明寫 `git show <舊 G sha>:devflow/WORKFLOW.md` 為依據（`G2`）。
 - 版本位數依 `V1`～`V3`（依 `ST2`）。
 - 合併後啟用邊界依 `G3`；檢查器門檻依 `G4`（依 `ST2`）。
