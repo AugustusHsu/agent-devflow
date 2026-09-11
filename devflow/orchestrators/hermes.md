@@ -1,7 +1,5 @@
 # orchestrator: hermes
 
-Hermes Agent 當協調者：確認範圍、固定 G／T、建 worktree、啟動 coder、向人提問、驗證交付、收尾。
-
 衍生值對照表。每格狀態：`✅ 實測 <日期>` 並附驗證方式，或 `⬜ 未實測`。
 
 | 面向 | 值 | 狀態 |
