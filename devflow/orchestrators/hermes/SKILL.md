@@ -119,25 +119,23 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 
 ### 10. 收尾（`C1`～`C4`、`F4`）
 
-`C1` 七步照序執行，判準見條文；每步 exit 非 0 或註解所列情況即停、不進下一步。Hermes 側指令（在主 checkout 執行，每段可整段貼入）：
+`C1` 七步照序執行，判準見條文；每段的最終 exit 即該步的機械判定（判定鏈以 `&&` 串接，不作判定的指令已 `|| true`，整段貼入與逐行執行結果相同），非 0 或註解所列情況即停、不進下一步。Hermes 側指令（在主 checkout 執行）：
 
 ```bash
-# (1) 兩項全驗；state 非 MERGED 而 merge-base 為 0 → 結果未定（F3）
-git fetch origin main
-git merge-base --is-ancestor <head sha> origin/main
-gh pr view <PR-N> --json state,mergedAt,mergeCommit
+# (1) 兩項全驗：fetch → 祖先檢查 → 讀回三欄；祖先檢查非 0 ＝ 未合入；state 非 MERGED → grep 非 0，結果未定（F3）
+git fetch origin main && git merge-base --is-ancestor <head sha> origin/main \
+  && gh pr view <PR-N> --json state,mergedAt,mergeCommit --jq '"\(.state)\t\(.mergedAt)\t\(.mergeCommit.oid)"' | grep '^MERGED'
 
-# (2) 仍 active 才 kill；等到讀回字串為 inactive（deactivating 不算；逾時 124 ＝ 未停，停）；判定依 hermes.md 「中斷交接」格
-[ "$(systemctl --user is-active coder-<N>.scope)" != active ] || systemctl --user kill --signal=TERM coder-<N>.scope
-timeout 30 sh -c 'until [ "$(systemctl --user is-active coder-<N>.scope)" = inactive ]; do sleep 1; done'
-[ "$(systemctl --user is-active coder-<N>.scope)" = inactive ] && echo inactive
+# (2) 仍 active 才 kill；kill 只送訊號、exit 不作判定（|| true）；等到讀回字串為 inactive（deactivating 不算；逾時 124 ＝ 未停）；判定依 hermes.md 「中斷交接」格
+[ "$(systemctl --user is-active coder-<N>.scope)" != active ] || systemctl --user kill --signal=TERM coder-<N>.scope || true
+timeout 30 sh -c 'until [ "$(systemctl --user is-active coder-<N>.scope)" = inactive ]; do sleep 1; done' \
+  && [ "$(systemctl --user is-active coder-<N>.scope)" = inactive ] && echo inactive
 
 # (3) 非空 → 逐項判是否須保留；有須保留者 → 停，依 F4
 git -C ../<repo>.worktrees/<N> status --porcelain
 
 # (4)(5) 被拒不強制：(4) 回 (3) 重判，確認無需保留後加 --force；(5) 主 checkout 先 git merge --ff-only origin/main 再重試
-git worktree remove ../<repo>.worktrees/<N>
-git branch -d <N>-<slug>
+git worktree remove ../<repo>.worktrees/<N> && git branch -d <N>-<slug>
 
 # (6) ls-remote 非 0 → 結果未定（F3），停；0 且空 → 跳過；0 且非空 → 取 OID，祖先檢查為 0 才刪
 if OUT=$(git ls-remote --heads origin <N>-<slug>); then
