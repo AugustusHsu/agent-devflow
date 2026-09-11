@@ -14,8 +14,10 @@
 - 斷言一律 bytes 比對；「不寫檔」另以 mtime 驗證（同 bytes 重寫也算寫）。
 - 需要別的模板時（AC-8 >30 行、模板正規化），把 install.py 複製到暫存目錄並放
   自己的 templates/entry-block.md——install.py 以 __file__ 定位模板，不是 cwd。
-- 輸出每案一行 `PASS|FAIL <AC-n>-<分支名>`，失敗細節印到 stderr，最後一行總計；
-  全數 PASS 才 exit 0。
+- 可寫性案例（chmod 0444 檔、0555 目錄）以非 root 為前提：root 對它們 os.access(W_OK)
+  恆真，構造不出反例；偵測到 os.geteuid() == 0 時該類案例標 SKIP（不算 FAIL）。
+- 輸出每案一行 `PASS|FAIL|SKIP <AC-n>-<分支名>`，失敗細節印到 stderr，最後一行總計
+  （含 skip 數）；無 FAIL 即 exit 0。
 """
 import difflib
 import os
@@ -81,6 +83,16 @@ class Failure(Exception):
     pass
 
 
+class Skip(Exception):
+    pass
+
+
+def require_non_root():
+    """可寫性案例的前提（spec 名詞「可寫性」）：root 對 0444／0555 的 os.access(W_OK) 恆真。"""
+    if os.geteuid() == 0:
+        raise Skip("running as root: os.access(W_OK) is always true, cannot build a counterexample")
+
+
 def short(v, n=160):
     r = repr(v)
     return r if len(r) <= n else r[:n] + "…(%d chars)" % len(r)
@@ -129,12 +141,27 @@ class Project:
     def rewritten(self, name):
         return self.path(name).stat().st_mtime != FIXED_MTIME
 
+    def chmod(self, name, mode):
+        os.chmod(self.path(name), mode)
+
+    def symlink(self, name, target):
+        os.symlink(target, self.path(name))
+
     def run(self, *flags, install=INSTALL, target=None):
         cmd = [sys.executable, str(install), target or str(self.root), *flags]
         return subprocess.run(cmd, capture_output=True)
 
     def cleanup(self):
-        shutil.rmtree(self.root, ignore_errors=True)
+        os.chmod(self.root, 0o700)   # 目錄不可寫的案例先還原，否則 rmtree 刪不掉子項
+        remove_tree(self.root)
+
+
+def remove_tree(path):
+    """清理失敗不靜默：印到 stderr，讓 /tmp 殘留可被看見。"""
+    try:
+        shutil.rmtree(path)
+    except OSError as e:
+        print("warning: could not remove %s: %s" % (path, e), file=sys.stderr, flush=True)
 
 
 @contextmanager
@@ -157,7 +184,7 @@ def sandboxed_install(template=None):
             (d / "templates" / "entry-block.md").write_bytes(template)
         yield d / "install.py"
     finally:
-        shutil.rmtree(d, ignore_errors=True)
+        remove_tree(d)
 
 
 def ok_run(r):
@@ -508,6 +535,73 @@ def _():
         expect(not p.exists("devflow.yml"), "devflow.yml must not be created")
 
 
+@case("AC-7-symlink-to-file-counts-as-present")
+def _():
+    # 常見配置 CLAUDE.md -> AGENTS.md：兩檔皆「存在」（lexists）、同 inode；symlink 保留
+    with project({"AGENTS.md": PREFIX}) as p:
+        p.symlink("CLAUDE.md", "AGENTS.md")
+        r = p.run()
+        ok_run(r)
+        eq(p.read("AGENTS.md"), T + b"\n" + PREFIX, "shared content inserted once")
+        expect(p.path("CLAUDE.md").is_symlink(), "symlink must be preserved (no inode swap)")
+        ok_run(p.run())  # 第二次兩檔 unchanged
+
+
+@case("AC-7-symlink-only-no-other-created")
+def _():
+    # 只有 CLAUDE.md（symlink 指向集合外的一般檔）→ 集合只有它，不建 AGENTS.md
+    with project({"notes.md": PREFIX}) as p:
+        p.symlink("CLAUDE.md", "notes.md")
+        r = p.run()
+        ok_run(r)
+        eq(p.read("notes.md"), T + b"\n" + PREFIX, "written through the symlink")
+        expect(not p.exists("AGENTS.md"), "AGENTS.md must not be created")
+
+
+@case("AC-7-dangling-symlink-exit-2")
+def _():
+    # lexists 真、exists 假：不替使用者決定建到哪；devflow.yml 也不會被拿來選檔
+    with project({"devflow.yml": b"coder: claude-code\n"}) as p:
+        p.symlink("CLAUDE.md", "AGENTS.md")
+        rd = p.run("--dry-run")
+        rr = p.run()
+        err_run(rd, 2)
+        err_run(rr, 2)
+        eq(rd.stderr, rr.stderr, "stderr same in both modes")
+        expect(p.display("CLAUDE.md") in rr.stderr, "stderr names the dangling path", rr.stderr)
+        expect(not p.exists("AGENTS.md"), "referent must not be created")
+        expect(p.path("CLAUDE.md").is_symlink(), "symlink left as is")
+
+
+@case("AC-7-entry-is-directory-exit-2")
+def _():
+    with project({"AGENTS.md": PREFIX}) as p:
+        p.path("CLAUDE.md").mkdir()
+        rd = p.run("--dry-run")
+        rr = p.run()
+        err_run(rd, 2)
+        err_run(rr, 2)
+        eq(rr.stderr, p.display("CLAUDE.md") + b": not a regular file\n", "stderr")
+        eq(rd.stderr, rr.stderr, "stderr same in both modes")
+        eq(p.read("AGENTS.md"), PREFIX, "writable AGENTS.md must not be written (atomic)")
+        expect(not p.rewritten("AGENTS.md"), "AGENTS.md must not be rewritten")
+
+
+@case("AC-7-symlink-to-directory-exit-2")
+def _():
+    with project() as p:
+        p.path("docs").mkdir()
+        p.symlink("CLAUDE.md", "docs")
+        rd = p.run("--dry-run")
+        rr = p.run()
+        err_run(rd, 2)
+        err_run(rr, 2)
+        eq(rr.stderr, p.display("CLAUDE.md") + b": not a regular file\n", "stderr")
+        eq(rd.stderr, rr.stderr, "stderr same in both modes")
+        expect(not p.exists("AGENTS.md"), "AGENTS.md must not be created")
+        eq(sorted(os.listdir(p.path("docs"))), [], "nothing written into the directory")
+
+
 # AC-8：模板 >30 行 → exit 2、不寫、stderr 說明行數與上限
 
 @case("AC-8-template-31-lines-exit-2")
@@ -599,6 +693,29 @@ def _():
         expect(not p.rewritten("AGENTS.md"), "AGENTS.md must not be rewritten")
 
 
+@case("AC-10-dry-run-no-trailing-newline-exact-difflib")
+def _():
+    # 原檔最後一行無 \n：diff 最後一行也無 \n，且**不**加 `\ No newline at end of file`
+    orig = b"# Proj\n\ncustom"
+    with project({"CLAUDE.md": orig}) as p:
+        r = p.run("--dry-run")
+        ok_run(r)
+        expected = unified(orig, T + b"\n" + orig, b"CLAUDE.md")
+        expect(not expected.endswith(b"\n"), "precondition: difflib output ends without newline")
+        eq(r.stdout, expected, "stdout == difflib output byte for byte")
+        expect(b"No newline" not in r.stdout, "no synthetic marker line", r.stdout)
+
+
+@case("AC-10-dry-run-end-at-eof-replace-exact-difflib")
+def _():
+    orig = PREFIX + OLD_BLOCK[:-1]   # end 行在 EOF、無換行
+    with project({"CLAUDE.md": orig}) as p:
+        r = p.run("--dry-run")
+        ok_run(r)
+        eq(r.stdout, unified(orig, PREFIX + T, b"CLAUDE.md"), "stdout == difflib output byte for byte")
+        eq(p.read("CLAUDE.md"), orig, "bytes")
+
+
 @case("AC-10-dry-run-exit1-suppressed-matches-real")
 def _():
     files = {"CLAUDE.md": PREFIX, "AGENTS.md": PREFIX + BEGIN_LINE + b"open\n"}
@@ -685,6 +802,74 @@ def _():
             expect(not p.rewritten(n), n + " must not be rewritten")
 
 
+# 可寫性（spec 名詞定義）：決策階段 os.access 檢查，dry-run 與實跑皆做；非 root 前提
+
+@case("AC-12-readonly-file-dry-run-and-real-exit-2")
+def _():
+    require_non_root()
+    with project({"CLAUDE.md": PREFIX}) as p:
+        p.chmod("CLAUDE.md", 0o444)
+        rd = p.run("--dry-run")
+        rr = p.run()
+        err_run(rd, 2)
+        err_run(rr, 2)
+        eq(rd.stderr, rr.stderr, "stderr same in both modes")
+        expect(p.display("CLAUDE.md") in rr.stderr, "stderr names the file", rr.stderr)
+        eq(p.read("CLAUDE.md"), PREFIX, "bytes")
+        expect(not p.rewritten("CLAUDE.md"), "file must not be rewritten")
+
+
+@case("AC-12-readonly-file-unchanged-is-not-a-write")
+def _():
+    # 走 AC-3 的檔不會被寫入，不檢查可寫性（root 下也成立，不需 SKIP）
+    data = PREFIX + T + SUFFIX
+    with project({"CLAUDE.md": data}) as p:
+        p.chmod("CLAUDE.md", 0o444)
+        r = p.run()
+        ok_run(r)
+        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "stdout")
+
+
+@case("AC-12-atomic-writable-plus-readonly-nothing-written")
+def _():
+    require_non_root()
+    with project({"CLAUDE.md": PREFIX, "AGENTS.md": PREFIX}) as p:
+        p.chmod("AGENTS.md", 0o444)
+        r = p.run()
+        err_run(r, 2)
+        expect(p.display("AGENTS.md") in r.stderr, "stderr names the read-only file", r.stderr)
+        eq(p.read("CLAUDE.md"), PREFIX, "writable CLAUDE.md must not be written first")
+        expect(not p.rewritten("CLAUDE.md"), "CLAUDE.md must not be rewritten")
+        eq(p.read("AGENTS.md"), PREFIX, "AGENTS.md untouched")
+
+
+@case("AC-12-directory-not-writable-create-exit-2")
+def _():
+    require_non_root()
+    with project({"devflow.yml": b"coder: claude-code\n"}) as p:
+        os.chmod(p.root, 0o555)
+        rd = p.run("--dry-run")
+        rr = p.run()
+        err_run(rd, 2)
+        err_run(rr, 2)
+        eq(rd.stderr, rr.stderr, "stderr same in both modes")
+        expect(p.display("CLAUDE.md") in rr.stderr, "stderr names the file to be created", rr.stderr)
+        expect(not p.exists("CLAUDE.md") and not p.exists("AGENTS.md"), "nothing created")
+
+
+@case("AC-12-readonly-replace-path-exit-2")
+def _():
+    require_non_root()
+    with project({"AGENTS.md": PREFIX + OLD_BLOCK + SUFFIX}) as p:
+        p.chmod("AGENTS.md", 0o444)
+        rd = p.run("--dry-run")
+        rr = p.run()
+        err_run(rd, 2)
+        err_run(rr, 2)
+        eq(rd.stderr, rr.stderr, "stderr same in both modes")
+        eq(p.read("AGENTS.md"), PREFIX + OLD_BLOCK + SUFFIX, "bytes")
+
+
 # AC-13：本 repo 自身 --dry-run → 兩檔 unchanged、exit 0
 
 @case("AC-13-self-repo-dry-run-unchanged")
@@ -720,10 +905,14 @@ def check_template():
 def main(argv):
     check_template()
     selected = [(n, f) for n, f in CASES if not argv or any(a in n for a in argv)]
-    passed = failed = 0
+    passed = failed = skipped = 0
     for name, fn in selected:
         try:
             fn()
+        except Skip as e:
+            skipped += 1
+            print("SKIP", name, flush=True)
+            print("    " + str(e), file=sys.stderr, flush=True)
         except Failure as e:
             failed += 1
             print("FAIL", name, flush=True)
@@ -735,7 +924,8 @@ def main(argv):
         else:
             passed += 1
             print("PASS", name, flush=True)
-    print("total %d, passed %d, failed %d" % (passed + failed, passed, failed), flush=True)
+    print("total %d, passed %d, failed %d, skipped %d"
+          % (passed + failed + skipped, passed, failed, skipped), flush=True)
     return 0 if failed == 0 and selected else 1
 
 
