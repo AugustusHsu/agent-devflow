@@ -38,7 +38,8 @@ metadata:
 ```bash
 git fetch origin && git branch <N>-<slug> origin/main
 git worktree add ../<repo>.worktrees/<N> <N>-<slug>
-git -C ../<repo>.worktrees/<N> rev-parse HEAD       # 等於 base sha；git worktree list 含該路徑
+git worktree list                                   # 含該路徑與分支
+git -C ../<repo>.worktrees/<N> rev-parse HEAD       # 等於 base sha
 ```
 
 ### 3. 派 coder（`L2`；`hermes.md` 「派工（`L2`）」格）
@@ -100,7 +101,7 @@ prompt 以 `templates/review-prompt.md` 為底，另加：
 - 完整 verdict 貼成 PR 留言（`R5`；`forges/github.md` 「審查證據（`R3`／`R5`）」格），另一則留摘要表：阻擋 → 處置。
 - `REQUEST_CHANGES` 分兩類：
   - 實作阻擋 → coder `--resume` 修（步驟 4），同一 issue（`F1`）。
-  - T 的漏洞 → 受影響任務暫停，依 `F2` 先修規格。stage 1 第 2 節未生效時：spec 改動另開 PR、依 `G2` 審、合併後更新 issue 的 T、影響分析留言、任務續。
+  - T 的漏洞 → 依 `F2`。Hermes 側：問人、答案寫回 issue（`L3` 通道）→ T 修訂另開 PR 走步驟 6～9 → 合入後把 issue 的 T 更新為新 commit、影響分析留言 → 重派原任務。
 - head 變更後重審（`R3`）；下一輪 prompt 縮窄到變更處＋未通過的 AC。
 - `APPROVE` → 步驟 9。
 
@@ -118,16 +119,28 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 
 ### 10. 收尾（`C1`～`C4`、`F4`）
 
-`C1` 七步照序執行，判準見條文；Hermes 側對應：
+`C1` 七步照序執行，判準見條文；Hermes 側指令：
 
-- (1) 兩項全驗：`git merge-base --is-ancestor <head sha> origin/main` ＋ `gh pr view <PR-N> --json state,mergedAt,mergeCommit` 讀回 `MERGED`（`forges/github.md` 「已合併訊號（`C1`）」格）。
-- (2) coder 已停：`systemctl --user is-active coder-<N>.scope`，判定依 `hermes.md` 「中斷交接」格。
-- (6)(7) 依 `forges/github.md` 「合併後刪分支（`C1`）」格。
-- `C2`：`gh issue view <N> --json state` 讀回 `CLOSED`。範圍依 `C3`、`C4`；收尾失敗依 `F4`。
+```bash
+git fetch origin main
+git merge-base --is-ancestor <head sha> origin/main      # (1)
+gh pr view <PR-N> --json state,mergedAt,mergeCommit      # (1) 兩項全驗
+systemctl --user is-active coder-<N>.scope                # (2)
+git -C ../<repo>.worktrees/<N> status --porcelain         # (3)
+git worktree remove ../<repo>.worktrees/<N>               # (4)
+git branch -d <N>-<slug>                                  # (5)
+git ls-remote --heads origin <N>-<slug>                   # (6)
+git push origin --delete <N>-<slug>                       # (6) 僅 ls-remote 非空且判準成立時
+git ls-remote --heads origin <N>-<slug>                   # (7)
+gh issue view <N> --json state                            # C2
+```
+
+- (1) 讀回 `MERGED`，依 `forges/github.md` 「已合併訊號（`C1`）」格；(2) 判定依 `hermes.md` 「中斷交接」格；(6)(7) 依 `forges/github.md` 「合併後刪分支（`C1`）」格；`C2` 讀回 `CLOSED`。
+- 範圍依 `C3`、`C4`；收尾失敗依 `F4`。
 
 ## 三、輪次紀律（`F1`、`R3`、`R5`）
 
-- 每單審查輪次上限由人定，寫進 issue；同一阻擋連續兩輪未收斂、或審查者推翻自己前一輪 → 停損，依 `F1` 升級。
+- 每單審查輪次上限由人定，寫進 issue；停損與升級依 `F1`。
 - 審查 reasoning：首輪 `xhigh`／`high`；後續範圍縮窄可降 `medium`／`low`。
 - 每輪 PR 留言兩則：verdict 摘要表＋完整 verdict（`R5`）。
 
@@ -139,11 +152,11 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 
 ## 五、規則改自己（`G2`）
 
-`WORKFLOW.md`、模板、對照表、本 skill 都是實作。流程依 `G2`：規格核准 → 實作 → 依舊 G 審。
+`WORKFLOW.md`、模板、對照表、本 skill 都是實作；變更流程依 `G2`。
 
-- 規格核准：`ST2` 起走第 2 節；stage 1 第 2 節未生效時，提案 issue（問題／案例／候選／建議，人逐項裁）的人類裁決**暫代**規格核准。
+- Hermes 側：提案 issue（問題／案例／候選／建議，人逐項裁）→ 實作 PR 走步驟 6～9。
 - 審查 prompt 明寫 `git show <舊 G sha>:devflow/WORKFLOW.md` 為依據（`G2`）。
-- 版本位數依 `V1`～`V3`（依 `ST2`）；stage 1 下 orchestrator 依 `V2` 語意自判位數、審查者依舊 G 核。
+- 版本位數依 `V1`～`V3`（依 `ST2`）。
 - 合併後啟用邊界依 `G3`；檢查器門檻依 `G4`（依 `ST2`）。
 - 入口區塊同步依 `D2`、`I5`：`python3 devflow/install.py . --dry-run` 驗。
 
