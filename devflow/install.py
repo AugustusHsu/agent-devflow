@@ -169,7 +169,7 @@ def decide(root, name, template):
     path = root / name
     display = str(path)
     if not os.path.lexists(path):
-        if not os.access(root, os.W_OK):
+        if not os.access(root, os.W_OK | os.X_OK):   # 建檔需 write＋search（0222 目錄 W_OK 真但 open 失敗）
             raise InstallError(2, "%s: directory not writable" % display)
         return Decision(name, display, "create", None, template)                 # AC-1
     if not path.exists():

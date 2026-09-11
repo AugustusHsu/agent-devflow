@@ -857,6 +857,21 @@ def _():
         expect(not p.exists("CLAUDE.md") and not p.exists("AGENTS.md"), "nothing created")
 
 
+@case("AC-12-directory-write-no-search-create-exit-2")
+def _():
+    # 0222：W_OK 真、X_OK 假——POSIX 建檔需 search 權限；只查 W_OK 會 dry-run 0／實跑 2
+    require_non_root()
+    with project({"devflow.yml": b"coder: claude-code\n"}) as p:
+        os.chmod(p.root, 0o222)
+        rd = p.run("--dry-run")
+        rr = p.run()
+        err_run(rd, 2)
+        err_run(rr, 2)
+        eq(rd.stderr, rr.stderr, "stderr same in both modes")
+        os.chmod(p.root, 0o700)
+        expect(not p.exists("CLAUDE.md") and not p.exists("AGENTS.md"), "nothing created")
+
+
 @case("AC-12-readonly-replace-path-exit-2")
 def _():
     require_non_root()
