@@ -528,25 +528,57 @@ def _():
         expect(not p.exists("CLAUDE.md"), "devflow.yml only consulted when both are absent")
 
 
+def agents_only(yml, why):
+    """兩入口檔皆無、devflow.yml 為 yml → 只建 AGENTS.md（讀取器回 None 或非 claude-code）。"""
+    with project({"devflow.yml": yml}) as p:
+        r = p.run()
+        ok_run(r)  # 永不報錯
+        eq(p.read("AGENTS.md"), T, why)
+        expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created: " + why)
+
+
+def claude_only(yml, why):
+    """兩入口檔皆無、devflow.yml 為 yml → 只建 CLAUDE.md（讀取器回 claude-code）。"""
+    with project({"devflow.yml": yml}) as p:
+        r = p.run()
+        ok_run(r)
+        eq(p.read("CLAUDE.md"), T, why)
+        expect(not p.exists("AGENTS.md"), "AGENTS.md must not be created: " + why)
+
+
 @case("AC-7-none-implementer-claude-code")
 def _():
-    # 本 repo devflow.yml 的形狀：其他頂層鍵、行尾註解、註解行、同層其他職位與選填欄位都在
+    # 本 repo devflow.yml 的形狀：其他頂層鍵、行尾註解、註解行（含縮排的）、區塊內空行、
+    # 選填欄位在 filler 之前、同層其他職位都在
     yml = (b"forge: github          # github | gitlab\n"
            b"\n"
            b"# seat bindings\n"
            b"seats:\n"
+           b"  # indented comment inside seats\n"
            b"  implementer:               # \xe5\xaf\xa6\xe4\xbd\x9c\xe4\xbd\x8d (UTF-8 comment)\n"
+           b"\n"
+           b"    model: default-model\n"
            b"    filler: claude-code      # claude-code | codex\n"
+           b"    reasoning: high\n"
            b"  reviewer:\n"
            b"    filler: codex\n"
            b"    model: gpt-5.6-sol\n"
            b"    reasoning: high\n"
            b"stage: 1\n")
-    with project({"devflow.yml": yml}) as p:
-        r = p.run()
-        ok_run(r)
-        eq(p.read("CLAUDE.md"), T, "CLAUDE.md created")
-        expect(not p.exists("AGENTS.md"), "AGENTS.md must not be created")
+    claude_only(yml, "CLAUDE.md created")
+
+
+@case("AC-7-none-unrecognized-lines-off-path-tolerated")
+def _():
+    # fail closed 只在路徑內：文件起始符、其他職位區塊裡的引號鍵與非 ASCII 鍵都不影響
+    yml = (b"---\n"
+           b"seats:\n"
+           b"  reviewer:\n"
+           b"    \"flags\": x\n"
+           b"    \xe5\x82\x99\xe8\xa8\xbb: y\n"
+           b"  implementer:\n"
+           b"    filler: claude-code\n")
+    claude_only(yml, "unrecognized lines outside the path do not fail closed")
 
 
 @case("AC-7-none-implementer-codex")
@@ -654,6 +686,89 @@ def _():
         ok_run(r)
         eq(p.read("AGENTS.md"), T, "legacy coder: key is not read")
         expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
+
+
+# AC-7 fail closed（PR #71 第一輪）：路徑內出現 scanner 看不見的中間父節點或不明結構 → None。
+# 每案的 filler: claude-code 都不在 seats.implementer 的直接子層；讀到它就是誤命中。
+
+IMPL = b"seats:\n  implementer:\n"
+
+
+@case("AC-7-none-empty-devflow-yml")
+def _():
+    agents_only(b"", "empty devflow.yml")
+    agents_only(b"\n   \n", "whitespace-only devflow.yml")
+
+
+@case("AC-7-none-implementer-under-other-seat")
+def _():
+    agents_only(b"seats:\n  reviewer:\n    implementer:\n      filler: claude-code\n",
+                "seats.reviewer.implementer.filler is not the path")
+
+
+@case("AC-7-none-deep-bare-key-parent")
+def _():
+    agents_only(IMPL + b"    wrapper:\n      filler: claude-code\n",
+                "seats.implementer.wrapper.filler is not the path")
+
+
+@case("AC-7-none-quoted-key-parent")
+def _():
+    agents_only(IMPL + b"    \"wrapper\":\n      filler: claude-code\n",
+                "quoted key is an invisible parent: fail closed")
+    agents_only(b"seats:\n  \"x\":\n    implementer:\n      filler: claude-code\n",
+                "quoted key at seats level is an invisible parent: fail closed")
+
+
+@case("AC-7-none-unicode-key-parent")
+def _():
+    agents_only(IMPL + b"    \xe5\x8c\x85\xe8\xa3\x9d:\n      filler: claude-code\n",
+                "non-ASCII key is an invisible parent: fail closed")
+
+
+@case("AC-7-none-sequence-item-parent")
+def _():
+    agents_only(IMPL + b"    - wrapper:\n        filler: claude-code\n",
+                "sequence item is an invisible parent: fail closed")
+    agents_only(b"seats:\n  - implementer:\n      filler: claude-code\n",
+                "sequence item at seats level: fail closed")
+    agents_only(b"seats:\n  reviewer:\n    filler: codex\n  - weird\n  implementer:\n    filler: claude-code\n",
+                "sequence item between seats: fail closed")
+
+
+@case("AC-7-none-flow-mapping-parent")
+def _():
+    agents_only(IMPL + b"    wrapper: {\n      filler: claude-code\n    }\n",
+                "multi-line flow mapping: fail closed")
+    agents_only(b"seats: {implementer: {filler: claude-code}}\n",
+                "one-line flow mapping: path keys with values are not blocks")
+
+
+@case("AC-7-none-path-key-with-value")
+def _():
+    agents_only(b"seats: foo\n  implementer:\n    filler: claude-code\n",
+                "seats: with a scalar is not a block")
+    agents_only(b"seats:\n  implementer: &impl\n    filler: claude-code\n",
+                "implementer: with an anchor is not a block")
+
+
+@case("AC-7-none-merge-key-in-implementer")
+def _():
+    agents_only(IMPL + b"    <<: *base\n    filler: claude-code\n",
+                "<<: merge key inside the path: fail closed")
+
+
+@case("AC-7-none-block-scalar-content-looks-like-filler")
+def _():
+    agents_only(IMPL + b"    model: |\n      filler: claude-code\n",
+                "block scalar content is nested under model, not a key")
+
+
+@case("AC-7-none-filler-value-not-a-single-token")
+def _():
+    agents_only(IMPL + b"    filler: claude-code extra\n", "trailing token: not a key line")
+    agents_only(IMPL + b"    filler:claude-code\n", "no space after colon: not a key line")
+    agents_only(IMPL + b"    filler: claude-code#x\n", "# without leading space: not a comment")
 
 
 @case("AC-7-none-devflow-yml-not-created")

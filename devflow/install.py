@@ -52,10 +52,11 @@ END = "<!-- devflow:end -->"
 ENTRY_FILES = ("CLAUDE.md", "AGENTS.md")
 D2_MAX_LINES = 30
 TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "entry-block.md"
-# AC-7：不做 YAML 解析。逐行取「鍵: 值」（值到空白或 # 為止，同舊 ^coder: 的取法），只靠
-# 空格縮排判巢狀，取 seats → implementer → filler 路徑上每層的第一個匹配。#68 起讀此路徑；
+# AC-7：不做 YAML 解析。「鍵行」＝空格縮排 ＋ ASCII 裸鍵 ＋ `:` ＋（空白 ＋ 單一 token）？＋
+# （空白 ＋ # 註解）？，到行尾；token 到空白或 # 為止，不去引號（同舊 ^coder: 的取法）。
+# 只靠縮排判巢狀，取 seats → implementer → filler 路徑上每層的第一個匹配。#68 起讀此路徑；
 # spec AC-7 仍寫 ^coder:，待修訂（見 #68 留言）。
-KEY_RE = re.compile(r"^( *)([A-Za-z_][\w.-]*):(?:\s*([^\s#]+))?")
+KEY_RE = re.compile(r"^( *)([A-Za-z_][A-Za-z0-9_.-]*):(?:\s+([^\s#]+))?(?:\s+#.*)?\s*$")
 SEATS_PATH = ("seats", "implementer", "filler")
 
 
@@ -151,10 +152,19 @@ def load_template():
 def read_implementer(root):
     """devflow.yml 的 seats.implementer.filler 值；任何讀不到／不匹配都回 None，永不報錯。
 
-    `seats:` 須在第 0 欄（同舊 ^coder: 的錨定）；`implementer:` 縮排大於 `seats:`、`filler:`
-    縮排大於 `implementer:`。縮排退回到某層鍵的欄位（或更外）＝離開該層；不在路徑上的鍵
-    （其他職位、其他頂層鍵）連同其子項整段略過。tab 不算縮排（與 YAML 同），含 tab 開頭的行
-    不匹配。
+    `seats:` 須在第 0 欄（同舊 ^coder: 的錨定）且無值；`implementer:` 縮排大於 `seats:` 且無值；
+    `filler:` 縮排大於 `implementer:` 且有值。縮排退回到某層鍵的欄位（或更外）＝離開該層。
+    空行與 # 註解行不影響層級。
+
+    fail closed：所在層在路徑上（`seats:` 之內、或 `seats.implementer:` 之內）時，出現任何不是
+    「鍵行」（KEY_RE）的非空非註解行——引號鍵、非 ASCII 鍵、`- ` 序列項、流式 `{`／`}`、
+    `<<:` 合併鍵、區塊純量的內容行、tab 縮排、值後接多餘 token——即回 None：那些都是 scanner
+    看不見的中間父節點或無法判定的結構，繼續掃會把更深層的 `filler` 誤當成 implementer 的直接
+    子項。路徑外（其他職位、其他頂層鍵）的不明行只略過：它們的縮排大於所屬區塊的鍵，任何
+    縮排更深的後續行都仍在該區塊內、不會被當成路徑上的鍵，故不影響結果。
+    路徑上的鍵帶值（`seats: x`、`implementer: &a`、流式 `seats: {…}`）不視為區塊，其下不再匹配。
+    重複鍵是無效 YAML，取第一個匹配（同舊行為）。token 不去引號：`filler: "claude-code"`
+    讀到的是帶引號的字串，不等於 claude-code。
     """
     try:
         text = (root / "devflow.yml").read_bytes().decode("utf-8")
@@ -162,20 +172,29 @@ def read_implementer(root):
         return None
     stack = []   # 目前所在各層：(鍵的縮排, 是否在 SEATS_PATH 上)；空＝頂層
     for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue                                   # 空行、註解行：不影響層級
         m = KEY_RE.match(line)
-        if not m:
-            continue                                   # 空行、註解、非「鍵:」的行
-        indent, key, value = len(m.group(1)), m.group(2), m.group(3)
+        indent = len(m.group(1)) if m else len(line) - len(line.lstrip(" "))
         while stack and indent <= stack[-1][0]:
-            stack.pop()
+            stack.pop()                                # 縮排退回＝離開該層
+        if not m:
+            if stack and stack[-1][1]:
+                return None                            # 路徑內的不明結構：fail closed
+            continue                                   # 路徑外：略過
         if indent and not stack:
             continue                                   # 頂層鍵不在第 0 欄：略過
+        key, value = m.group(2), m.group(3)
         depth = len(stack)
-        on_path = ((not stack or stack[-1][1]) and depth < len(SEATS_PATH)
-                   and key == SEATS_PATH[depth])
-        if on_path and depth == len(SEATS_PATH) - 1 and value is not None:
-            return value
-        stack.append((indent, on_path))
+        if (not stack or stack[-1][1]) and depth < len(SEATS_PATH) and key == SEATS_PATH[depth]:
+            if depth == len(SEATS_PATH) - 1:
+                if value is not None:
+                    return value                       # seats.implementer.filler: <token>
+            elif value is None:
+                stack.append((indent, True))           # 進入 seats／implementer 區塊
+                continue
+        stack.append((indent, False))                  # 路徑外的鍵、帶值的路徑鍵、無值的 filler
     return None
 
 
