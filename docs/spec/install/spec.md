@@ -21,7 +21,7 @@ version: 0.0.0.0
 - **檔首插入**：輸出 = 模板 bytes + `\n` + 原檔 bytes。原檔以 `---` frontmatter 開頭時**同樣插在 byte 0**——`D2` 說「區塊外是專案的內容」，frontmatter 也是專案內容，安裝器不解析它；原檔若以換行開頭，該換行保留（不去重）
 - **兩檔**：目標 repo 根目錄的 `CLAUDE.md` 與 `AGENTS.md`
 - **目標檔集合**：依 AC-7 先選定要處理的檔案集合（兩檔／其一／只 `AGENTS.md`），**再**對集合內每檔做決策；不在集合內的檔案不讀、不建。「存在」以 `os.path.lexists` 判：**symlink 一律視為存在**；dangling symlink（`lexists` 真、`exists` 假）→ exit 2，不寫任何檔，stderr 說明——安裝器不替使用者決定該建到哪裡；集合內路徑存在但**不是一般檔案**（目錄、或 symlink 指向目錄）→ 同樣 exit 2，stderr `<路徑>: not a regular file`
-- **可寫性**：決策階段對集合內每個「將被寫入」的既有檔案檢查 `os.access(path, os.W_OK)`、將被建立的檔案檢查其目錄 `os.access(dir, os.W_OK)`；任一不可寫 → exit 2，不寫任何檔。此檢查在 `--dry-run` 與實際執行**皆執行**，使兩者 exit code 一致（AC-10）。**測試前提**：可寫性案例以非 root 身分執行；harness 偵測到 `os.geteuid() == 0` 時將該類案例標為 `SKIP`（不算 FAIL），並在總計列印 skip 數——root 對 `0444` 檔 `os.access(W_OK)` 恆真，chmod 無法構造反例。檢查後仍發生的 OSError 不在原子性承諾內（可寫性檢查與寫入之間的競態）
+- **可寫性**：決策階段對集合內每個「將被寫入」的既有檔案檢查 `os.access(path, os.W_OK)`、將被建立的檔案檢查其目錄 `os.access(dir, os.W_OK | os.X_OK)`（POSIX 建檔需 write＋search 兩權限；`0222` 目錄 `W_OK` 真但建檔失敗）；任一不可寫 → exit 2，不寫任何檔。此檢查在 `--dry-run` 與實際執行**皆執行**，使兩者 exit code 一致（AC-10）。**測試前提**：可寫性案例以非 root 身分執行；harness 偵測到 `os.geteuid() == 0` 時將該類案例標為 `SKIP`（不算 FAIL），並在總計列印 skip 數——root 對 `0444` 檔 `os.access(W_OK)` 恆真，chmod 無法構造反例。檢查後仍發生的 OSError 不在原子性承諾內（可寫性檢查與寫入之間的競態）
 - **原子性**：先對集合內全部檔案做決策（AC-1～AC-6、AC-8 各歸哪一路），任一檔命中 exit 1／exit 2 路徑則**集合內皆不寫**；全部可寫才寫
 
 ## 驗收標準
