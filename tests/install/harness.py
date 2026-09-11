@@ -233,9 +233,10 @@ def _():
         eq(p.read("AGENTS.md"), T, "created bytes == normalized template")
 
 
-# AC-2：無 begin 標記行 → 檔首插入：模板 + \n + 原檔
+# AC-2：無任何標記行 → 檔首插入：模板 + \n + 原檔
+# （只有 end 沒有 begin 不走這裡——那是 AC-5b 拒絕）
 
-@case("AC-2-no-begin-inserts-at-byte-0")
+@case("AC-2-no-markers-inserts-at-byte-0")
 def _():
     orig = PREFIX + SUFFIX
     with project({"CLAUDE.md": orig}) as p:
@@ -262,15 +263,6 @@ def _():
         r = p.run()
         ok_run(r)
         eq(p.read("CLAUDE.md"), T + b"\n" + orig, "leading newlines not deduplicated")
-
-
-@case("AC-2-stray-end-is-project-content")
-def _():
-    orig = PREFIX + END_LINE + SUFFIX
-    with project({"CLAUDE.md": orig}) as p:
-        r = p.run()
-        ok_run(r)
-        eq(p.read("CLAUDE.md"), T + b"\n" + orig, "stray end ignored; inserted at head")
 
 
 @case("AC-2-empty-file")
@@ -312,16 +304,6 @@ def _():
         eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "stdout")
         eq(p.read("CLAUDE.md"), data, "CRLF block left as is")
         expect(not p.rewritten("CLAUDE.md"), "file must not be rewritten")
-
-
-@case("AC-3-stray-end-before-begin-ignored")
-def _():
-    data = b"intro\n" + END_LINE + T + SUFFIX
-    with project({"AGENTS.md": data}) as p:
-        r = p.run()
-        ok_run(r)
-        eq(r.stdout, p.display("AGENTS.md") + b": unchanged\n", "stdout")
-        eq(p.read("AGENTS.md"), data, "bytes")
 
 
 # AC-4：第一組不等於模板 → 原檔[begin 行首前] + 模板 + 原檔[end 行行尾後]
@@ -383,14 +365,98 @@ def _():
         expect(not p.exists("AGENTS.md"), "AGENTS.md must not be created")
 
 
-@case("AC-5-end-before-begin-does-not-pair")
+# AC-5b：第一個 begin 之前有 end 標記行、或無 begin 但有 end → exit 1、不寫、
+# stderr `<路徑>:<最早的 end 行號>: stray devflow:end before begin`（D2：區塊前不得有任何標記行）
+
+
+def stray_run(r, p, name, lineno, data):
+    """AC-5b 的共同斷言：exit 1、stderr 格式與行號、bytes 不變、未重寫。"""
+    err_run(r, 1)
+    eq(r.stderr, p.display(name) + b":%d: stray devflow:end before begin\n" % lineno, "stderr")
+    eq(p.read(name), data, "bytes")
+    expect(not p.rewritten(name), "file must not be rewritten")
+
+
+@case("AC-5b-stray-end-before-begin")
 def _():
-    data = END_LINE + b"x\n" + BEGIN_LINE + b"y\n"  # begin 在第 3 行
+    # 分支一：落單 end 在 begin 前（begin 其後無 end）。AC-5b 先於 AC-5：報的是 end 那行，
+    # 不是 begin 那行的 `devflow:begin without end`
+    data = END_LINE + b"x\n" + BEGIN_LINE + b"y\n"  # end 在第 1 行、begin 在第 3 行
     with project({"AGENTS.md": data}) as p:
+        stray_run(p.run(), p, "AGENTS.md", 1, data)
+
+
+@case("AC-5b-only-end-no-begin")
+def _():
+    # 分支二：只有 end。原本是 AC-2 的插入路徑（落單 end 當專案內容），1.0.0.0 的 D2 起改為拒絕
+    data = PREFIX + END_LINE + SUFFIX  # end 在第 5 行
+    with project({"CLAUDE.md": data}) as p:
+        stray_run(p.run(), p, "CLAUDE.md", 5, data)
+        expect(not p.exists("AGENTS.md"), "AGENTS.md must not be created")
+
+
+@case("AC-5b-stray-end-before-complete-group")
+def _():
+    # 分支三：落單 end 在 begin 前、begin 後也有正常 end（第一組等於模板，原本會走 AC-3 unchanged）
+    data = b"intro\n" + END_LINE + T + SUFFIX  # end 在第 2 行
+    with project({"AGENTS.md": data}) as p:
+        stray_run(p.run(), p, "AGENTS.md", 2, data)
+
+
+@case("AC-5b-stray-end-before-differing-group")
+def _():
+    # 分支三的另一面：第一組不等於模板（原本會走 AC-4 replace），一樣拒絕、不動任何 byte
+    data = PREFIX + END_LINE + OLD_BLOCK + SUFFIX  # end 在第 5 行
+    with project({"CLAUDE.md": data}) as p:
+        stray_run(p.run(), p, "CLAUDE.md", 5, data)
+
+
+@case("AC-5b-earliest-stray-end-reported")
+def _():
+    data = b"a\n" + END_LINE + b"b\n" + END_LINE + T  # 兩個落單 end，取第 2 行
+    with project({"CLAUDE.md": data}) as p:
+        stray_run(p.run(), p, "CLAUDE.md", 2, data)
+
+
+@case("AC-5b-indented-stray-end-is-marker")
+def _():
+    # 判準 B 是 strip 後比對：縮排的 end 也是標記行，一樣算落單
+    data = PREFIX + b"  " + END + b"  \n" + T  # end 在第 5 行
+    with project({"CLAUDE.md": data}) as p:
+        stray_run(p.run(), p, "CLAUDE.md", 5, data)
+
+
+@case("AC-5b-end-inside-later-content-is-not-stray")
+def _():
+    # 對照：end 在第一組**之後**不算落單（AC-6），仍是 unchanged
+    data = T + b"\n" + END_LINE + b"tail\n"
+    with project({"CLAUDE.md": data}) as p:
         r = p.run()
-        err_run(r, 1)
-        eq(r.stderr, p.display("AGENTS.md") + b":3: devflow:begin without end\n", "stderr")
-        eq(p.read("AGENTS.md"), data, "bytes")
+        ok_run(r)
+        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "stdout")
+        expect(not p.rewritten("CLAUDE.md"), "file must not be rewritten")
+
+
+@case("AC-5b-dry-run-matches-real")
+def _():
+    data = b"x\n" + END_LINE + PREFIX
+    with project({"AGENTS.md": data}) as dry, project({"AGENTS.md": data}) as real:
+        rd = dry.run("--dry-run")
+        rr = real.run()
+        stray_run(rd, dry, "AGENTS.md", 2, data)
+        stray_run(rr, real, "AGENTS.md", 2, data)
+        eq(rd.stderr.replace(dry.display(""), b""), rr.stderr.replace(real.display(""), b""),
+           "stderr same as real run (modulo tmp path)")
+
+
+@case("AC-5b-atomic-other-file-not-written")
+def _():
+    # 原子性：CLAUDE.md 可插入、AGENTS.md 有落單 end → 兩檔皆不寫
+    bad = END_LINE + PREFIX
+    with project({"CLAUDE.md": PREFIX, "AGENTS.md": bad}) as p:
+        stray_run(p.run(), p, "AGENTS.md", 1, bad)
+        eq(p.read("CLAUDE.md"), PREFIX, "writable CLAUDE.md must not be written")
+        expect(not p.rewritten("CLAUDE.md"), "CLAUDE.md must not be rewritten")
 
 
 # AC-6：第一組之後的任何標記行 → 忽略（不計數、不報錯、不改動）
