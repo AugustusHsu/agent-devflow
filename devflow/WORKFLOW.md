@@ -1,5 +1,5 @@
 ---
-version: 1.3.0.0
+version: 1.3.1.0
 ---
 
 # agent-devflow WORKFLOW
@@ -22,7 +22,7 @@ version: 1.3.0.0
 - `I3` 進 main 的每個變更都經 PR/MR，以 merge commit 合入；不 squash、不 rebase merge。唯一例外見第 10 節。
 - `I4` 工單只住 forge。repo 內不放工單檔、BACKLOG、審查報告副本；orchestrator 不得持有工單的第二份拷貝。
 - `I5` 一個事實只住一處。入口檔區塊、對照表衍生物、人類站都是產物：不手抄、不設同步戳記。
-- `I6` 換 orchestrator 工具（`devflow.yml` 的 `orchestrator` 值）不改變 forge 與 coder 工具（`devflow.yml` 的 `coder` 值）的任何狀態：issue、分支、worktree、PR 的形狀在 `orchestrator` 的三種值下相同。
+- `I6` 換 orchestrator 工具（`devflow.yml` 的 `seats.coordinator.filler` 值）不改變 forge 與 coder 工具（`devflow.yml` 的 `seats.implementer.filler` 值）的任何狀態：issue、分支、worktree、PR 的形狀在 `seats.coordinator.filler` 的三種值下相同。
 
 ## 2. 規格（S）
 
@@ -53,7 +53,7 @@ version: 1.3.0.0
 ## 5. 審查（R）
 
 - `R1` 實作 PR 由 fresh-context 審查者審：拿到 G、T、`base..head`、完整來源、測試指令；不接受作者摘要當證據。同一 session 不得對自己的工作簽正式 verdict。
-- `R2` 建議審查者（職位，`seats/reviewer.md`）由與 coder 工具（`devflow.yml` 的 `coder` 值）異廠的工具填；只有一家可用時，用同廠的全新 context。
+- `R2` 建議審查者（職位，`seats/reviewer.md`）由與 coder 工具（`devflow.yml` 的 `seats.implementer.filler` 值）異廠的工具填；只有一家可用時，用同廠的全新 context。
 - `R3` verdict 必須寫明 head sha；head 變更即失效，須重審。
 - `R4` 逐條 AC 給證據，至少嘗試一個反例；反例須涵蓋「正確的值出現在錯誤的位置」這一類，不只是「值不存在」——把 AC 要求的字串設想成落在另一列、另一節、另一格，再看現有證據是否仍然成立；仍成立即證據不足。檢查 write scope 是否被超出、是否夾帶 `G5` 所列變更。用 `templates/review-prompt.md`。
 - `R5` 審查證據住 forge（PR review／comment）。merge commit 訊息帶 PR 號、reviewer、head sha，作為離開 forge 時的可攜最小集合。
