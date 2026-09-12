@@ -3,7 +3,7 @@
 給 AI coding agent 用的開發流程套件：規格建版 → 拆任務 → 開發 → 審查 → 合併 → 收尾，
 以及失敗與退版路徑。做成可安裝到任何專案的一組規則、對照表與模板。本 repo 用自己的流程開發自己。
 
-> 現況：`stage: 1`（單線）。規則本體 `devflow/WORKFLOW.md` 為 `0.0.2.0`；
+> 現況：`stage: 1`（單線）。規則本體 `devflow/WORKFLOW.md` 的版本以該檔 frontmatter 的 `version` 欄為準，本檔不複述（`I5`）；
 > 對照表尚未遷移至 `R9` 三值，且絕大多數格子仍標未實測，
 > 待 #17 的職位／分節結構落地後，再由 #15 依 `R9` 重做。下一步是 Phase 2（見下）。
 
@@ -42,7 +42,7 @@ devflow/
 CLAUDE.md AGENTS.md       只含 devflow:begin/end 區塊（由 templates/entry-block.md 產生）
 docs/spec/                本 repo 自己的規格（dogfood）
 docs/guide/               人類專用
-.github/workflows/        devflow-checks.yml：九項檢查，`d2`／`i1` 為關卡（check 列入 branch protection），其餘七項建議只寫進 log
+.github/workflows/        devflow-checks.yml：CI 檢查器（check 列入 branch protection）。每項檢查各有關卡開關（`GATES`）：關卡失敗擋合併，其餘建議只寫進 log；哪幾項是關卡見該檔檔頭
 ```
 
 ## 執行順序
@@ -74,10 +74,10 @@ docs/guide/               人類專用
   判定不看 Actions 實際 checkout 的 merge ref，也不看合併後 main 的 commit——
   三者可以是同一份 tree 但不同 commit SHA（例：`2daafca` 與 `d64d214` 的 tree 都是 `403faa5`）。
 - **required 現況**（2026-09-11 起）：`devflow-checks` 已列入 main 的 branch protection
-  `required_status_checks`。九項檢查中 `d2`（入口區塊）、`i1`（head branch 名稱）為關卡——
-  `❌` 使檢查器 exit 1、check 變紅、擋合併；其餘七項 advisory，只寫進 log，不擋。
-  分界是定義域封不封閉，見 `devflow-checks.yml` 檔頭。
-- **升 required 的判定方式**（已於 `i1` 首次走通；日後其餘七項升級仍適用，各項的 required 目標記在 #22）：
+  `required_status_checks`。檢查器裡每項檢查各有一個關卡開關（`GATES`；True＝關卡，False＝advisory）——
+  關卡項 `❌` 使檢查器 exit 1、check 變紅、擋合併；advisory 項只寫進 log，不擋。
+  哪幾項是關卡、分界為何（定義域封不封閉），以 `devflow-checks.yml` 檔頭為準，本檔不複述。
+- **升 required 的判定方式**（已於 `i1` 首次走通；日後其餘 advisory 項升級仍適用，各項的 required 目標記在 #22）：
   - **前提**：workflow 把「這次實際 checkout 的 commit SHA」（`checkout_sha`）與「該 commit 上
     `devflow-checks.yml` 的 blob id」（`checker_blob`）印進 log——PR #41 起印出。
     `pull_request` 事件跑的是 GitHub 生成的 merge commit，該 commit 在 PR 合併後就查不到
