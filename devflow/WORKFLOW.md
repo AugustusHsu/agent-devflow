@@ -1,5 +1,5 @@
 ---
-version: 1.3.1.0
+version: 1.3.2.0
 ---
 
 # agent-devflow WORKFLOW
@@ -19,7 +19,7 @@ version: 1.3.1.0
 
 - `I1` 同一時間：一張 issue ＝ 一條分支 ＝ 一個 worktree ＝ 一個實作者（職位，`seats/implementer.md`）。分支名 `<N>-<slug>`。
 - `I2` 實作者（職位，`seats/implementer.md`）不在主 checkout 工作。worktree 由協調者（職位，`seats/coordinator.md`；由工具或人填）建在 `../<repo>.worktrees/<N>`；實作者只收路徑。主 checkout 只供協調用：forge 操作、建 worktree、收尾。
-- `I3` 進 main 的每個變更都經 PR/MR，以 merge commit 合入；不 squash、不 rebase merge。唯一例外見第 10 節。
+- `I3` 進 main 的每個變更都經 PR/MR，以 merge commit 合入；不 squash、不 rebase merge。唯一例外是直推 main；第 10 節生效時依該節。
 - `I4` 工單只住 forge。repo 內不放工單檔、BACKLOG、審查報告副本；orchestrator 不得持有工單的第二份拷貝。
 - `I5` 一個事實只住一處。入口檔區塊、對照表衍生物、人類站都是產物：不手抄、不設同步戳記。
 - `I6` 換 orchestrator 工具（`devflow.yml` 的 `seats.coordinator.filler` 值）不改變 forge 與 coder 工具（`devflow.yml` 的 `seats.implementer.filler` 值）的任何狀態：issue、分支、worktree、PR 的形狀在 `seats.coordinator.filler` 的三種值下相同。
@@ -36,10 +36,11 @@ version: 1.3.1.0
 ## 3. 版本（V）
 
 - `V1` 四碼 `a.b.c.d`，進位歸零；混合變更取影響最高的一位。這是本套件的自訂規則，不是 SemVer。
-- `V2` 位數語意：`a` 不相容（既有契約或用法不再成立）；`b` 相容新增（新能力、新 AC）；`c` 修正既有能力，承諾不變；`d` 內容修訂，不改行為與契約。
+- `V2` 位數語意：`a` 不相容（既有契約或用法不再成立），只在人明確要求時進位；`a` 位不由語意判定，協調者與審查者不得自判，也不得以語意為由要求進或不進 `a` 位；`b` 相容新增（新能力、新 AC）；`c` 修正既有能力，承諾不變；`d` 內容修訂，不改行為與契約。
 - `V3` normative ＝ bump ≥ `c`，需 issue；editorial ＝ bump `d`，不需 issue，仍走 PR、仍 bump。判斷依語意，不依章節位置或字數。
 - `V4` 適用對象：規格文檔（含本檔）與 kit release tag `v<a.b.c.d>`。`stage` 不是版本號；第三方版本、工具版本、issue 編號保持原值。
 - `V5` kit tag 只打在 main 已含的 commit；已發版本不移動、不刪、不重打，修正走下一版。
+- `V6` 變更若使既有契約或用法不再成立，不論位數為何，須在 issue 與 PR 說明中標明「不相容」，並列出受影響的契約與遷移方式。審查者可提報未標明者；不得據以要求改位數（`V2`）。
 
 ## 4. 任務生命週期（L）
 
@@ -81,7 +82,7 @@ version: 1.3.1.0
 
 ## 8. 收尾（C）
 
-- `C1` 順序七步，每步判準成立才進下一步：(1) `git merge-base --is-ancestor <head> main` exit 0 → (2) 停止 coder 程序，已停與否依 `orchestrators/` 對照表判定 → (3) worktree 無需保留的未提交／未追蹤內容 → (4) `git worktree remove` → (5) `git branch -d`（永不 `-D`）→ (6) `git ls-remote --heads origin <branch>` 為空則跳過；非空則取其 OID，`git merge-base --is-ancestor <OID> main` exit 0 後 `git push origin --delete <branch>` → (7) `git ls-remote --heads origin <branch>` 為空＝成功。
+- `C1` 順序七步，每步判準成立才進下一步：(1) `git merge-base --is-ancestor <head> main` exit 0 → (2) 停止 coder 程序，已停與否依 `orchestrators/` 對照表判定 → (3) worktree 無需保留的未提交／未追蹤內容 → (4) `git worktree remove` → (5) 以步驟 (1) 所驗的同一 `<head>` 值（不重新讀取分支現值），`git update-ref -d refs/heads/<branch> <head>`：compare-and-delete，ref 已移動即拒絕；本步不驗合併狀態，與步驟 (1) 互補而非取代；不用 `git branch -d`／`-D` → (6) `git ls-remote --heads origin <branch>` 為空則跳過；非空則取其 OID，`git merge-base --is-ancestor <OID> main` exit 0 後 `git push origin --delete <branch>` → (7) `git ls-remote --heads origin <branch>` 為空＝成功。
 - `C2` 關 issue；forge 自動關閉也要讀回驗證。
 - `C3` 只清本次任務擁有的資源；其他活躍任務的 worktree、分支不動。blocked 或取消且成果未處置者保留並回報。
 - `C4` 「`git worktree list` 只剩主目錄」是成功收尾的判準，不是強清命令。
@@ -104,8 +105,8 @@ version: 1.3.1.0
 ## 11. Stage（ST）
 
 - `ST0` bootstrap：尚無流程，直推 main。
-- `ST1` 單線：第 4～8、10 節生效；同時只有一個任務。
-- `ST2` 規格建版：加上第 2、3、9 節；任務從規格推導。
+- `ST1` 單線：第 3～8、10 節生效；同時只有一個任務。
+- `ST2` 規格建版：加上第 2、9 節；任務從規格推導。
 - `ST3` 平行：加上第 12 節。
 - `ST4` stage 只標示已驗證的能力，不是權限開關；降 stage 不放寬 main 保護、憑證或發布授權。
 - `ST5` 保護節自 stage 0 起生效，不依 stage：第 5 節（R）、第 8 節（C）、第 9 節 `G1`～`G3`、`G5`。`G4` 例外，屬能力門檻，依 `ST2`。
