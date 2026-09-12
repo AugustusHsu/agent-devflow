@@ -1,6 +1,7 @@
 # agent-devflow 專案設定。本 repo 自己也是第一個消費者。
 # 只有 forge 與 seats（各職位的綁定）是自變數；其餘（PR/MR、CLI、入口檔、skills 目錄、派工方式）
-# 都是衍生值，由 devflow/ 下的對照表產生，不在這裡寫。規則本體：devflow/WORKFLOW.md。
+# 都是衍生值，由 devflow/ 下的對照表產生，不在這裡寫（唯一例外：implementer_filler 投影，見下）。
+# 規則本體：devflow/WORKFLOW.md。
 
 forge: github          # github | gitlab
 
@@ -19,6 +20,11 @@ seats:
     filler: hermes           # hermes | paperclip | human
   approver:                  # 裁決位；人（seats/approver.md），無 model／reasoning
     filler: human
+
+# seats.implementer.filler 的衍生投影（不是第二個自變數）：install.py 不解析 YAML，只讀這個頂層鍵
+# 決定新專案建 CLAUDE.md 還是 AGENTS.md（docs/spec/install/spec.md AC-7）。與上面的值必須逐字相同，
+# 由 CI 的 i5 檢查機械保證（AC-13）；改 filler 時一併改這裡。
+implementer_filler: claude-code
 
 # 本 repo 套用到哪一層流程（不是版本號；定義見 WORKFLOW.md 第 11 節）：
 #   0 bootstrap（無流程，直推 main）

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tests/install/harness.py — devflow/install.py 的驗收測試（spec AC-1～AC-13）。
+"""tests/install/harness.py — devflow/install.py 的驗收測試（spec AC-1～AC-12；AC-13 由 CI 執行，不在此）。
 
 執行：
     python3 tests/install/harness.py            # 全部案例
@@ -50,13 +50,20 @@ OLD_BLOCK = BEGIN_LINE + b"## old devflow block\n\nstale content\n" + END_LINE
 FIXED_MTIME = 1_000_000_000  # 2001-09-09，用來偵測「有沒有重寫檔案」
 
 
-def seats(filler):
-    """devflow.yml 片段：seats.implementer.filler（#68 起的結構；AC-7 只讀這一條路徑）。"""
-    return b"seats:\n  implementer:\n    filler: " + filler + b"\n"
+# devflow.yml 片段（#68 起的結構）。AC-7 只讀頂層投影鍵 implementer_filler；seats: 區塊是它的來源，
+# 安裝器不讀（兩處一致由 CI 的 i5 比對，spec AC-13，不在本 harness 範圍）。
+def projection(filler):
+    return b"implementer_filler: " + filler + b"\n"
 
 
-YML_CLAUDE = seats(b"claude-code")
-YML_CODEX = seats(b"codex")
+YML_CLAUDE = projection(b"claude-code")
+YML_CODEX = projection(b"codex")
+NESTED_CLAUDE = b"seats:\n  implementer:\n    filler: claude-code\n"   # 只有巢狀寫法、無投影
+# AC-7 advisory：有 seats: 頂層行卻讀不到合規投影時，stderr 恰一行、exit 不變
+ADVISORY = (b"devflow.yml: seats: present but implementer_filler unreadable (missing, malformed, "
+            b"duplicated, or file is not a plain top-level mapping); defaulting to AGENTS.md\n")
+# 本 repo 實際設定（含 seats:、docs:、投影鍵）：AC-12 要求它與其 CRLF 版都得 CLAUDE.md
+REPO_YML = (REPO / "devflow.yml").read_bytes()
 
 
 def block_of_lines(n):
@@ -528,66 +535,91 @@ def _():
         expect(not p.exists("CLAUDE.md"), "devflow.yml only consulted when both are absent")
 
 
-def agents_only(yml, why):
-    """兩入口檔皆無、devflow.yml 為 yml → 只建 AGENTS.md（讀取器回 None 或非 claude-code）。"""
+def agents_only(yml, why, stderr=b""):
+    """兩入口檔皆無、devflow.yml 為 yml → dry-run 與實跑皆 exit 0、stderr 恰為 stderr（預設空，
+    advisory 案傳 ADVISORY）；實跑只建 AGENTS.md（讀取器回 None 或非 claude-code）。"""
     with project({"devflow.yml": yml}) as p:
+        rd = p.run("--dry-run")
+        eq(rd.returncode, 0, "dry-run exit code: " + why)
+        eq(rd.stderr, stderr, "dry-run stderr: " + why)
         r = p.run()
-        ok_run(r)  # 永不報錯
+        eq(r.returncode, 0, "exit code: " + why)   # 永不報錯
+        eq(r.stderr, stderr, "stderr: " + why)
         eq(p.read("AGENTS.md"), T, why)
         expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created: " + why)
 
 
 def claude_only(yml, why):
-    """兩入口檔皆無、devflow.yml 為 yml → 只建 CLAUDE.md（讀取器回 claude-code）。"""
+    """兩入口檔皆無、devflow.yml 為 yml → dry-run 與實跑皆 exit 0、stderr 空；實跑只建 CLAUDE.md。"""
     with project({"devflow.yml": yml}) as p:
+        rd = p.run("--dry-run")
+        ok_run(rd)
         r = p.run()
         ok_run(r)
         eq(p.read("CLAUDE.md"), T, why)
         expect(not p.exists("AGENTS.md"), "AGENTS.md must not be created: " + why)
 
 
-@case("AC-7-none-implementer-claude-code")
+# ── AC-7 皆無：投影鍵合規 → CLAUDE.md ────────────────────────────────
+
+@case("AC-7-none-projection-claude-code")
 def _():
-    # 本 repo devflow.yml 的形狀：其他頂層鍵、行尾註解、註解行（含縮排的）、區塊內空行、
-    # 選填欄位在 filler 之前、同層其他職位都在
-    yml = (b"forge: github          # github | gitlab\n"
-           b"\n"
-           b"# seat bindings\n"
-           b"seats:\n"
-           b"  # indented comment inside seats\n"
-           b"  implementer:               # \xe5\xaf\xa6\xe4\xbd\x9c\xe4\xbd\x8d (UTF-8 comment)\n"
-           b"\n"
-           b"    model: default-model\n"
-           b"    filler: claude-code      # claude-code | codex\n"
-           b"    reasoning: high\n"
-           b"  reviewer:\n"
-           b"    filler: codex\n"
-           b"    model: gpt-5.6-sol\n"
-           b"    reasoning: high\n"
-           b"stage: 1\n")
-    claude_only(yml, "CLAUDE.md created")
+    claude_only(YML_CLAUDE, "minimal projection")
+    claude_only(b"forge: github\n" + YML_CLAUDE + b"stage: 1\n", "projection among other top-level keys")
+    claude_only(b"\n# c\n   \n\t\n" + YML_CLAUDE, "leading blank/comment/whitespace-only lines are ignored")
 
 
-@case("AC-7-none-unrecognized-lines-off-path-tolerated")
+@case("AC-7-none-projection-trailing-comment")
 def _():
-    # fail closed 只在路徑內：文件起始符、其他職位區塊裡的引號鍵與非 ASCII 鍵都不影響
-    yml = (b"---\n"
-           b"seats:\n"
-           b"  reviewer:\n"
-           b"    \"flags\": x\n"
-           b"    \xe5\x82\x99\xe8\xa8\xbb: y\n"
-           b"  implementer:\n"
-           b"    filler: claude-code\n")
-    claude_only(yml, "unrecognized lines outside the path do not fail closed")
+    claude_only(b"implementer_filler: claude-code   # claude-code | codex\n", "trailing # comment")
+    claude_only(b"implementer_filler:\tclaude-code\t# c\n", "tab as separator")
+    claude_only(b"implementer_filler: claude-code   \n", "trailing spaces")
 
 
-@case("AC-7-none-implementer-codex")
+@case("AC-7-none-projection-crlf")
 def _():
-    with project({"devflow.yml": YML_CODEX}) as p:
-        r = p.run()
-        ok_run(r)
-        eq(p.read("AGENTS.md"), T, "AGENTS.md created")
-        expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
+    claude_only(b"forge: github\r\nimplementer_filler: claude-code\r\n", "all CRLF")
+
+
+@case("AC-7-none-projection-crlf-valueless-top-key")
+def _():
+    # 抓把 \r 當行內容的實作：x:\r 就不是頂層鍵行、seats:\r／docs:\r 也不是
+    claude_only(b"x:\r\n  y: 1\r\n" + YML_CLAUDE.replace(b"\n", b"\r\n"), "x:<CRLF> + candidate")
+    claude_only(REPO_YML.replace(b"\n", b"\r\n"), "this repo's devflow.yml converted to CRLF")
+
+
+@case("AC-7-none-projection-mixed-line-endings")
+def _():
+    claude_only(b"forge: github\r\nseats:\n  implementer:\r\n    filler: claude-code\n" + YML_CLAUDE,
+                "LF and CRLF mixed")
+
+
+@case("AC-7-none-projection-no-final-newline")
+def _():
+    claude_only(b"forge: github\nimplementer_filler: claude-code", "last line without newline")
+
+
+@case("AC-7-none-projection-doc-start")
+def _():
+    claude_only(b"---\n" + YML_CLAUDE, "first line ---")
+    claude_only(b"--- # c\n" + YML_CLAUDE, "first line --- # comment")
+    claude_only(b"---  \n" + YML_CLAUDE, "--- with trailing spaces")
+    claude_only(b"# c\n\n---\n" + YML_CLAUDE, "--- as first non-ignored line after comments")
+
+
+@case("AC-7-none-projection-with-seats-block")
+def _():
+    claude_only(REPO_YML, "this repo's devflow.yml as is (seats: block + projection)")
+    claude_only(NESTED_CLAUDE + YML_CLAUDE, "nested block followed by projection")
+    claude_only(YML_CLAUDE + b"seats:\n  implementer:\n    filler: codex\n",
+                "projection wins even when the nested value differs (consistency is AC-13's job)")
+
+
+@case("AC-7-none-projection-codex")
+def _():
+    agents_only(YML_CODEX, "compliant value that is not claude-code")
+    agents_only(b"seats:\n  implementer:\n    filler: codex\n" + YML_CODEX,
+                "compliant codex with seats: present: no advisory")
 
 
 @case("AC-7-none-no-devflow-yml")
@@ -599,23 +631,274 @@ def _():
         expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
 
 
-@case("AC-7-none-non-yaml-with-seats-block")
+@case("AC-7-none-envelope-ignores-values-and-indented-lines")
 def _():
-    yml = b"{{{ this is: not: [yaml\n" + YML_CLAUDE + b"]]] ::: junk\n"
-    with project({"devflow.yml": yml}) as p:
-        r = p.run()
-        ok_run(r)
-        eq(p.read("CLAUDE.md"), T, "regex line match, no YAML parse")
-        expect(not p.exists("AGENTS.md"), "AGENTS.md must not be created")
+    # 信封成立但值層有非法 YAML：不看 `:` 之後、不看縮排行
+    claude_only(b"x: [\n" + YML_CLAUDE, "unclosed flow sequence in a value")
+    claude_only(b"y: \"\n" + YML_CLAUDE, "unclosed double quote in a value")
+    claude_only(b"x:\n  ]]] }}} \"\"\" - ? % ---\n" + YML_CLAUDE, "arbitrary noise in indented lines")
 
+
+# 切行一致性：這五個碼位在任何 YAML 版本都不是換行，以 \n 切行時 `forge: github<c>--- [` 是同一個
+# 頂層鍵行、其後內容不看 → CLAUDE.md；誤用 str.splitlines() 的實作會把 `--- [` 切成頂層行 → AGENTS.md
+
+@case("AC-7-none-split-consistency-U+000B")
+def _():
+    claude_only(b"forge: github\x0b--- [\n" + YML_CLAUDE + b" ]\n", "VT is not a line break")
+
+
+@case("AC-7-none-split-consistency-U+000C")
+def _():
+    claude_only(b"forge: github\x0c--- [\n" + YML_CLAUDE + b" ]\n", "FF is not a line break")
+
+
+@case("AC-7-none-split-consistency-U+001C")
+def _():
+    claude_only(b"forge: github\x1c--- [\n" + YML_CLAUDE + b" ]\n", "FS is not a line break")
+
+
+@case("AC-7-none-split-consistency-U+001D")
+def _():
+    claude_only(b"forge: github\x1d--- [\n" + YML_CLAUDE + b" ]\n", "GS is not a line break")
+
+
+@case("AC-7-none-split-consistency-U+001E")
+def _():
+    claude_only(b"forge: github\x1e--- [\n" + YML_CLAUDE + b" ]\n", "RS is not a line break")
+
+
+# ── AC-7 皆無：候選行不合規 → AGENTS.md ──────────────────────────────
+
+@case("AC-7-none-candidate-no-space-after-colon")
+def _():
+    agents_only(b"implementer_filler:claude-code\n", "no whitespace after the colon")
+
+
+@case("AC-7-none-candidate-valueless")
+def _():
+    agents_only(b"implementer_filler:\n", "no value")
+    agents_only(b"implementer_filler:  # c\n", "comment only")
+
+
+@case("AC-7-none-candidate-extra-token")
+def _():
+    agents_only(b"implementer_filler: claude-code extra\n", "second token")
+    agents_only(b"implementer_filler: claude-code#x\n", "# glued to the value is not a comment")
+
+
+@case("AC-7-none-candidate-duplicate")
+def _():
+    agents_only(YML_CLAUDE + b"forge: github\n" + YML_CLAUDE, "two candidate lines, same value")
+    agents_only(YML_CLAUDE + YML_CODEX, "two candidate lines, different values")
+
+
+@case("AC-7-none-candidate-quoted-value")
+def _():
+    agents_only(b"implementer_filler: \"claude-code\"\n", "quotes are part of the token, not stripped")
+
+
+@case("AC-7-none-candidate-case-differs")
+def _():
+    agents_only(b"implementer_filler: Claude-Code\n", "byte comparison, no case folding")
+
+
+@case("AC-7-none-candidate-prefix-only-key")
+def _():
+    agents_only(b"implementer_filler_x: claude-code\n", "implementer_filler_x: is not a candidate")
+
+
+@case("AC-7-none-candidate-indented")
+def _():
+    agents_only(b"forge: github\n  " + YML_CLAUDE, "space-indented line is not a top-level line")
+    agents_only(b"forge: github\n\t" + YML_CLAUDE, "tab-indented line is not a top-level line")
+
+
+@case("AC-7-none-empty-devflow-yml")
+def _():
+    agents_only(b"", "empty file")
+    agents_only(b"\n  \n\t\n", "whitespace-only file")
+
+
+# ── AC-7 皆無：行模型 → AGENTS.md ────────────────────────────────────
+
+@case("AC-7-none-bare-cr-second-document")
+def _():
+    # PR #74 第六輪反例：\n 眼中一行，YAML 眼中是 entry ＋ 新 document 的 flow 開頭
+    agents_only(b"forge: github\r--- [\n" + YML_CLAUDE + b" ]\n", "bare CR hides a second document")
+
+
+@case("AC-7-none-bare-cr-in-comment")
+def _():
+    agents_only(b"# c\r--- [\n" + YML_CLAUDE + b" ]\n", "bare CR inside a comment line")
+
+
+@case("AC-7-none-bare-cr-in-indented-line")
+def _():
+    agents_only(b"x:\n  model: x\r- [\n" + YML_CLAUDE + b" ]\n", "bare CR inside an indented line")
+
+
+@case("AC-7-none-cr-cr-lf")
+def _():
+    agents_only(b"forge: github\r\r\n" + YML_CLAUDE, "first \\r of \\r\\r\\n is bare")
+
+
+@case("AC-7-none-lone-cr-at-eof")
+def _():
+    agents_only(YML_CLAUDE + b"forge: github\r", "\\r at EOF is bare")
+
+
+@case("AC-7-none-nel")
+def _():
+    agents_only("forge: github\x85--- [\n".encode("utf-8") + YML_CLAUDE + b" ]\n", "U+0085 NEL anywhere")
+
+
+@case("AC-7-none-ls")
+def _():
+    agents_only("forge: github\u2028--- [\n".encode("utf-8") + YML_CLAUDE + b" ]\n", "U+2028 LS anywhere")
+
+
+@case("AC-7-none-ps")
+def _():
+    agents_only("forge: github\u2029--- [\n".encode("utf-8") + YML_CLAUDE + b" ]\n", "U+2029 PS anywhere")
+
+
+# ── AC-7 皆無：信封第 1 條（根定位）→ AGENTS.md ──────────────────────
+
+@case("AC-7-none-root-flow-sequence")
+def _():
+    # YAML 1.2 Example 7.19：第 0 欄的 `[`、`key: value`、`]`；根是 sequence，不存在頂層 mapping 投影
+    agents_only(b"[\n" + YML_CLAUDE + b"]\n", "root flow sequence")
+
+
+@case("AC-7-none-indented-root-flow-shell")
+def _():
+    # PR #74 第五輪反例：外殼縮排一格、續行在第 0 欄。`seats: {},` 是 seats: 起始的頂層行 → advisory
+    agents_only(b" [\nseats: {},\n" + YML_CLAUDE + b" ]\n", "indented root flow shell", ADVISORY)
+    agents_only(b" [\nforge: github,\n" + YML_CLAUDE + b" ]\n", "indented root flow shell, no seats:")
+
+
+@case("AC-7-none-indented-tag-flow")
+def _():
+    agents_only(b" !!seq [\n" + YML_CLAUDE + b" ]\n", "indented tag + flow sequence")
+
+
+@case("AC-7-none-indented-quote-shell")
+def _():
+    agents_only(b" \"\n" + YML_CLAUDE + b" \"\n", "indented double-quote shell")
+
+
+@case("AC-7-none-root-flow-mapping")
+def _():
+    agents_only(b"{\n" + YML_CLAUDE + b"}\n", "root flow mapping")
+
+
+@case("AC-7-none-root-quoted-scalar")
+def _():
+    agents_only(b"\"\n" + YML_CLAUDE + b"\"\n", "root multi-line double-quoted scalar")
+    agents_only(b"'\n" + YML_CLAUDE + b"'\n", "root multi-line single-quoted scalar")
+
+
+@case("AC-7-none-root-block-scalar")
+def _():
+    agents_only(b"|\n" + YML_CLAUDE, "root literal block scalar")
+    agents_only(b">\n" + YML_CLAUDE, "root folded block scalar")
+
+
+@case("AC-7-none-doc-start-with-content")
+def _():
+    agents_only(b"--- [\n" + YML_CLAUDE + b"]\n", "--- followed by a flow sequence")
+    agents_only(b"--- |\n" + YML_CLAUDE, "--- followed by a block scalar indicator")
+
+
+@case("AC-7-none-doc-start-then-indented-shell")
+def _():
+    agents_only(b"---\n [\n" + YML_CLAUDE + b" ]\n", "--- exception does not admit an indented shell")
+
+
+@case("AC-7-none-doc-start-twice")
+def _():
+    agents_only(b"---\n---\n" + YML_CLAUDE, "second --- is not a top-level key line")
+
+
+@case("AC-7-none-first-line-property")
+def _():
+    agents_only(b"&a\n" + YML_CLAUDE, "anchor property on the first line")
+    agents_only(b"!!map\n" + YML_CLAUDE, "tag property on the first line")
+
+
+@case("AC-7-none-indented-root-mapping")
+def _():
+    agents_only(b"  forge: github\n" + YML_CLAUDE, "first non-ignored line is indented")
+
+
+@case("AC-7-none-bom-then-key")
+def _():
+    # 抓誤用 utf-8-sig 的實作：BOM 不剝，首行不是頂層鍵行
+    agents_only(b"\xef\xbb\xbf" + YML_CLAUDE, "BOM directly before the key")
+
+
+@case("AC-7-none-bom-then-comment")
+def _():
+    agents_only(b"\xef\xbb\xbf# c\n" + YML_CLAUDE, "BOM + comment is neither ignored nor a key line")
+
+
+@case("AC-7-none-yaml-directive")
+def _():
+    agents_only(b"%YAML 1.2\n---\n" + YML_CLAUDE, "%YAML directive line")
+
+
+# ── AC-7 皆無：信封第 2 條（全檔）→ AGENTS.md ────────────────────────
+
+@case("AC-7-none-second-doc-start")
+def _():
+    agents_only(b"forge: github\n---\n" + YML_CLAUDE, "candidate in the second document")
+
+
+@case("AC-7-none-doc-end-marker")
+def _():
+    agents_only(YML_CLAUDE + b"...\n", "... document end marker")
+
+
+@case("AC-7-none-quoted-key-elsewhere")
+def _():
+    agents_only(b"\"forge\": github\n" + YML_CLAUDE, "quoted key on another top-level line")
+
+
+@case("AC-7-none-complex-key")
+def _():
+    agents_only(b"? key\n: v\n" + YML_CLAUDE, "? complex key")
+
+
+@case("AC-7-none-col0-sequence-item")
+def _():
+    agents_only(b"- item\n" + YML_CLAUDE, "column-0 sequence item")
+
+
+@case("AC-7-none-compact-sequence-value")
+def _():
+    agents_only(b"a:\n- x\n" + YML_CLAUDE, "compact sequence value at column 0 (conservatively rejected)")
+
+
+@case("AC-7-none-flow-with-col0-closer")
+def _():
+    agents_only(b"x: [\n" + YML_CLAUDE + b"]\n", "column-0 ] closer")
+    agents_only(b"x: {\n" + YML_CLAUDE + b"}\n", "column-0 } closer")
+
+
+@case("AC-7-none-other-non-key-top-lines")
+def _():
+    agents_only(b"\tforge: github\n" + YML_CLAUDE, "tab-first top-level line")
+    agents_only("包裝: x\n".encode("utf-8") + YML_CLAUDE, "non-ASCII key")
+    agents_only(b"forge : github\n" + YML_CLAUDE, "space before the colon")
+    agents_only(b"<<: *x\n" + YML_CLAUDE, "merge key")
+
+
+# ── AC-7 皆無：其他 ──────────────────────────────────────────────────
 
 @case("AC-7-none-devflow-yml-not-utf8")
 def _():
-    with project({"devflow.yml": b"\xff\xfe" + YML_CLAUDE}) as p:
-        r = p.run()
-        ok_run(r)  # 永不報錯
-        eq(p.read("AGENTS.md"), T, "undecodable devflow.yml → AGENTS.md")
-        expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
+    agents_only(b"\xff\xfe" + YML_CLAUDE, "undecodable devflow.yml")
+    agents_only(b"\xff\xfeseats:\n", "undecodable: no advisory either (lines cannot be inspected)")
 
 
 @case("AC-7-none-devflow-yml-is-directory")
@@ -627,148 +910,46 @@ def _():
         eq(p.read("AGENTS.md"), T, "unreadable devflow.yml → AGENTS.md")
 
 
-@case("AC-7-none-indented-seats-no-match")
+@case("AC-7-none-nested-only-no-projection")
 def _():
-    with project({"devflow.yml": b"tool:\n  seats:\n    implementer:\n      filler: claude-code\n"}) as p:
-        r = p.run()
-        ok_run(r)
-        eq(p.read("AGENTS.md"), T, "seats: must be a top-level key at column 0")
-        expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
-
-
-@case("AC-7-none-first-implementer-wins")
-def _():
-    with project({"devflow.yml": YML_CODEX + b"  implementer:\n    filler: claude-code\n"}) as p:
-        r = p.run()
-        ok_run(r)
-        eq(p.read("AGENTS.md"), T, "first match is codex")
-        expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
-
-
-@case("AC-7-none-filler-under-other-seat-no-match")
-def _():
-    # 正確的值出現在錯誤的位置：reviewer 的 filler 是 claude-code、implementer 是 codex
-    yml = b"seats:\n  reviewer:\n    filler: claude-code\n  implementer:\n    filler: codex\n"
-    with project({"devflow.yml": yml}) as p:
-        r = p.run()
-        ok_run(r)
-        eq(p.read("AGENTS.md"), T, "only seats.implementer.filler is read")
-        expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
-
-
-@case("AC-7-none-implementer-outside-seats-no-match")
-def _():
-    # implementer 巢在別的頂層鍵下、或 seats 區塊已被下一個頂層鍵關閉：都不算
-    for yml in (b"other:\n  implementer:\n    filler: claude-code\n",
-                b"seats:\n  reviewer:\n    filler: codex\nimplementer:\n  filler: claude-code\n"):
-        with project({"devflow.yml": yml}) as p:
-            r = p.run()
-            ok_run(r)
-            eq(p.read("AGENTS.md"), T, "implementer must be nested under seats")
-            expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
-
-
-@case("AC-7-none-tab-indent-no-match")
-def _():
-    # tab 不是 YAML 縮排；含 tab 開頭的行不匹配，仍永不報錯
-    with project({"devflow.yml": b"seats:\n\timplementer:\n\t\tfiller: claude-code\n"}) as p:
-        r = p.run()
-        ok_run(r)
-        eq(p.read("AGENTS.md"), T, "tab-indented lines do not match")
-        expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
+    # 安裝器不讀 seats: 巢狀路徑；含 PR #74 第三輪的三個 flow 包裹反例。seats: 存在 → advisory
+    agents_only(NESTED_CLAUDE, "nested block form only", ADVISORY)
+    agents_only(b"seats:\n  implementer:\n    reviewer: [\n    filler: claude-code\n]\n",
+                "round-3 attack: flow sequence wrapper", ADVISORY)
+    agents_only(b"seats:\n  implementer:\n    reviewer: {\n    filler: claude-code\n}\n",
+                "round-3 attack: flow mapping wrapper", ADVISORY)
+    agents_only(b"seats:\n  implementer:\n    reviewer:\n      x: [\n    filler: claude-code\n]\n",
+                "round-3 attack: opener hidden in another key", ADVISORY)
 
 
 @case("AC-7-none-legacy-coder-key-ignored")
 def _():
-    # #68 廢除的舊鍵 coder:（不留別名）：即使值為 claude-code 也不得再被讀成 implementer
-    with project({"devflow.yml": b"coder: claude-code\n"}) as p:
-        r = p.run()
-        ok_run(r)
-        eq(p.read("AGENTS.md"), T, "legacy coder: key is not read")
-        expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
+    # #68 廢除的舊鍵 coder:（不留別名）：即使值為 claude-code 也不得再被讀
+    agents_only(b"coder: claude-code\n", "legacy coder: key is not read")
 
 
-# AC-7 fail closed（PR #71 第一輪）：路徑內出現 scanner 看不見的中間父節點或不明結構 → None。
-# 每案的 filler: claude-code 都不在 seats.implementer 的直接子層；讀到它就是誤命中。
+# ── AC-7 advisory ────────────────────────────────────────────────────
 
-IMPL = b"seats:\n  implementer:\n"
-
-
-@case("AC-7-none-empty-devflow-yml")
+@case("AC-7-none-advisory-seats-without-candidate")
 def _():
-    agents_only(b"", "empty devflow.yml")
-    agents_only(b"\n   \n", "whitespace-only devflow.yml")
+    agents_only(NESTED_CLAUDE + b"forge: github\n", "seats: present, candidate missing", ADVISORY)
+    agents_only(b"seats:\r\n  implementer:\r\n    filler: claude-code\r\n", "CRLF seats: line", ADVISORY)
+    agents_only(NESTED_CLAUDE + YML_CLAUDE + YML_CLAUDE, "seats: present, candidate duplicated", ADVISORY)
+    agents_only(NESTED_CLAUDE + b"implementer_filler:claude-code\n", "seats: present, candidate malformed", ADVISORY)
 
 
-@case("AC-7-none-implementer-under-other-seat")
+@case("AC-7-none-advisory-seats-envelope-broken")
 def _():
-    agents_only(b"seats:\n  reviewer:\n    implementer:\n      filler: claude-code\n",
-                "seats.reviewer.implementer.filler is not the path")
+    agents_only(NESTED_CLAUDE + b"]\n" + YML_CLAUDE, "seats: present, envelope broken by ]", ADVISORY)
+    agents_only(b"[\nseats: {},\n" + YML_CLAUDE + b"]\n", "seats: line inside a root flow shell", ADVISORY)
+    agents_only(b"seats:\r\r\n" + YML_CLAUDE, "seats: present, bare CR breaks the line model", ADVISORY)
 
 
-@case("AC-7-none-deep-bare-key-parent")
+@case("AC-7-none-no-advisory-without-seats")
 def _():
-    agents_only(IMPL + b"    wrapper:\n      filler: claude-code\n",
-                "seats.implementer.wrapper.filler is not the path")
-
-
-@case("AC-7-none-quoted-key-parent")
-def _():
-    agents_only(IMPL + b"    \"wrapper\":\n      filler: claude-code\n",
-                "quoted key is an invisible parent: fail closed")
-    agents_only(b"seats:\n  \"x\":\n    implementer:\n      filler: claude-code\n",
-                "quoted key at seats level is an invisible parent: fail closed")
-
-
-@case("AC-7-none-unicode-key-parent")
-def _():
-    agents_only(IMPL + b"    \xe5\x8c\x85\xe8\xa3\x9d:\n      filler: claude-code\n",
-                "non-ASCII key is an invisible parent: fail closed")
-
-
-@case("AC-7-none-sequence-item-parent")
-def _():
-    agents_only(IMPL + b"    - wrapper:\n        filler: claude-code\n",
-                "sequence item is an invisible parent: fail closed")
-    agents_only(b"seats:\n  - implementer:\n      filler: claude-code\n",
-                "sequence item at seats level: fail closed")
-    agents_only(b"seats:\n  reviewer:\n    filler: codex\n  - weird\n  implementer:\n    filler: claude-code\n",
-                "sequence item between seats: fail closed")
-
-
-@case("AC-7-none-flow-mapping-parent")
-def _():
-    agents_only(IMPL + b"    wrapper: {\n      filler: claude-code\n    }\n",
-                "multi-line flow mapping: fail closed")
-    agents_only(b"seats: {implementer: {filler: claude-code}}\n",
-                "one-line flow mapping: path keys with values are not blocks")
-
-
-@case("AC-7-none-path-key-with-value")
-def _():
-    agents_only(b"seats: foo\n  implementer:\n    filler: claude-code\n",
-                "seats: with a scalar is not a block")
-    agents_only(b"seats:\n  implementer: &impl\n    filler: claude-code\n",
-                "implementer: with an anchor is not a block")
-
-
-@case("AC-7-none-merge-key-in-implementer")
-def _():
-    agents_only(IMPL + b"    <<: *base\n    filler: claude-code\n",
-                "<<: merge key inside the path: fail closed")
-
-
-@case("AC-7-none-block-scalar-content-looks-like-filler")
-def _():
-    agents_only(IMPL + b"    model: |\n      filler: claude-code\n",
-                "block scalar content is nested under model, not a key")
-
-
-@case("AC-7-none-filler-value-not-a-single-token")
-def _():
-    agents_only(IMPL + b"    filler: claude-code extra\n", "trailing token: not a key line")
-    agents_only(IMPL + b"    filler:claude-code\n", "no space after colon: not a key line")
-    agents_only(IMPL + b"    filler: claude-code#x\n", "# without leading space: not a comment")
+    agents_only(b"forge: github\n", "unreadable but no seats: line")
+    agents_only(b"  seats:\n" + YML_CODEX, "indented seats: is not a top-level line")
+    agents_only(b"# seats:\n[\n" + YML_CLAUDE + b"]\n", "seats: only inside a comment")
 
 
 @case("AC-7-none-devflow-yml-not-created")
@@ -1129,9 +1310,9 @@ def _():
         eq(p.read("AGENTS.md"), PREFIX + OLD_BLOCK + SUFFIX, "bytes")
 
 
-# AC-13：本 repo 自身 --dry-run → 兩檔 unchanged、exit 0
+# 本 repo 自身 --dry-run → 兩檔 unchanged、exit 0（不是 spec 的 AC-13；那是 CI 的 i5）
 
-@case("AC-13-self-repo-dry-run-unchanged")
+@case("self-repo-dry-run-unchanged")
 def _():
     r = subprocess.run([sys.executable, str(INSTALL), str(REPO), "--dry-run"], capture_output=True)
     ok_run(r)

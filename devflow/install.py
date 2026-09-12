@@ -52,12 +52,19 @@ END = "<!-- devflow:end -->"
 ENTRY_FILES = ("CLAUDE.md", "AGENTS.md")
 D2_MAX_LINES = 30
 TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "entry-block.md"
-# AC-7：不做 YAML 解析。「鍵行」＝空格縮排 ＋ ASCII 裸鍵 ＋ `:` ＋（空白 ＋ 單一 token）？＋
-# （空白 ＋ # 註解）？，到行尾；token 到空白或 # 為止，不去引號（同舊 ^coder: 的取法）。
-# 只靠縮排判巢狀，取 seats → implementer → filler 路徑上每層的第一個匹配。#68 起讀此路徑；
-# spec AC-7 仍寫 ^coder:，待修訂（見 #68 留言）。
-KEY_RE = re.compile(r"^( *)([A-Za-z_][A-Za-z0-9_.-]*):(?:\s+([^\s#]+))?(?:\s+#.*)?\s*$")
-SEATS_PATH = ("seats", "implementer", "filler")
+# AC-7：不做 YAML 解析。只讀頂層投影鍵 implementer_filler（seats.implementer.filler 的衍生投影，
+# 一致性由 CI 的 i5 保證，AC-13）。以下正規式對應 spec 的名詞；行已去掉 CRLF 的 \r。
+# 頂層鍵行：裸鍵 ＋ `:` ＋（行尾、或一個以上空格／tab 再接任意內容）
+TOP_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*:(?:$|[ \t])")
+# 純 `---`：其後只能是空格／tab，或空格／tab 再接 # 註解
+DOC_START_RE = re.compile(r"^---(?:[ \t]*|[ \t]+#.*)$")
+# 候選行：`implementer_filler:` ＋ 一個以上空格／tab ＋ 值 ＋〔一個以上空格／tab ＋ # 至行尾〕？＋ 尾端空格／tab？
+CANDIDATE_PREFIX = "implementer_filler:"
+CANDIDATE_RE = re.compile(r"^implementer_filler:[ \t]+([^ \t\r#]+)(?:[ \t]+#.*)?[ \t]*$")
+# 行模型排除的換行字元：NEL／LS／PS（YAML 1.1 視為換行）；bare CR 另在切行時判
+FORBIDDEN_BREAKS = ("\x85", "\u2028", "\u2029")
+ADVISORY = ("devflow.yml: seats: present but implementer_filler unreadable (missing, malformed, "
+            "duplicated, or file is not a plain top-level mapping); defaulting to AGENTS.md")
 
 
 class InstallError(Exception):
@@ -149,53 +156,100 @@ def load_template():
 # ── 目標檔集合（AC-7）────────────────────────────────────────────────
 
 
-def read_implementer(root):
-    """devflow.yml 的 seats.implementer.filler 值；任何讀不到／不匹配都回 None，永不報錯。
-
-    `seats:` 須在第 0 欄（同舊 ^coder: 的錨定）且無值；`implementer:` 縮排大於 `seats:` 且無值；
-    `filler:` 縮排大於 `implementer:` 且有值。縮排退回到某層鍵的欄位（或更外）＝離開該層。
-    空行與 # 註解行不影響層級。
-
-    fail closed：所在層在路徑上（`seats:` 之內、或 `seats.implementer:` 之內）時，出現任何不是
-    「鍵行」（KEY_RE）的非空非註解行——引號鍵、非 ASCII 鍵、`- ` 序列項、流式 `{`／`}`、
-    `<<:` 合併鍵、區塊純量的內容行、tab 縮排、值後接多餘 token——即回 None：那些都是 scanner
-    看不見的中間父節點或無法判定的結構，繼續掃會把更深層的 `filler` 誤當成 implementer 的直接
-    子項。路徑外（其他職位、其他頂層鍵）的不明行只略過：它們的縮排大於所屬區塊的鍵，任何
-    縮排更深的後續行都仍在該區塊內、不會被當成路徑上的鍵，故不影響結果。
-    路徑上的鍵帶值（`seats: x`、`implementer: &a`、流式 `seats: {…}`）不視為區塊，其下不再匹配。
-    重複鍵是無效 YAML，取第一個匹配（同舊行為）。token 不去引號：`filler: "claude-code"`
-    讀到的是帶引號的字串，不等於 claude-code。
-    """
+def load_devflow_yml(root):
+    """devflow.yml 的文字（嚴格 UTF-8）；讀不到、不是檔案、無法解碼都回 None，永不報錯。"""
     try:
-        text = (root / "devflow.yml").read_bytes().decode("utf-8")
+        return (root / "devflow.yml").read_bytes().decode("utf-8")
     except (OSError, UnicodeDecodeError):
         return None
-    stack = []   # 目前所在各層：(鍵的縮排, 是否在 SEATS_PATH 上)；空＝頂層
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue                                   # 空行、註解行：不影響層級
-        m = KEY_RE.match(line)
-        indent = len(m.group(1)) if m else len(line) - len(line.lstrip(" "))
-        while stack and indent <= stack[-1][0]:
-            stack.pop()                                # 縮排退回＝離開該層
-        if not m:
-            if stack and stack[-1][1]:
-                return None                            # 路徑內的不明結構：fail closed
-            continue                                   # 路徑外：略過
-        if indent and not stack:
-            continue                                   # 頂層鍵不在第 0 欄：略過
-        key, value = m.group(2), m.group(3)
-        depth = len(stack)
-        if (not stack or stack[-1][1]) and depth < len(SEATS_PATH) and key == SEATS_PATH[depth]:
-            if depth == len(SEATS_PATH) - 1:
-                if value is not None:
-                    return value                       # seats.implementer.filler: <token>
-            elif value is None:
-                stack.append((indent, True))           # 進入 seats／implementer 區塊
-                continue
-        stack.append((indent, False))                  # 路徑外的鍵、帶值的路徑鍵、無值的 filler
-    return None
+
+
+def logical_lines(text):
+    """AC-7 行模型：以 \\n 切行（不用 str.splitlines()——它還會切 \\x0b／\\x0c／\\x1c–\\x1e），
+    CRLF 的 \\r 屬行尾、從行內容去掉。任何 bare CR（不緊接 \\n、位於檔尾、`\\r\\r\\n` 的第一個）
+    或任何位置的 NEL／LS／PS → 整檔不合規，回 None。BOM 不剝：留在第一行內容裡。"""
+    if any(ch in text for ch in FORBIDDEN_BREAKS):
+        return None
+    segments = text.split("\n")
+    last = len(segments) - 1
+    lines = []
+    for i, seg in enumerate(segments):
+        if i != last and seg.endswith("\r"):
+            seg = seg[:-1]                        # 這個 \r 後面緊接 \n：CRLF 行尾
+        if "\r" in seg:
+            return None                           # bare CR
+        lines.append(seg)
+    return lines
+
+
+def is_ignored(line):
+    """忽略行＝只含空格／tab 的行，或去掉行首空格／tab 後以 # 起始的行（\\r 已在切行時去掉）。"""
+    body = line.lstrip(" \t")
+    return body == "" or body.startswith("#")
+
+
+def is_top(line):
+    """頂層行＝首字元不是空格的非忽略行（tab、BOM 起始者也是頂層行，但不是頂層鍵行）。"""
+    return not is_ignored(line) and not line.startswith(" ")
+
+
+def implementer_filler(text):
+    """AC-7 對一段 devflow.yml 文字的判定：通過行模型與信封、且恰一合規候選行 → 其值；否則 None。
+
+    信封（兩條皆須成立）：
+    1. 根定位：第一個非忽略行——不論縮排——必須是頂層鍵行；或它是第 0 欄的純 `---`，且其後
+       第一個非忽略行是頂層鍵行。這把根釘成「從第 0 欄開始的 block mapping」：根 flow／引號／
+       block scalar／序列不論外殼縮排幾格、不論是否藏在 `---` 之後，第一個內容行都不是
+       `裸鍵: ` 形狀，在此被擋。
+    2. 全檔：其後每一個頂層行都必須是頂層鍵行——第二個 `---`、`...`、flow 續行 `]`／`}`、
+       `- ` 序列項、引號鍵、`%` 指令、tab／BOM 起始者都使整檔不合規。
+    信封不看頂層鍵行 `:` 之後的內容、也不看縮排行（值層的非法 YAML 不影響）。
+    候選行：以 `implementer_filler:` 起始的頂層行，須恰一行且整行匹配 CANDIDATE_RE；
+    值逐 byte 比對、不去引號、不改大小寫。
+    """
+    lines = logical_lines(text)
+    if lines is None:
+        return None
+    content = [line for line in lines if not is_ignored(line)]
+    if not content:
+        return None
+    first = content[0]
+    if DOC_START_RE.match(first):
+        content = content[1:]                     # `---` 例外：只允許在第一個非忽略行
+        if not content:
+            return None
+        first = content[0]
+    if not TOP_KEY_RE.match(first):
+        return None                               # 信封 1：根不是第 0 欄的裸鍵行
+    candidates = []
+    for line in content:
+        if not line.startswith(" "):              # 頂層行
+            if not TOP_KEY_RE.match(line):
+                return None                       # 信封 2
+            if line.startswith(CANDIDATE_PREFIX):
+                candidates.append(line)
+    if len(candidates) != 1:
+        return None                               # 零行或重複
+    m = CANDIDATE_RE.match(candidates[0])
+    return m.group(1) if m else None
+
+
+def has_seats_line(text):
+    """advisory 的觸發條件：存在以 `seats:` 起始的頂層行。以 \\n 切行、去掉行尾 \\r 後判，
+    不要求整檔通過行模型（信封不成立時也要能提示）。"""
+    for line in text.split("\n"):
+        if line.endswith("\r"):
+            line = line[:-1]
+        if is_top(line) and line.startswith("seats:"):
+            return True
+    return False
+
+
+def read_implementer(root):
+    """devflow.yml 的 implementer_filler 值（AC-7）；任何讀不到／不合規都回 None，永不報錯。
+    CI 的 i5（AC-13）直接呼叫本函式取 L，本檔不得另有第二份判定。"""
+    text = load_devflow_yml(root)
+    return None if text is None else implementer_filler(text)
 
 
 def choose_targets(root):
@@ -203,7 +257,11 @@ def choose_targets(root):
     present = [name for name in ENTRY_FILES if os.path.lexists(root / name)]
     if present:
         return present
-    return ["CLAUDE.md"] if read_implementer(root) == "claude-code" else ["AGENTS.md"]
+    text = load_devflow_yml(root)
+    value = None if text is None else implementer_filler(text)
+    if value is None and text is not None and has_seats_line(text):
+        print(ADVISORY, file=sys.stderr)          # AC-7 advisory：有 seats: 卻讀不到合規投影
+    return ["CLAUDE.md"] if value == "claude-code" else ["AGENTS.md"]
 
 
 # ── 決策（AC-1～AC-6、可寫性）───────────────────────────────────────
