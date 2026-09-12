@@ -2,7 +2,7 @@
 ## 開發流程（agent-devflow）
 
 本專案採用 agent-devflow。規則本體：`devflow/WORKFLOW.md`（引用規則用 ID，如 `I2`、`R3`）。
-設定：`devflow.yml`（forge / coder / orchestrator / stage / merge）。
+設定：`devflow.yml`（forge / seats / stage / merge）。
 
 - 開工前讀 `devflow.yml` 的 `stage`，只套用該 stage 生效的節（WORKFLOW.md 第 11 節）。
 - 每個任務有兩個基準：治理基準 G（WORKFLOW.md 的 commit）與開發目標 T（規格的 commit）；以 issue 上寫的為準。
