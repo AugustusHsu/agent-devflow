@@ -122,8 +122,8 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 `C1` 七步照序執行，判準見條文；每段的最終 exit 即該步的機械判定（判定鏈以 `&&` 串接，不作判定的指令已 `|| true`，整段貼入與逐行執行結果相同），非 0 或註解所列情況即停、不進下一步。Hermes 側指令（在主 checkout 執行）：
 
 ```bash
-# (1) 兩項全驗：fetch → 祖先檢查 → 讀回三欄；祖先檢查非 0 ＝ 未合入；state 非 MERGED → grep 非 0，結果未定（F3）
-git fetch origin main && git merge-base --is-ancestor <head sha> origin/main \
+# (1) 兩項全驗：HEAD_OID 填 PR 的 <head sha>，(5) 填同一個值（段與段不保證同一 shell，不靠變數跨段）；fetch → 祖先檢查 → 讀回三欄；祖先檢查非 0 ＝ 未合入；state 非 MERGED → grep 非 0，結果未定（F3）
+HEAD_OID=<head sha> && git fetch origin main && git merge-base --is-ancestor "$HEAD_OID" origin/main \
   && gh pr view <PR-N> --json state,mergedAt,mergeCommit --jq '"\(.state)\t\(.mergedAt)\t\(.mergeCommit.oid)"' | grep '^MERGED'
 
 # (2) 仍 active 才 kill；kill 只送訊號、exit 不作判定（|| true）；等到讀回字串為 inactive（deactivating 不算；逾時 124 ＝ 未停）；判定依 hermes.md 「中斷交接」格
@@ -134,8 +134,14 @@ timeout 30 sh -c 'until [ "$(systemctl --user is-active coder-<N>.scope)" = inac
 # (3) 非空 → 逐項判是否須保留；有須保留者 → 停，依 F4
 git -C ../<repo>.worktrees/<N> status --porcelain
 
-# (4)(5) 被拒不強制：(4) 回 (3) 重判，確認無需保留後加 --force；(5) 主 checkout 先 git merge --ff-only origin/main 再重試
-git worktree remove ../<repo>.worktrees/<N> && git branch -d <N>-<slug>
+# (4) 被拒不強制：回 (3) 重判，確認無需保留後加 --force
+git worktree remove ../<repo>.worktrees/<N>
+
+# (5) compare-and-delete。HEAD_OID 在此重填與 (1) 相同的 <head sha>（不得 rev-parse 分支現值）；空字串與全零會讓 update-ref 退化成無條件刪除，
+#     故先驗「40 位十六進位且非全零」，不過即停；被拒（cannot lock ref … is at X but expected Y）＝ ref 已移動，停，不改用 branch -d／-D、不 merge main 重試
+HEAD_OID=<head sha>
+[[ $HEAD_OID =~ ^[0-9a-f]{40}$ && $HEAD_OID != 0000000000000000000000000000000000000000 ]] \
+  && git update-ref -d refs/heads/<N>-<slug> "$HEAD_OID"
 
 # (6) ls-remote 非 0 → 結果未定（F3），停；0 且空 → 跳過；0 且非空 → 取 OID，祖先檢查為 0 才刪
 if OUT=$(git ls-remote --heads origin <N>-<slug>); then
@@ -168,7 +174,7 @@ gh issue view <N> --json state --jq .state
 
 - 流程依 `G2`。Hermes 側：提案 issue（問題／案例／候選／建議，人逐項裁）→ 實作單作為新任務走步驟 1～10。
 - 審查 prompt 明寫 `git show <舊 G sha>:devflow/WORKFLOW.md` 為依據（`G2`）。
-- 版本位數依 `V1`～`V3`（依 `ST2`）。
+- 版本位數依 `V1`～`V3`，不相容標記依 `V6`（第 3 節，依 `ST1`）。
 - 合併後啟用邊界依 `G3`；檢查器門檻依 `G4`（依 `ST2`）。
 - 入口區塊同步依 `D2`、`I5`：`python3 devflow/install.py . --dry-run` 驗。
 
