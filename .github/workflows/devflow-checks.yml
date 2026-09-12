@@ -278,8 +278,28 @@ jobs:
           import re
           import subprocess
           import sys
+          import traceback
           from pathlib import Path
           from urllib.parse import unquote
+
+
+          # ── exit code 的分類守則 ─────────────────────────────────────────
+          # exit 1 只有一個意思：某個必需關卡判了 ❌（內容違規）。exit 2 是「檢查器本身無法執行」——
+          # 缺相依、不在 repo 內、外來程式碼逸出、解析器受限、以及**任何沒被明確分類的例外**。
+          # Python 對未攔截的例外預設以 1 結束，會和關卡失敗撞號（PR #76 第三輪：深巢狀 devflow.yml
+          # 讓 yaml.compose 拋 RecursionError，投影明明一致卻被記成 i5 ❌）。這個 hook 把所有漏網的
+          # 例外統一收成 exit 2；SystemExit 不經 hook，所以 die() 與關卡的 sys.exit(1) 不受影響。
+          # traceback 照印（除錯要用），另補一行 💥 說明分類。
+          def _uncaught(exc_type, exc, tb):
+              try:
+                  sys.stdout.flush()
+                  traceback.print_exception(exc_type, exc, tb)
+                  print("💥 檢查器無法執行：未預期的 %s: %s（未分類的例外一律 exit 2，不是關卡失敗）"
+                        % (exc_type.__name__, exc))
+                  sys.stdout.flush()
+              finally:
+                  sys.exit(2)               # 連印出訊息都失敗（stdout 編碼之類）也要是 2，不能退回預設的 1
+          sys.excepthook = _uncaught
 
           try:
               import yaml
@@ -825,6 +845,15 @@ jobs:
 
           if I5_FILE not in files:
               die("找不到受版控的 %s，repo 佈局與檢查器假設不符" % I5_FILE)
+          # 從輸入到判定，每一步的例外分類（守則見檔首 _uncaught）：
+          #   讀檔 OSError ── exit 2：CI 剛 checkout 的受版控檔讀不到是環境問題，不是內容
+          #   yaml.YAMLError（ScannerError／ParserError／ComposerError／ReaderError）── ❌ exit 1：
+          #     這是 parser 在說「你的輸入不對」——語法錯、多 document、alias 未定義、非 UTF-8／
+          #     不可列印字元——都是使用者寫錯，屬「不是恰一個合法 document」的結構違規
+          #   RecursionError／MemoryError ── exit 2：Python 在說「我的資源不夠」，不是 parser 在說輸入錯。
+          #     深巢狀（約 500 層起）PyYAML 的遞迴 composer 會撞 recursionlimit；投影可能完全一致，
+          #     檢查器只是判不了。不提高 recursionlimit——那只是推高門檻，分類仍錯，且可能真的 segfault
+          #   節點樹走訪、比對、印出時任何未預期例外 ── exit 2（_uncaught 兜底；那是檢查器的 bug）
           # bytes 交給 PyYAML：BOM／編碼由它依 YAML 規則判，和「真正讀這個檔案的 parser」一致。
           # 安裝器那邊是 bytes 嚴格 UTF-8、BOM 不剝——兩邊看法不同時 P≠L，正是 i5 要報的。
           try:
@@ -839,6 +868,9 @@ jobs:
               i5_root = None
               i5_problems.append("不是恰一個合法的 YAML document：%s"
                                  % str(e).strip().replace("\n", " "))
+          except (RecursionError, MemoryError) as e:
+              die("解析 %s 時 %s：檔案巢狀太深或太大，超出檢查器（PyYAML 遞迴 composer）的能力；"
+                  "這不是投影不一致，i5 無法判定" % (I5_FILE, type(e).__name__))
           if i5_root is None and not i5_problems:
               i5_problems.append("沒有任何 document（空檔或只有註解）")
           s_val = p_val = None
