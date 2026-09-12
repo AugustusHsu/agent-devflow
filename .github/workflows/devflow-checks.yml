@@ -144,6 +144,15 @@
 #     這是 AC-13 刻意的（唯一一份 AC-7 判定住在安裝器），不是漏洞。
 #     `seats` 以外的職位（reviewer／coordinator／approver）的結構不驗——AC-13 只管兩條路徑
 #     經過的三個 mapping。
+#   * 【`i5` 的 L 是在檢查器自己的行程裡執行 devflow/install.py 取得的——竄改該檔可繞過。】
+#     攔得住的：import 期或 read_implementer() 內的例外、sys.exit（foreign() 攔 BaseException →
+#     exit 2）、回傳非 str／str 子類（type() is str → exit 2）。攔不住的（PR #76 第二輪實測皆 exit 0）：
+#     import 期 monkeypatch yaml.compose、atexit 註冊 os._exit(0)、read_implementer() 內 os._exit(0)
+#     ——os._exit 繞過所有例外與 atexit，monkeypatch 發生在檢查器自己的行程內。
+#     威脅模型不涵蓋這三者：都必須改 devflow/install.py 本身，而它在版控內、改動必經 PR ＋
+#     required check ＋ 人工審查（PR #71 走了五輪）；能改它的人已經能直接改本檔關掉 GATES。
+#     界線：**不需要惡意也會發生、且修法便宜**的才擋（sys.exit 早退、為了型別標註或包裝而回傳
+#     str 子類）；只有蓄意竄改才會發生的，交給審查（G5 同一句話：本檢查器擋失誤，不擋蓄意規避）。
 #   * 【`d2` 只驗第一段：第一個 begin 到其後第一個 end，≤30 行；有 begin 無 end 也擋；
 #     第一個 begin 之前有 end 標記行也擋。】
 #     區塊「內容」對不對、區塊外有沒有被安裝流程改到（D2 後半句），都要跟 base 比對
@@ -846,8 +855,13 @@ jobs:
           # 不是 devflow.yml 違規，所以是 exit 2 不是 exit 1，也不能讓它以自己的 exit code 收場。
           l_val = foreign("%s 的 read_implementer() 逸出" % I5_INSTALLER,
                           lambda: installer.read_implementer(Path(".")))
-          if l_val is not None and not isinstance(l_val, str):
-              die("%s 的 read_implementer() 回傳 %r，不是字串也不是 None" % (I5_INSTALLER, l_val))
+          # 契約：回 None 或**恰好是 str**。用 type() is 不用 isinstance：str 子類可以覆寫 __eq__
+          # （`class PretendEqual(str): __eq__ = lambda *_: True`），isinstance 放行後 s == p == l 恆真、
+          # 關卡失效（PR #76 第二輪）。不正規化成 str(l)：那會把「回傳型別不合契約」誤報成「投影不一致」。
+          # 這是檢查器的輸入不合契約＝exit 2，不是 devflow.yml 違規。
+          if l_val is not None and type(l_val) is not str:
+              die("%s 的 read_implementer() 回傳 %r（型別 %s），契約是 None 或恰好 str"
+                  % (I5_INSTALLER, l_val, type(l_val).__name__))
           if i5_problems:
               report("i5", "%s 不符 AC-13 的結構要求（%d 項）" % (I5_FILE, len(i5_problems)),
                      i5_problems
