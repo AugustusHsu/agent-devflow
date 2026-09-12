@@ -729,6 +729,34 @@ def _():
     agents_only(b"implementer_filler: -x\n", "plain scalar may start with -", value="-x")
 
 
+@case("AC-7-none-candidate-conditional-indicator")
+def _():
+    # §7.3.3：`-`／`?`／`:` 只有後接 ns-plain-safe（非空白字元）時才可起首。單獨一個不是 plain scalar
+    # （PyYAML ScannerError）→ None、有 seats: 時 advisory；`-x`／`?x`／`:x` 是 plain scalar → 讀到原字串、無 advisory
+    for cand in (b"-", b"?", b":"):
+        agents_only(b"implementer_filler: " + cand + b"\n", "lone %r is not a plain scalar" % cand)
+        agents_only(NESTED_CLAUDE + b"implementer_filler: " + cand + b"\n",
+                    "lone %r with seats: present: advisory" % cand, ADVISORY)
+    for cand in (b"-x", b"?x", b":x"):
+        agents_only(b"implementer_filler: " + cand + b"\n", "%r is a plain scalar" % cand, value=cand.decode())
+        agents_only(NESTED_CLAUDE + b"implementer_filler: " + cand + b"\n",
+                    "%r with seats: present: compliant, no advisory" % cand, value=cand.decode())
+    # 指示字元後接空白：`: x` 是 mapping 分隔、`- x` 是序列項、`? x` 是複合鍵——值 token 不含空白，
+    # `[-?:]` 之後沒有值字元 → 整行不匹配 → None
+    for cand in (b": x", b"- x", b"? x"):
+        agents_only(NESTED_CLAUDE + b"implementer_filler: " + cand + b"\n",
+                    "%r: indicator followed by space is not a scalar" % cand, ADVISORY)
+
+
+@case("AC-7-none-candidate-flow-closer-or-comma")
+def _():
+    # 無條件指示字元中的 `]`／`}`／`,`（flow 續行／分隔）明確反例
+    for cand in (b"]", b"}", b","):
+        agents_only(b"implementer_filler: " + cand + b"\n", "leading %r is not a bare literal" % cand)
+        agents_only(NESTED_CLAUDE + b"implementer_filler: " + cand + b"\n",
+                    "leading %r with seats: present: advisory" % cand, ADVISORY)
+
+
 @case("AC-7-none-candidate-case-differs")
 def _():
     # 合規的裸字面值，只是不等於 claude-code：讀得到、無 advisory
