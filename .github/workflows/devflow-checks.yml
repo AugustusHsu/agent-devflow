@@ -5,13 +5,15 @@
 # 注意不是 `G4`：`G4` 住第 9 節，依第 0 節與 `ST2` 要 stage 2 才生效，現在是 stage 1，
 # 不能引為依據。
 # 本檔每一項檢查都有自己的開關（下面的 GATES）：True＝必需關卡，False＝建議（只報告不擋）。
-# 九項裡兩項是 True（`d2`、`i1`），七項是 False——分界不是「哪一項比較重要」，
-# 而是**定義域封不封閉**，見下面兩節。
+# 十項裡三項是 True（`d2`、`i1`、`i5`），七項是 False——分界不是「哪一項比較重要」，
+# 而是**定義域封不封閉**，見下面三節。
 #
 # ── ⚠️ 這個 check 擋什麼、不擋什麼 ───────────────────────────────────────
 # 會擋（exit 1）：`d2` 入口區塊（第一個 begin 到其後第一個 end 這一段：缺 end 或 >30 行；
-#                 以及 begin 之前有落單的 end）、`i1` head branch 名稱。
-# 就這兩項。
+#                 以及 begin 之前有落單的 end）、`i1` head branch 名稱、
+#                 `i5` devflow.yml 的 `implementer_filler` 投影與 `seats.implementer.filler`
+#                 及安裝器實際讀到的值三方一致。
+# 就這三項。
 # 不擋（exit 0，只把發現印在 log）：其餘七項，一律 advisory。
 #
 # 「GATES 是 True」只讓這個 check 自己變紅，**不等於它是 branch protection 的
@@ -69,6 +71,33 @@
 #       示例組放在前面則依 D2 定義**它就是**區塊（安裝器會把它換成模板），見「擋不住什麼」。
 #       要再降級，得由人裁決，不由本檔自己改。
 #
+# ── i5 為什麼可以是關卡（issue #75；規格是 docs/spec/install/spec.md AC-13）──────
+# `I5` 住第 1 節，永遠生效。devflow.yml 把同一個事實寫了兩處：`seats.implementer.filler`
+# （來源 S）與頂層 `implementer_filler`（投影 P）——安裝器 stdlib-only、不解析 YAML，只讀 P
+# （AC-7）。投影靠人記得同步，正是 `I5` 要防的；AC-13 把一致性交給本檢查器機械保證。
+#   一、定義域封閉：一個檔案（本 repo 根目錄的 devflow.yml）、兩條固定路徑、真 parser
+#       （PyYAML compose 出的節點樹），沒有散文判讀。判定是 AC-13 逐條寫死的：
+#         結構要求——恰一個 document；根、`seats` 的值、`seats.implementer` 的值都是 `!!map`；
+#         這三個 mapping 的每個 key 都是 `!!str` 純量且鍵名不重複（引號鍵與裸鍵、alias 指向的
+#         key 一視同仁，以 `.value` 比對）。任一不成立 → ❌。
+#         三方比對——S、P 取值節點的 `.value`（須為 `!!str` 純量）；L＝直接載入
+#         devflow/install.py 呼叫 read_implementer() 讀到的值（不另寫一份 AC-7 判定：兩份判定
+#         就有第三個可漂移的東西）。通過 ⇔ 三者皆「無」，或三者皆為字串且逐字相等。
+#       為什麼是 compose 不是 safe_load：construct 會把重複鍵 last-wins 合併、把引號鍵與裸鍵
+#       合併、把 `<<` 展開——`"implementer_filler": codex` ＋ `implementer_filler: claude-code`
+#       在 safe_load 後三者相等，卻正是過期投影。frontmatter 的 duplicate_version_key 同一機制。
+#       為什麼要 L：S＝P 只保證 YAML 語意一致；`implementer_filler: *f`、`"claude-code"`、多行
+#       plain scalar 續行在 compose 後 P 都取得到，安裝器卻讀不到或讀到別的東西。P＝L 保證
+#       安裝器實際讀到的就是 YAML 語意。
+#   二、生效性：`I5` 在第 1 節，任何 stage 都有效，不像 V1／V4／S1 要等 stage 2。
+#   三、假陽性：合法輸入只有一種——投影寫成安裝器讀得到的裸字面值、與來源逐字相同。
+#       其他寫法（alias、引號、顯式標籤）在 YAML 語意上等價，但安裝器讀不到，
+#       AC-13 明文判 ❌：投影是給安裝器讀的，不是給 YAML parser 讀的。
+#       「三者皆無」也通過——那表示這個 repo 沒用這個機制，不是違規。
+#   正反 run 的紀錄在實作 PR（issue #75 AC-3）：正向＝本 repo 現行設定；反向＝把
+#   `implementer_filler` 改成與 S 不同的值。其餘十個反向案例（規格「驗證」一節）在本地以
+#   同一份檢查器逐案跑過，結果也記在 PR。
+#
 # ── 不發明規則：`i1` 的 slug 為什麼不限字元集 ─────────────────────────────
 # `I1` 的原文只有「分支名 `<N>-<slug>`」，沒有規定 slug 的字元集。
 # 收成 `^[0-9]+-[a-z0-9-]+$` 會擋掉 `26-封閉定義域`、`4-v0.0.2.0-bump`、`26-Fix-D2`——
@@ -83,8 +112,17 @@
 #   條件三：負向相對正向**只新增目標項的違規**；其他項至多 📝，exit 1 只能由目標項造成
 #           （exit 2 不算——那是檢查器自己壞了）。
 # 前兩者的前提是 log 印得出「跑的是哪一份檔案」，所以本檔加了「記錄受測身分」那一步。
-# 條件三要的負向輸入落在 AGENTS.md／CLAUDE.md（`d2`）與分支名（`i1`）上，
+# 條件三要的負向輸入落在 AGENTS.md／CLAUDE.md（`d2`）、分支名（`i1`）、devflow.yml（`i5`）上，
 # 都不是本檔的變更——換句話說，改本檔的 PR 只產得出正向 run，負向 run 要另外造。
+# 條件一要求兩個 run 的 blob 相同，而 ❌／exit 1 只在 GATES 為 True 時出現：所以負向 run
+# 跑的那份檢查器裡目標項已經是 True——本地先用同一份檢查器跑過全部反向案例，再上 CI 取
+# 正反兩個 run，順序是「本地正反 → 設 True → CI 正反」，不是「CI 正反 → 設 True」。
+# run 一律來自 pull_request 事件（README 的判定也只認 `event` ＝ `pull_request`）：本檔只有這一個
+# 觸發，還沒開 PR 的分支跑不出 run，所以要升關卡的工單得**先開 PR（草稿即可）再取 run**——
+# 負向輸入推一個探針 commit、取得 ❌ 後 revert（`i5` 的作法），或另開一條 probe 分支＋PR
+# （`i1` 的作法，PR #42）。曾為此加過 workflow_dispatch，因它與 pull_request 共用 required
+# context、較晚的 dispatch success 會蓋掉 PR 的 ❌ 而移除（PR #76 第一輪）；要再加得先換掉
+# context 名稱並以實際 run 證明兩者不同。
 #
 # ── 這七項檢查各自在報告什麼（都只報告，不擋）────────────────────────────
 #   * version：frontmatter 的 version 是不是四碼 a.b.c.d
@@ -98,8 +136,23 @@
 #       卻被判成 frontmatter 沒關閉。該 bug 已修，但這件事證明了這種宣稱不可靠。
 #
 # ── 擋不住什麼（已知不完備，不要假裝完備）──────────────────────────────
-#   * 【`d2`、`i1` 以外的全部。】以下各條說的是「連報告都報不到」，
+#   * 【`d2`、`i1`、`i5` 以外的全部。】以下各條說的是「連報告都報不到」，
 #     或「報告了但沒有任何強制力」。
+#   * 【`i5` 只看本 repo 的 devflow.yml。】消費者 repo 的投影一致性不在範圍（spec「未決事項」）：
+#     它們只有安裝器 AC-7 的 advisory——「有 `seats:` 而無合規投影」會被提示，「兩處值不同」
+#     無人攔。L 的定義是「devflow/install.py 現在讀到什麼」：改了讀取器，`i5` 跟著它走，
+#     這是 AC-13 刻意的（唯一一份 AC-7 判定住在安裝器），不是漏洞。
+#     `seats` 以外的職位（reviewer／coordinator／approver）的結構不驗——AC-13 只管兩條路徑
+#     經過的三個 mapping。
+#   * 【`i5` 的 L 是在檢查器自己的行程裡執行 devflow/install.py 取得的——竄改該檔可繞過。】
+#     攔得住的：import 期或 read_implementer() 內的例外、sys.exit（foreign() 攔 BaseException →
+#     exit 2）、回傳非 str／str 子類（type() is str → exit 2）。攔不住的（PR #76 第二輪實測皆 exit 0）：
+#     import 期 monkeypatch yaml.compose、atexit 註冊 os._exit(0)、read_implementer() 內 os._exit(0)
+#     ——os._exit 繞過所有例外與 atexit，monkeypatch 發生在檢查器自己的行程內。
+#     威脅模型不涵蓋這三者：都必須改 devflow/install.py 本身，而它在版控內、改動必經 PR ＋
+#     required check ＋ 人工審查（PR #71 走了五輪）；能改它的人已經能直接改本檔關掉 GATES。
+#     界線：**不需要惡意也會發生、且修法便宜**的才擋（sys.exit 早退、為了型別標註或包裝而回傳
+#     str 子類）；只有蓄意竄改才會發生的，交給審查（G5 同一句話：本檢查器擋失誤，不擋蓄意規避）。
 #   * 【`d2` 只驗第一段：第一個 begin 到其後第一個 end，≤30 行；有 begin 無 end 也擋；
 #     第一個 begin 之前有 end 標記行也擋。】
 #     區塊「內容」對不對、區塊外有沒有被安裝流程改到（D2 後半句），都要跟 base 比對
@@ -169,6 +222,10 @@ name: devflow checks
 on:
   pull_request:
     branches: [main]
+  # 只有 pull_request。不要加 workflow_dispatch：它與 pull_request 產生同一個 required context
+  # （`devflow-checks`），required status check 取該 context 最新一筆結論——PR 的 ❌ 之後對同一個
+  # head 手動觸發一次，較晚的 success 就把失敗蓋掉，而且 dispatch 下 `i1` 還是略過的
+  # （PR #76 第一輪）。正反 run 的取法見檔頭「升 required 的前提」。
 
 permissions:
   contents: read
@@ -216,11 +273,33 @@ jobs:
           python3 - <<'PY'
           # -*- coding: utf-8 -*-
           """devflow 規則檢查。exit 0 通過／1 必需關卡失敗／2 檢查器本身無法執行。"""
+          import importlib.util
           import os
           import re
           import subprocess
           import sys
+          import traceback
+          from pathlib import Path
           from urllib.parse import unquote
+
+
+          # ── exit code 的分類守則 ─────────────────────────────────────────
+          # exit 1 只有一個意思：某個必需關卡判了 ❌（內容違規）。exit 2 是「檢查器本身無法執行」——
+          # 缺相依、不在 repo 內、外來程式碼逸出、解析器受限、以及**任何沒被明確分類的例外**。
+          # Python 對未攔截的例外預設以 1 結束，會和關卡失敗撞號（PR #76 第三輪：深巢狀 devflow.yml
+          # 讓 yaml.compose 拋 RecursionError，投影明明一致卻被記成 i5 ❌）。這個 hook 把所有漏網的
+          # 例外統一收成 exit 2；SystemExit 不經 hook，所以 die() 與關卡的 sys.exit(1) 不受影響。
+          # traceback 照印（除錯要用），另補一行 💥 說明分類。
+          def _uncaught(exc_type, exc, tb):
+              try:
+                  sys.stdout.flush()
+                  traceback.print_exception(exc_type, exc, tb)
+                  print("💥 檢查器無法執行：未預期的 %s: %s（未分類的例外一律 exit 2，不是關卡失敗）"
+                        % (exc_type.__name__, exc))
+                  sys.stdout.flush()
+              finally:
+                  sys.exit(2)               # 連印出訊息都失敗（stdout 編碼之類）也要是 2，不能退回預設的 1
+          sys.excepthook = _uncaught
 
           try:
               import yaml
@@ -232,11 +311,12 @@ jobs:
 
           # ── 關卡開關 ──────────────────────────────────────────────────────
           # True＝必需關卡（失敗就擋）；False＝建議（只報告）。
-          # 前兩項是 True，其餘七項是 False。分界是定義域封不封閉，理由見檔頭。
+          # 前三項是 True，其餘七項是 False。分界是定義域封不封閉，理由見檔頭。
           # 驗證用：DEVFLOW_GATE_<KEY>=1 可單獨打開一項，環境變數只能加嚴不能放寬。
           GATES = {
               "d2":      True,    # D2 入口區塊 ≤30 行（第 13 節，永遠生效）
               "i1":      True,    # I1 head branch 名為 <N>-<slug>（第 1 節，永遠生效）
+              "i5":      True,    # I5 devflow.yml 投影 implementer_filler 三方一致（第 1 節，永遠生效；spec AC-13）
               "version": False,   # V1 frontmatter version 四碼（stage: 0 下 V1／V4 未生效）
               "dupid":   False,   # 規則 ID 唯一定義（散文與定義分不出來，見檔頭）
               "refs":    False,   # 規則 ID 無懸空引用（會誤擋非規則代號，見檔頭）
@@ -262,6 +342,14 @@ jobs:
           # 一個正整數（<N> 是 issue 號，從 1 起算，所以不收 0 開頭）、一個 `-`、非空的 slug。
           # slug 的字元集 I1 沒有規定，收窄就是發明規則（見檔頭「不發明規則」）。一律 fullmatch。
           BRANCH_RE = re.compile(r"[1-9][0-9]*-.+")
+          # I5（spec AC-13）的定義域：一個檔案、兩條固定路徑、一個讀取函式。
+          # S＝seats.implementer.filler、P＝根層 implementer_filler、L＝安裝器 read_implementer() 讀到的值。
+          I5_FILE = "devflow.yml"
+          I5_INSTALLER = "devflow/install.py"
+          I5_PROJECTION = "implementer_filler"
+          I5_SOURCE_PATH = ("seats", "implementer", "filler")
+          YAML_MAP = "tag:yaml.org,2002:map"
+          YAML_STR = "tag:yaml.org,2002:str"
           TABLE_DIRS = ("devflow/forges/", "devflow/coders/", "devflow/orchestrators/")
           TABLE_HEADER = ["面向", "值", "狀態"]
           STATUS_COL = "狀態"
@@ -642,6 +730,188 @@ jobs:
                      ["`<N>` 是 issue 號（正整數，不以 0 開頭），接一個 `-`，再接非空的 slug",
                       "例：`26-closed-domain-checks`",
                       "slug 的字元集 I1 沒有規定，這裡不限"])
+
+          print()
+          print("── I5：%s 的 %s 投影與 %s 及安裝器讀到的值三方一致（%s）"
+                % (I5_FILE, I5_PROJECTION, ".".join(I5_SOURCE_PATH), tag("i5")))
+          # 判定逐條照 docs/spec/install/spec.md AC-13，理由見檔頭「i5 為什麼可以是關卡」。
+          # 只 compose 不 construct（同 duplicate_version_key）：要抓的重複鍵、引號鍵、merge 鍵
+          # 都是 construct 會吞掉的東西。壞 YAML、多 document 是內容違規（❌），不是檢查器壞掉；
+          # 檔案不在版控內、安裝器載不進來才是 exit 2——那是 repo 佈局與本檔假設不符。
+
+          def node_desc(node):
+              """log 用：節點種類、tag、（純量的）值、所在行。alias 解析後指向錨定節點，行號是錨的位置。"""
+              line = node.start_mark.line + 1 if node.start_mark else "?"
+              if isinstance(node, yaml.ScalarNode):
+                  return "%s tag=%s value=%r（第 %s 行）" % (type(node).__name__, node.tag, node.value, line)
+              return "%s tag=%s（第 %s 行）" % (type(node).__name__, node.tag, line)
+
+
+          def is_plain_map(node):
+              return isinstance(node, yaml.MappingNode) and node.tag == YAML_MAP
+
+
+          def mapping_entries(node, where):
+              """AC-13 對一個路徑上 mapping 的鍵要求：每個 key 都是 !!str 的 ScalarNode，鍵名（.value）
+              不重複——引號鍵與裸鍵、Unicode escape、!!str 顯式標籤、alias 指向的 key，compose 後
+              .value 都是同一個 canonical 字串，所以一律抓得到；非字串 tag 的鍵（bool／int／null／
+              merge）與複合鍵（key 是 Sequence／Mapping）直接是違規，不做 tag 正規化。
+              回傳 (違規清單, {鍵名: 值節點})；重複鍵只保留第一個，反正結構已經 ❌。"""
+              problems = []
+              seen = {}
+              values = {}
+              for k, v in node.value:
+                  if not (isinstance(k, yaml.ScalarNode) and k.tag == YAML_STR):
+                      problems.append("%s 有非 !!str 純量的鍵：%s" % (where, node_desc(k)))
+                      continue
+                  if k.value in seen:
+                      problems.append("%s 的鍵 `%s` 重複：%s 與 %s"
+                                      % (where, k.value, node_desc(seen[k.value]), node_desc(k)))
+                      continue
+                  seen[k.value] = k
+                  values[k.value] = v
+              return problems, values
+
+
+          def i5_structure(root):
+              """結構要求 ＋ 取 S、P 節點。回傳 (違規清單, S 節點或 None, P 節點或 None)。
+              路徑上的 mapping：根一定看；seats 的值、seats.implementer 的值存在才看。"""
+              if not is_plain_map(root):
+                  return ["根不是 !!map 的 MappingNode：%s" % node_desc(root)], None, None
+              problems, root_values = mapping_entries(root, "根")
+              projection = root_values.get(I5_PROJECTION)
+              source = None
+              seats = root_values.get(I5_SOURCE_PATH[0])
+              if seats is not None:
+                  if not is_plain_map(seats):
+                      problems.append("`%s` 的值不是 !!map 的 MappingNode：%s"
+                                      % (I5_SOURCE_PATH[0], node_desc(seats)))
+                  else:
+                      more, seats_values = mapping_entries(seats, "`%s`" % I5_SOURCE_PATH[0])
+                      problems += more
+                      implementer = seats_values.get(I5_SOURCE_PATH[1])
+                      if implementer is not None:
+                          where = "`%s`" % ".".join(I5_SOURCE_PATH[:2])
+                          if not is_plain_map(implementer):
+                              problems.append("%s 的值不是 !!map 的 MappingNode：%s"
+                                              % (where, node_desc(implementer)))
+                          else:
+                              more, impl_values = mapping_entries(implementer, where)
+                              problems += more
+                              source = impl_values.get(I5_SOURCE_PATH[2])
+              return problems, source, projection
+
+
+          def i5_scalar(node, name):
+              """S／P 存在時須為 !!str 的 ScalarNode，取 .value；不存在＝None。
+              yes／1／~ 之類被隱式解析成 bool／int／null 的都不是。回傳 (值或 None, 違規或 None)。"""
+              if node is None:
+                  return None, None
+              if not (isinstance(node, yaml.ScalarNode) and node.tag == YAML_STR):
+                  return None, "%s 不是 !!str 的 ScalarNode：%s" % (name, node_desc(node))
+              return node.value, None
+
+
+          def foreign(what, fn):
+              """執行外來程式碼（載入 installer、呼叫 read_implementer），任何逸出都轉成 exit 2。
+              攔 BaseException 不是 Exception：SystemExit 繼承 BaseException，installer 在 import 期或
+              read_implementer() 內一句 sys.exit(0) 若穿透到頂層，Python 就以 0 結束——整個檢查器判 success、
+              三個關卡靜默失效（PR #76 第一輪）。KeyboardInterrupt 同理。die() 自己的 SystemExit(2) 是
+              在 except 區塊裡才拋的，不會被同一個 except 攔回。只包這兩段，檢查器本身的 sys.exit 不受影響。"""
+              try:
+                  return fn()
+              except BaseException as e:
+                  die("%s：%s: %s" % (what, type(e).__name__, e))
+
+
+          def load_installer():
+              """直接載入 devflow/install.py 取 L。AC-13：不得另寫一份 AC-7 判定——
+              兩份判定就有第三個可漂移的東西。載不進來是佈局問題（exit 2），不是內容違規。"""
+              if I5_INSTALLER not in files:
+                  die("找不到受版控的 %s，AC-13 的 L 沒有來源" % I5_INSTALLER)
+              sys.dont_write_bytecode = True        # 別在 devflow/ 留 __pycache__
+              spec = importlib.util.spec_from_file_location("devflow_install", I5_INSTALLER)
+              module = importlib.util.module_from_spec(spec)
+              # 語法錯、import 錯、import 期的 sys.exit 都算載不進來
+              foreign("載入 %s 失敗" % I5_INSTALLER, lambda: spec.loader.exec_module(module))
+              if not callable(getattr(module, "read_implementer", None)):
+                  die("%s 沒有 read_implementer()，AC-13 的 L 沒有來源" % I5_INSTALLER)
+              return module
+
+
+          def show(value):
+              return "（無）" if value is None else repr(value)
+
+
+          if I5_FILE not in files:
+              die("找不到受版控的 %s，repo 佈局與檢查器假設不符" % I5_FILE)
+          # 從輸入到判定，每一步的例外分類（守則見檔首 _uncaught）：
+          #   讀檔 OSError ── exit 2：CI 剛 checkout 的受版控檔讀不到是環境問題，不是內容
+          #   yaml.YAMLError（ScannerError／ParserError／ComposerError／ReaderError）── ❌ exit 1：
+          #     這是 parser 在說「你的輸入不對」——語法錯、多 document、alias 未定義、非 UTF-8／
+          #     不可列印字元——都是使用者寫錯，屬「不是恰一個合法 document」的結構違規
+          #   RecursionError／MemoryError ── exit 2：Python 在說「我的資源不夠」，不是 parser 在說輸入錯。
+          #     深巢狀（約 500 層起）PyYAML 的遞迴 composer 會撞 recursionlimit；投影可能完全一致，
+          #     檢查器只是判不了。不提高 recursionlimit——那只是推高門檻，分類仍錯，且可能真的 segfault
+          #   節點樹走訪、比對、印出時任何未預期例外 ── exit 2（_uncaught 兜底；那是檢查器的 bug）
+          # bytes 交給 PyYAML：BOM／編碼由它依 YAML 規則判，和「真正讀這個檔案的 parser」一致。
+          # 安裝器那邊是 bytes 嚴格 UTF-8、BOM 不剝——兩邊看法不同時 P≠L，正是 i5 要報的。
+          try:
+              with open(I5_FILE, "rb") as fh:
+                  i5_bytes = fh.read()
+          except OSError as e:
+              die("讀不到 %s：%s" % (I5_FILE, e))
+          i5_problems = []
+          try:
+              i5_root = yaml.compose(i5_bytes)
+          except yaml.YAMLError as e:
+              i5_root = None
+              i5_problems.append("不是恰一個合法的 YAML document：%s"
+                                 % str(e).strip().replace("\n", " "))
+          except (RecursionError, MemoryError) as e:
+              die("解析 %s 時 %s：檔案巢狀太深或太大，超出檢查器（PyYAML 遞迴 composer）的能力；"
+                  "這不是投影不一致，i5 無法判定" % (I5_FILE, type(e).__name__))
+          if i5_root is None and not i5_problems:
+              i5_problems.append("沒有任何 document（空檔或只有註解）")
+          s_val = p_val = None
+          if not i5_problems:
+              i5_problems, s_node, p_node = i5_structure(i5_root)
+              s_val, bad = i5_scalar(s_node, "S＝`%s` 的值" % ".".join(I5_SOURCE_PATH))
+              if bad:
+                  i5_problems.append(bad)
+              p_val, bad = i5_scalar(p_node, "P＝`%s` 的值" % I5_PROJECTION)
+              if bad:
+                  i5_problems.append(bad)
+          installer = load_installer()
+          # read_implementer() 依 AC-7 承諾永不報錯；真的逸出（含 sys.exit）是安裝器壞了＝檢查器無法執行，
+          # 不是 devflow.yml 違規，所以是 exit 2 不是 exit 1，也不能讓它以自己的 exit code 收場。
+          l_val = foreign("%s 的 read_implementer() 逸出" % I5_INSTALLER,
+                          lambda: installer.read_implementer(Path(".")))
+          # 契約：回 None 或**恰好是 str**。用 type() is 不用 isinstance：str 子類可以覆寫 __eq__
+          # （`class PretendEqual(str): __eq__ = lambda *_: True`），isinstance 放行後 s == p == l 恆真、
+          # 關卡失效（PR #76 第二輪）。不正規化成 str(l)：那會把「回傳型別不合契約」誤報成「投影不一致」。
+          # 這是檢查器的輸入不合契約＝exit 2，不是 devflow.yml 違規。
+          if l_val is not None and type(l_val) is not str:
+              die("%s 的 read_implementer() 回傳 %r（型別 %s），契約是 None 或恰好 str"
+                  % (I5_INSTALLER, l_val, type(l_val).__name__))
+          if i5_problems:
+              report("i5", "%s 不符 AC-13 的結構要求（%d 項）" % (I5_FILE, len(i5_problems)),
+                     i5_problems
+                     + ["AC-13：恰一個 document；根、`seats` 的值、`seats.implementer` 的值都是 !!map；"
+                        "這三個 mapping 的每個 key 都是 !!str 純量且鍵名不重複；S、P 存在時是 !!str 純量"])
+          elif s_val is None and p_val is None and l_val is None:
+              ok("%s 沒有 `%s`、沒有 `%s`、安裝器也讀不到值：三者皆無，本 repo 未用此機制"
+                 % (I5_FILE, ".".join(I5_SOURCE_PATH), I5_PROJECTION))
+          elif s_val == p_val == l_val:
+              ok("%s：`%s` ＝ `%s` ＝ 安裝器讀到的值 ＝ %r"
+                 % (I5_FILE, ".".join(I5_SOURCE_PATH), I5_PROJECTION, s_val))
+          else:
+              report("i5", "%s 的 `%s` 投影與來源不一致（I5／AC-13）" % (I5_FILE, I5_PROJECTION),
+                     ["S＝`%s`：%s" % (".".join(I5_SOURCE_PATH), show(s_val)),
+                      "P＝`%s`：%s" % (I5_PROJECTION, show(p_val)),
+                      "L＝安裝器 %s read_implementer() 讀到：%s" % (I5_INSTALLER, show(l_val)),
+                      "通過 ⇔ 三者皆無，或三者皆為字串且逐字相等。投影要寫成安裝器讀得到的裸字面值"
+                      "（不是 alias、引號、顯式標籤、多行），並與來源逐字相同"])
 
           print()
           print("── V1：frontmatter version 為四碼 a.b.c.d（%s）" % tag("version"))
