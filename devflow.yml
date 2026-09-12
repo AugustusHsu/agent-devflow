@@ -24,7 +24,7 @@ seats:
 # seats.implementer.filler 的衍生投影（不是第二個自變數）：install.py 不解析 YAML，只讀這個頂層鍵
 # 決定新專案建 CLAUDE.md 還是 AGENTS.md（docs/spec/install/spec.md AC-7）。與上面的值必須逐字相同，
 # 由 CI 的 i5 檢查機械保證（AC-13）；改 filler 時一併改這裡。
-implementer_filler: codex
+implementer_filler: claude-code
 
 # 本 repo 套用到哪一層流程（不是版本號；定義見 WORKFLOW.md 第 11 節）：
 #   0 bootstrap（無流程，直推 main）
