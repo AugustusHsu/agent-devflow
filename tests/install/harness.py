@@ -757,6 +757,31 @@ def _():
                     "leading %r with seats: present: advisory" % cand, ADVISORY)
 
 
+@case("AC-7-none-candidate-trailing-colon")
+def _():
+    # §7.3.3 ns-plain-char：`:` 只有後接 ns-plain-safe 時才是內容；行尾的 `:` 是 mapping 分隔——
+    # `implementer_filler: codex:` 在 YAML 是「值為以 codex 為鍵的 mapping」（PyYAML ScannerError）→ None
+    for cand in (b"codex:", b"claude-code:", b"x:", b"a::", b"::"):
+        agents_only(b"implementer_filler: " + cand + b"\n", "trailing colon %r is not a plain scalar" % cand)
+        agents_only(NESTED_CLAUDE + b"implementer_filler: " + cand + b"\n",
+                    "trailing colon %r with seats: present: advisory" % cand, ADVISORY)
+    agents_only(NESTED_CLAUDE + b"implementer_filler: codex:  # c\n",
+                "trailing colon before a comment: advisory", ADVISORY)
+    # 回歸保護：中間的 `:` 與起首的 `:`＋字元仍是 plain scalar → 讀到原字串、有 seats: 不印
+    for cand in (b"a:b", b":x", b"::x", b"a::b", b":-"):
+        agents_only(NESTED_CLAUDE + b"implementer_filler: " + cand + b"\n",
+                    "%r keeps passing" % cand, value=cand.decode())
+
+
+@case("AC-7-none-candidate-other-trailing-chars-allowed")
+def _():
+    # 尾字元除 `:` 外無限制（§7.3.3 只對 `:` 與 `#` 設鄰接條件，token 不含 `#`）：
+    # 尾端 -／?／,／[／]／{／} 都是合法 plain scalar，讀到原字串、有 seats: 不印 advisory
+    for cand in (b"abc-", b"abc?", b"abc,", b"abc[", b"abc]", b"abc{", b"abc}", b"a:-"):
+        agents_only(NESTED_CLAUDE + b"implementer_filler: " + cand + b"\n",
+                    "%r is a plain scalar" % cand, value=cand.decode())
+
+
 @case("AC-7-none-candidate-case-differs")
 def _():
     # 合規的裸字面值，只是不等於 claude-code：讀得到、無 advisory

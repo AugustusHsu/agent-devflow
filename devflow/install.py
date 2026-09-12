@@ -59,14 +59,19 @@ TOP_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*:(?:$|[ \t])")
 # 純 `---`：其後只能是空格／tab，或空格／tab 再接 # 註解
 DOC_START_RE = re.compile(r"^---(?:[ \t]*|[ \t]+#.*)$")
 # 候選行：`implementer_filler:` ＋ 一個以上空格／tab ＋ 值 ＋〔一個以上空格／tab ＋ # 至行尾〕？＋ 尾端空格／tab？
-# 值＝不含空格／tab／\r／# 的連續字元，且是**裸字面值**，依 YAML 1.2 §7.3.3 ns-plain-first：
-# 19 個 c-indicator `- ? : , [ ] { } # & * ! | > ' " % @ \`` 中，16 個無條件不得起首（`#` 已在通用
-# 排除裡），`-`／`?`／`:` 三個只有後接 ns-plain-safe（block 語境＝任何非空白字元）時才可起首——
-# 單獨的 `-`／`?`／`:` 不是 plain scalar，`-x`／`?x`／`:x` 是。帶引號、alias、anchor、tag、區塊／
-# 流式指示都不是安裝器讀得到的裸值（spec AC-7 不合規例「值帶引號」、AC-13「引號值／alias／顯式
-# 標籤 → L＝無」）。
+# 值＝不含空格／tab／\r／# 的連續字元，且是**裸字面值**＝YAML 1.2 §7.3.3 的單行 plain scalar。
+# 對「不含空白與 #」的 token，該文法只剩兩條約束，以下兩條即完整刻畫：
+# (1) 首字元（ns-plain-first）：19 個 c-indicator `- ? : , [ ] { } # & * ! | > ' " % @ \`` 中 16 個
+#     無條件不得起首（`#` 已在通用排除裡）；`-`／`?`／`:` 只有後接 ns-plain-safe（block 語境＝任何
+#     非空白字元）時才可起首——單獨的 `-`／`?`／`:` 不是 plain scalar，`-x`／`?x`／`:x` 是。
+# (2) 後續字元（ns-plain-char）：任何非空白字元皆可，唯 `:` 須後接 ns-plain-safe——token 內的 `:`
+#     必然後接 token 字元，所以等價於**尾字元不得是 `:`**（`codex:` 在 YAML 是 mapping 分隔，
+#     `a:b`、`::x` 是 plain scalar）；`#` 的前接規則因 token 不含 `#` 而不適用。其他尾字元
+#     （`-`／`?`／`,`／`[`／`]`／`{`／`}`）無限制。
+# 帶引號、alias、anchor、tag、區塊／流式指示都不是安裝器讀得到的裸值（spec AC-7 不合規例
+# 「值帶引號」、AC-13「引號值／alias／顯式標籤 → L＝無」）。
 CANDIDATE_PREFIX = "implementer_filler:"
-CANDIDATE_VALUE = r"(?:[^ \t\r#\"'*&!|>\[\]{},%@`?:-][^ \t\r#]*|[?:-][^ \t\r#]+)"
+CANDIDATE_VALUE = r"(?:[^ \t\r#\"'*&!|>\[\]{},%@`?:-][^ \t\r#]*|[?:-][^ \t\r#]+)(?<!:)"
 CANDIDATE_RE = re.compile(r"^implementer_filler:[ \t]+(" + CANDIDATE_VALUE + r")(?:[ \t]+#.*)?[ \t]*$")
 # 行模型排除的換行字元：NEL／LS／PS（YAML 1.1 視為換行）；bare CR 另在切行時判
 FORBIDDEN_BREAKS = ("\x85", "\u2028", "\u2029")
