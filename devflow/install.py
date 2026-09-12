@@ -59,8 +59,12 @@ TOP_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*:(?:$|[ \t])")
 # 純 `---`：其後只能是空格／tab，或空格／tab 再接 # 註解
 DOC_START_RE = re.compile(r"^---(?:[ \t]*|[ \t]+#.*)$")
 # 候選行：`implementer_filler:` ＋ 一個以上空格／tab ＋ 值 ＋〔一個以上空格／tab ＋ # 至行尾〕？＋ 尾端空格／tab？
+# 值＝不含空格／tab／\r／# 的連續字元，且是**裸字面值**：首字元不得是 YAML 的指示字元
+# `" ' * & ! | > [ ] { } , % @ \``（§7.3.3 ns-plain-first 排除的那組——帶引號、alias、anchor、tag、
+# 區塊／流式指示都不是安裝器讀得到的裸值；spec AC-7 不合規例「值帶引號」、AC-13「引號值／alias／
+# 顯式標籤 → L＝無」）。`-`／`?`／`:` 起始的值 YAML 允許為 plain scalar，不排除。
 CANDIDATE_PREFIX = "implementer_filler:"
-CANDIDATE_RE = re.compile(r"^implementer_filler:[ \t]+([^ \t\r#]+)(?:[ \t]+#.*)?[ \t]*$")
+CANDIDATE_RE = re.compile(r"^implementer_filler:[ \t]+([^ \t\r#\"'*&!|>\[\]{},%@`][^ \t\r#]*)(?:[ \t]+#.*)?[ \t]*$")
 # 行模型排除的換行字元：NEL／LS／PS（YAML 1.1 視為換行）；bare CR 另在切行時判
 FORBIDDEN_BREAKS = ("\x85", "\u2028", "\u2029")
 ADVISORY = ("devflow.yml: seats: present but implementer_filler unreadable (missing, malformed, "
@@ -205,7 +209,9 @@ def implementer_filler(text):
        `- ` 序列項、引號鍵、`%` 指令、tab／BOM 起始者都使整檔不合規。
     信封不看頂層鍵行 `:` 之後的內容、也不看縮排行（值層的非法 YAML 不影響）。
     候選行：以 `implementer_filler:` 起始的頂層行，須恰一行且整行匹配 CANDIDATE_RE；
-    值逐 byte 比對、不去引號、不改大小寫。
+    值逐 byte 比對、不改大小寫。帶引號（`"claude-code"`、`'claude-code'`）、alias、anchor、tag
+    等非裸字面值的候選行是不合規（回 None，不是回傳含引號的字串）——「不去引號」是指不把
+    `"claude-code"` 當成 claude-code，不是把它當成合規 token。
     """
     lines = logical_lines(text)
     if lines is None:

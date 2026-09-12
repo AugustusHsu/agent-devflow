@@ -20,6 +20,7 @@
   （含 skip 數）；無 FAIL 即 exit 0。
 """
 import difflib
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -33,6 +34,13 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 INSTALL = REPO / "devflow" / "install.py"
 TEMPLATE_PATH = REPO / "devflow" / "templates" / "entry-block.md"
+
+# 直接載入 install.py 以驗 read_implementer 的回傳值（AC-7 的 L；CI 的 i5 也是這樣取）。
+# 子程序執行仍是判定 exit／stdout／stderr／建檔的來源，這裡只多驗讀取器本身。
+sys.dont_write_bytecode = True
+_spec = importlib.util.spec_from_file_location("devflow_install", INSTALL)
+install = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(install)
 
 BEGIN = b"<!-- devflow:begin -->"
 END = b"<!-- devflow:end -->"
@@ -535,10 +543,12 @@ def _():
         expect(not p.exists("CLAUDE.md"), "devflow.yml only consulted when both are absent")
 
 
-def agents_only(yml, why, stderr=b""):
-    """兩入口檔皆無、devflow.yml 為 yml → dry-run 與實跑皆 exit 0、stderr 恰為 stderr（預設空，
-    advisory 案傳 ADVISORY）；實跑只建 AGENTS.md（讀取器回 None 或非 claude-code）。"""
+def agents_only(yml, why, stderr=b"", value=None):
+    """兩入口檔皆無、devflow.yml 為 yml → read_implementer 恰回 value（預設 None＝不合規；合規但非
+    claude-code 者傳該字串）；dry-run 與實跑皆 exit 0、stderr 恰為 stderr（預設空，advisory 案傳
+    ADVISORY）；實跑只建 AGENTS.md。"""
     with project({"devflow.yml": yml}) as p:
+        eq(install.read_implementer(p.root), value, "read_implementer: " + why)
         rd = p.run("--dry-run")
         eq(rd.returncode, 0, "dry-run exit code: " + why)
         eq(rd.stderr, stderr, "dry-run stderr: " + why)
@@ -550,8 +560,10 @@ def agents_only(yml, why, stderr=b""):
 
 
 def claude_only(yml, why):
-    """兩入口檔皆無、devflow.yml 為 yml → dry-run 與實跑皆 exit 0、stderr 空；實跑只建 CLAUDE.md。"""
+    """兩入口檔皆無、devflow.yml 為 yml → read_implementer 回 claude-code；dry-run 與實跑皆 exit 0、
+    stderr 空；實跑只建 CLAUDE.md。"""
     with project({"devflow.yml": yml}) as p:
+        eq(install.read_implementer(p.root), "claude-code", "read_implementer: " + why)
         rd = p.run("--dry-run")
         ok_run(rd)
         r = p.run()
@@ -617,9 +629,9 @@ def _():
 
 @case("AC-7-none-projection-codex")
 def _():
-    agents_only(YML_CODEX, "compliant value that is not claude-code")
+    agents_only(YML_CODEX, "compliant value that is not claude-code", value="codex")
     agents_only(b"seats:\n  implementer:\n    filler: codex\n" + YML_CODEX,
-                "compliant codex with seats: present: no advisory")
+                "compliant codex with seats: present: no advisory", value="codex")
 
 
 @case("AC-7-none-no-devflow-yml")
@@ -694,12 +706,35 @@ def _():
 
 @case("AC-7-none-candidate-quoted-value")
 def _():
-    agents_only(b"implementer_filler: \"claude-code\"\n", "quotes are part of the token, not stripped")
+    # 帶引號的值不是裸字面值 → 候選行不合規、L＝無（spec AC-7 不合規例、AC-13）；不是「讀到含引號的字串」
+    agents_only(b"implementer_filler: \"claude-code\"\n", "double-quoted value is non-compliant")
+    agents_only(b"implementer_filler: 'claude-code'\n", "single-quoted value is non-compliant")
+    agents_only(NESTED_CLAUDE + b"implementer_filler: \"claude-code\"\n",
+                "seats: + double-quoted value: advisory", ADVISORY)
+    agents_only(NESTED_CLAUDE + b"implementer_filler: 'claude-code'  # c\n",
+                "seats: + single-quoted value with comment: advisory", ADVISORY)
+
+
+@case("AC-7-none-candidate-not-bare-literal")
+def _():
+    # 同類：值以 YAML 指示字元起始，永遠不是 plain scalar（§7.3.3）——alias／anchor／tag／區塊／流式／保留字元；
+    # AC-13 把 alias 與顯式標籤列為「安裝器讀不到（L＝無）」
+    for cand, what in ((b"*f", "alias"), (b"&a", "anchor"), (b"!!str", "tag"), (b"!!str claude-code", "tag + value"),
+                       (b"|", "literal block indicator"), (b">", "folded block indicator"),
+                       (b"[claude-code]", "flow sequence"), (b"{a: b}", "flow mapping"),
+                       (b"%x", "reserved %"), (b"@x", "reserved @"), (b"`x", "reserved backtick")):
+        agents_only(b"implementer_filler: " + cand + b"\n", what + " is not a bare literal")
+        agents_only(NESTED_CLAUDE + b"implementer_filler: " + cand + b"\n", what + " with seats: present: advisory", ADVISORY)
+    # 對照：`-`／`?`／`:` 起始者 YAML 允許為 plain scalar，是合規裸值（只是不等於 claude-code）
+    agents_only(b"implementer_filler: -x\n", "plain scalar may start with -", value="-x")
 
 
 @case("AC-7-none-candidate-case-differs")
 def _():
-    agents_only(b"implementer_filler: Claude-Code\n", "byte comparison, no case folding")
+    # 合規的裸字面值，只是不等於 claude-code：讀得到、無 advisory
+    agents_only(b"implementer_filler: Claude-Code\n", "byte comparison, no case folding", value="Claude-Code")
+    agents_only(NESTED_CLAUDE + b"implementer_filler: Claude-Code\n",
+                "compliant but different value with seats: present: no advisory", value="Claude-Code")
 
 
 @case("AC-7-none-candidate-prefix-only-key")
@@ -936,6 +971,25 @@ def _():
     agents_only(b"seats:\r\n  implementer:\r\n    filler: claude-code\r\n", "CRLF seats: line", ADVISORY)
     agents_only(NESTED_CLAUDE + YML_CLAUDE + YML_CLAUDE, "seats: present, candidate duplicated", ADVISORY)
     agents_only(NESTED_CLAUDE + b"implementer_filler:claude-code\n", "seats: present, candidate malformed", ADVISORY)
+
+
+@case("AC-7-none-advisory-each-malformed-candidate")
+def _():
+    # 候選行的每一類不合規（spec AC-7「不合規例」）配上 seats: → read_implementer None ＋ 恰一行 advisory
+    for cand, what in ((b"implementer_filler:claude-code\n", "no whitespace after colon"),
+                       (b"implementer_filler:\n", "no value"),
+                       (b"implementer_filler:  # c\n", "comment only"),
+                       (b"implementer_filler: claude-code extra\n", "extra token"),
+                       (b"implementer_filler: claude-code#x\n", "# glued to value"),
+                       (YML_CLAUDE + YML_CLAUDE, "duplicate, same value"),
+                       (YML_CLAUDE + YML_CODEX, "duplicate, different values"),
+                       (b"implementer_filler: \"claude-code\"\n", "double-quoted"),
+                       (b"implementer_filler: 'claude-code'\n", "single-quoted"),
+                       (b"implementer_filler_x: claude-code\n", "prefix-only key"),
+                       (b"  " + YML_CLAUDE, "space-indented"),
+                       (b"\t" + YML_CLAUDE, "tab-indented"),
+                       (b"", "missing")):
+        agents_only(NESTED_CLAUDE + cand, what + " with seats: present", ADVISORY)
 
 
 @case("AC-7-none-advisory-seats-envelope-broken")
