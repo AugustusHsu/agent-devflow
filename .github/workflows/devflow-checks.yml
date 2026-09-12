@@ -117,10 +117,12 @@
 # 條件一要求兩個 run 的 blob 相同，而 ❌／exit 1 只在 GATES 為 True 時出現：所以負向 run
 # 跑的那份檢查器裡目標項已經是 True——本地先用同一份檢查器跑過全部反向案例，再上 CI 取
 # 正反兩個 run，順序是「本地正反 → 設 True → CI 正反」，不是「CI 正反 → 設 True」。
-# 本檔另接受 workflow_dispatch（`gh workflow run devflow-checks.yml --ref <分支>`）：
-# 只有 pull_request 觸發時，還沒開 PR 的分支跑不出 run，正反 run 就得等 PR 開了才能取；
-# 手動觸發跑的是該分支 head 本身（不是 GitHub 生成的 merge commit），checkout_sha 事後仍查得到。
-# 手動觸發時 `i1` 沒有 head branch 可驗，會印 ⏭️ 略過，不是 ❌。
+# run 一律來自 pull_request 事件（README 的判定也只認 `event` ＝ `pull_request`）：本檔只有這一個
+# 觸發，還沒開 PR 的分支跑不出 run，所以要升關卡的工單得**先開 PR（草稿即可）再取 run**——
+# 負向輸入推一個探針 commit、取得 ❌ 後 revert（`i5` 的作法），或另開一條 probe 分支＋PR
+# （`i1` 的作法，PR #42）。曾為此加過 workflow_dispatch，因它與 pull_request 共用 required
+# context、較晚的 dispatch success 會蓋掉 PR 的 ❌ 而移除（PR #76 第一輪）；要再加得先換掉
+# context 名稱並以實際 run 證明兩者不同。
 #
 # ── 這七項檢查各自在報告什麼（都只報告，不擋）────────────────────────────
 #   * version：frontmatter 的 version 是不是四碼 a.b.c.d
@@ -211,9 +213,10 @@ name: devflow checks
 on:
   pull_request:
     branches: [main]
-  # 手動觸發：給還沒開 PR 的分支取正反 run 用（README「升 required 的判定方式」；
-  # 理由見檔頭「升 required 的前提」）。跑的是 --ref 指定分支的 head 本身。
-  workflow_dispatch:
+  # 只有 pull_request。不要加 workflow_dispatch：它與 pull_request 產生同一個 required context
+  # （`devflow-checks`），required status check 取該 context 最新一筆結論——PR 的 ❌ 之後對同一個
+  # head 手動觸發一次，較晚的 success 就把失敗蓋掉，而且 dispatch 下 `i1` 還是略過的
+  # （PR #76 第一輪）。正反 run 的取法見檔頭「升 required 的前提」。
 
 permissions:
   contents: read
@@ -780,6 +783,18 @@ jobs:
               return node.value, None
 
 
+          def foreign(what, fn):
+              """執行外來程式碼（載入 installer、呼叫 read_implementer），任何逸出都轉成 exit 2。
+              攔 BaseException 不是 Exception：SystemExit 繼承 BaseException，installer 在 import 期或
+              read_implementer() 內一句 sys.exit(0) 若穿透到頂層，Python 就以 0 結束——整個檢查器判 success、
+              三個關卡靜默失效（PR #76 第一輪）。KeyboardInterrupt 同理。die() 自己的 SystemExit(2) 是
+              在 except 區塊裡才拋的，不會被同一個 except 攔回。只包這兩段，檢查器本身的 sys.exit 不受影響。"""
+              try:
+                  return fn()
+              except BaseException as e:
+                  die("%s：%s: %s" % (what, type(e).__name__, e))
+
+
           def load_installer():
               """直接載入 devflow/install.py 取 L。AC-13：不得另寫一份 AC-7 判定——
               兩份判定就有第三個可漂移的東西。載不進來是佈局問題（exit 2），不是內容違規。"""
@@ -788,10 +803,8 @@ jobs:
               sys.dont_write_bytecode = True        # 別在 devflow/ 留 __pycache__
               spec = importlib.util.spec_from_file_location("devflow_install", I5_INSTALLER)
               module = importlib.util.module_from_spec(spec)
-              try:
-                  spec.loader.exec_module(module)
-              except Exception as e:                # 語法錯、import 錯都算載不進來
-                  die("載入 %s 失敗：%s" % (I5_INSTALLER, e))
+              # 語法錯、import 錯、import 期的 sys.exit 都算載不進來
+              foreign("載入 %s 失敗" % I5_INSTALLER, lambda: spec.loader.exec_module(module))
               if not callable(getattr(module, "read_implementer", None)):
                   die("%s 沒有 read_implementer()，AC-13 的 L 沒有來源" % I5_INSTALLER)
               return module
@@ -829,7 +842,10 @@ jobs:
               if bad:
                   i5_problems.append(bad)
           installer = load_installer()
-          l_val = installer.read_implementer(Path("."))
+          # read_implementer() 依 AC-7 承諾永不報錯；真的逸出（含 sys.exit）是安裝器壞了＝檢查器無法執行，
+          # 不是 devflow.yml 違規，所以是 exit 2 不是 exit 1，也不能讓它以自己的 exit code 收場。
+          l_val = foreign("%s 的 read_implementer() 逸出" % I5_INSTALLER,
+                          lambda: installer.read_implementer(Path(".")))
           if l_val is not None and not isinstance(l_val, str):
               die("%s 的 read_implementer() 回傳 %r，不是字串也不是 None" % (I5_INSTALLER, l_val))
           if i5_problems:
