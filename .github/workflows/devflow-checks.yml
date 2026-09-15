@@ -1223,15 +1223,27 @@ jobs:
                           or SCHEME.match(target)):
                       continue
                   # URL 的順序是 path?query#fragment；兩者都不是路徑的一部分。
-                  path = unquote(target.split("#", 1)[0].split("?", 1)[0])
+                  # 先切再 percent-decode，且**分類（repo-root vs 相對）在 decode 前
+                  # 就定案**——decode 後才看首斜線的話，`/%2Fetc/passwd` 會變成
+                  # `//etc/passwd`、去首斜線成 runner 的絕對路徑 `/etc/passwd`
+                  # 而漏放（審查者 PR #81 第四輪反例）。
+                  raw = target.split("#", 1)[0].split("?", 1)[0]
+                  from_repo_root = raw.startswith("/")
+                  path = unquote(raw[1:] if from_repo_root else raw)
                   if not path:
                       continue
                   nlink += 1
-                  full = path[1:] if path.startswith("/") else os.path.join(base, path)
+                  # decode 後仍可能生出前導斜線（`%2F…`）：那不是 repo 路徑，
+                  # 交給下面的 repo 邊界判定擋掉，不再剝一次。
+                  full = path if from_repo_root else os.path.join(base, path)
                   full = os.path.normpath(full)
                   # 比對的是**路徑段**，不是字首：`..probe.md` 是一個合法的檔名，
                   # 用 startswith("..") 會把它判成逃出 repo（本機實測 exit 1）。
-                  if full == ".." or full.startswith("../"):
+                  # 絕對路徑一律逃出：percent-decode 後可能生出前導斜線
+                  # （`/%2Fetc/passwd` → `/etc/passwd`），那是 runner 的檔案系統，
+                  # 不是 repo；只擋 `..` 會讓它因 os.path.exists 為真而漏放
+                  # （審查者 PR #81 第四輪反例）。
+                  if os.path.isabs(full) or full == ".." or full.startswith("../"):
                       broken.append("%s:%s -> %s（逃出 repo 之外）" % (f, line, target))
                   elif not os.path.exists(full):
                       broken.append("%s:%s -> %s" % (f, line, target))
