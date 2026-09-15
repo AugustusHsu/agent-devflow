@@ -1208,6 +1208,23 @@ jobs:
           print()
           print("── markdown 相對連結指向存在的路徑（%s）" % tag("link"))
           SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
+          # 存在性的 oracle 是 **git 的檔案清單**，不是 runner 的檔案系統。
+          # `os.path.exists` 會跟隨 symlink，使判定取決於 runner 上有沒有那個
+          # 目標：tracked 的 `outside-link -> /etc/passwd` 會放行（假陰性），
+          # 指向不存在目標的同型 symlink 會被擋（假陽性）——兩者在 git 裡都是
+          # mode 120000 的 repo entry，判定卻相反（審查者 PR #81 第五輪反例）。
+          # 這也是 #22 已知的 `.git/config` 漏放的同一個根因。
+          tracked_set = set(files)
+          tracked_dirs = set()
+          for _t in files:
+              _p = _t
+              while "/" in _p:
+                  _p = _p.rsplit("/", 1)[0]
+                  tracked_dirs.add(_p)
+
+          def in_repo(p):
+              """p 是不是 git 認得的 repo entry（檔案或目錄）。"""
+              return p in tracked_set or p in tracked_dirs
           broken = []
           nlink = 0
           for f in md_files:
@@ -1245,7 +1262,7 @@ jobs:
                   # （審查者 PR #81 第四輪反例）。
                   if os.path.isabs(full) or full == ".." or full.startswith("../"):
                       broken.append("%s:%s -> %s（逃出 repo 之外）" % (f, line, target))
-                  elif not os.path.exists(full):
+                  elif not in_repo(full):
                       broken.append("%s:%s -> %s" % (f, line, target))
           if broken:
               report("link", "有相對連結指向不存在或 repo 之外的路徑", broken)
