@@ -1214,9 +1214,12 @@ jobs:
               d = docs[f]
               base = os.path.dirname(f)
               for target, line in link_targets(d["tokens"], d["env"], d["lines"]):
-                  # 不是 repo 相對連結的，一律略過：fragment、network-path（`//host/path`）、
-                  # host-absolute（`/pricing`——那是站台根，不是 repo 根）、有 scheme 的 URL。
-                  if (target.startswith("#") or target.startswith("/")
+                  # fragment 與有 scheme 的 URL 不是 repo 路徑；`//host/path` 是
+                  # network-path URL（無 scheme 但指向外部主機），也不是。
+                  # 但單一 `/` 開頭的 target 在 GitHub 上是 **repo-root 相對連結**
+                  # （`/devflow/WORKFLOW.md` 指向 repo 根），要檢查（審查者 PR #81
+                  # 第三輪：一律排除會漏放）。
+                  if (target.startswith("#") or target.startswith("//")
                           or SCHEME.match(target)):
                       continue
                   # URL 的順序是 path?query#fragment；兩者都不是路徑的一部分。
@@ -1224,7 +1227,7 @@ jobs:
                   if not path:
                       continue
                   nlink += 1
-                  full = os.path.join(base, path)
+                  full = path[1:] if path.startswith("/") else os.path.join(base, path)
                   full = os.path.normpath(full)
                   # 比對的是**路徑段**，不是字首：`..probe.md` 是一個合法的檔名，
                   # 用 startswith("..") 會把它判成逃出 repo（本機實測 exit 1）。
