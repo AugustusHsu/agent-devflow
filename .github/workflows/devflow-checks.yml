@@ -1215,7 +1215,10 @@ jobs:
           # mode 120000 的 repo entry，判定卻相反（審查者 PR #81 第五輪反例）。
           # 這也是 #22 已知的 `.git/config` 漏放的同一個根因。
           tracked_set = set(files)
-          tracked_dirs = set()
+          # repo 根一定存在，但它不是任何 tracked path 的前綴推導結果
+          # （`a/b.md` 只推得出 `a`）——`[x](.)`、`[x](./)`、`[x](devflow/..)`
+          # 都 normpath 成 `.`，不預置就會誤擋（審查者 PR #81 第六輪反例）。
+          tracked_dirs = {"."}
           for _t in files:
               _p = _t
               while "/" in _p:
