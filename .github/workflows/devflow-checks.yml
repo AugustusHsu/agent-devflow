@@ -555,16 +555,22 @@ jobs:
 
 
           def r9_sections(tokens):
-              """檔案裡出現過的 R9 節標題，依出現順序。空清單＝整檔未分節。"""
+              """檔案裡出現過的 R9 節標題，依出現順序。空清單＝整檔未分節。
+
+              只認**文件層級**的標題：blockquote／list 等容器內的 `## 通用` 是引用或
+              舉例，不是這份檔案的分節（審查者 PR #81 第一輪反例：`> ## 通用` 會讓
+              節外的表被誤判為合格）。markdown-it 對容器內的 token 設 level > 0。"""
               out = []
-              heading = False
+              heading_level = None
               for t in tokens:
                   if t.type == "heading_open":
-                      heading = True
+                      heading_level = t.level
                   elif t.type == "heading_close":
-                      heading = False
-                  elif heading and t.type == "inline":
-                      heading = False
+                      heading_level = None
+                  elif heading_level is not None and t.type == "inline":
+                      lv, heading_level = heading_level, None
+                      if lv != 0:
+                          continue
                       name = section_name(t.content)
                       if name:
                           out.append(name)
@@ -573,23 +579,36 @@ jobs:
 
           def tables_of(tokens, lines):
               """每張表連同它所在的 R9 節（`section`；不在任何節下＝None）。
-              節的範圍＝從該節標題到下一個標題為止：只看「最近的那個標題是不是節標題」，
-              不看層級——R9 沒有規定節標題的層級，比層級就是發明規則。"""
+
+              節的範圍＝從該節標題到下一個**同層或更淺**的標題為止。更深的子標題
+              （`## 通用` 下的 `### 細節`）仍在該節內——把子標題當成節結束會誤擋
+              合法的結構（審查者 PR #81 第一輪反例）。R9 沒有規定節標題的層級，
+              所以層級由該檔實際使用的節標題決定，不寫死 h2。
+
+              只認文件層級的標題：blockquote／list 等容器內的標題（token level > 0）
+              是引用或舉例，既不開節也不關節。"""
               out = []
               cur = part = row = None
               section = None
-              heading = False
+              section_depth = None
+              depth = None
               for t in tokens:
                   if t.type == "heading_open":
-                      heading = True
+                      depth = int(t.tag[1:]) if t.tag[:1] == "h" and t.tag[1:].isdigit() else None
+                      if t.level != 0:
+                          depth = None          # 容器內的標題：不開節也不關節
                       continue
                   if t.type == "heading_close":
-                      heading = False
                       continue
-                  if heading and t.type == "inline":
-                      section = section_name(t.content)
-                      heading = False
+                  if depth is not None and t.type == "inline":
+                      name = section_name(t.content)
+                      if name:
+                          section, section_depth = name, depth
+                      elif section_depth is not None and depth <= section_depth:
+                          section = section_depth = None
+                      depth = None
                       continue
+                  depth = None
                   if t.type == "table_open":
                       cur = {"line": locate(lines, t), "header": [], "header_line": None,
                              "body": [], "section": section}
@@ -1157,9 +1176,6 @@ jobs:
                                       % (where, "」「".join(TABLE_SECTIONS),
                                          "、".join(sections)))
                       continue
-                  if not t["body"]:
-                      problems.append("%s 的表沒有任何資料列" % where)
-                      continue
                   col = t["header"].index(STATUS_COL)
                   short = [r for r in t["body"] if len(r["cells"]) <= col]
                   if short:
@@ -1190,7 +1206,7 @@ jobs:
               d = docs[f]
               base = os.path.dirname(f)
               for target, line in link_targets(d["tokens"], d["env"], d["lines"]):
-                  if target.startswith("#") or SCHEME.match(target):
+                  if target.startswith("#") or target.startswith("//") or SCHEME.match(target):
                       continue
                   # URL 的順序是 path?query#fragment；兩者都不是路徑的一部分。
                   path = unquote(target.split("#", 1)[0].split("?", 1)[0])
