@@ -585,13 +585,23 @@ jobs:
               合法的結構（審查者 PR #81 第一輪反例）。R9 沒有規定節標題的層級，
               所以層級由該檔實際使用的節標題決定，不寫死 h2。
 
+              用**堆疊**保存外層節，不是單一變數：`## 通用` 下的 `### 通用` 結束後
+              仍應回到外層的「通用」，單一 `section_depth` 會把整個節清空（審查者
+              PR #81 第二輪反例）。堆疊每層記 (層級, 節名或 None)。
+
               只認文件層級的標題：blockquote／list 等容器內的標題（token level > 0）
               是引用或舉例，既不開節也不關節。"""
               out = []
               cur = part = row = None
-              section = None
-              section_depth = None
+              stack = []          # [(depth, section_or_None), ...]，depth 遞增
               depth = None
+
+              def current_section():
+                  for _, name in reversed(stack):
+                      if name:
+                          return name
+                  return None
+
               for t in tokens:
                   if t.type == "heading_open":
                       depth = int(t.tag[1:]) if t.tag[:1] == "h" and t.tag[1:].isdigit() else None
@@ -601,17 +611,15 @@ jobs:
                   if t.type == "heading_close":
                       continue
                   if depth is not None and t.type == "inline":
-                      name = section_name(t.content)
-                      if name:
-                          section, section_depth = name, depth
-                      elif section_depth is not None and depth <= section_depth:
-                          section = section_depth = None
+                      while stack and stack[-1][0] >= depth:
+                          stack.pop()
+                      stack.append((depth, section_name(t.content)))
                       depth = None
                       continue
                   depth = None
                   if t.type == "table_open":
                       cur = {"line": locate(lines, t), "header": [], "header_line": None,
-                             "body": [], "section": section}
+                             "body": [], "section": current_section()}
                   elif t.type == "table_close":
                       if cur is not None:
                           out.append(cur)
@@ -1206,14 +1214,17 @@ jobs:
               d = docs[f]
               base = os.path.dirname(f)
               for target, line in link_targets(d["tokens"], d["env"], d["lines"]):
-                  if target.startswith("#") or target.startswith("//") or SCHEME.match(target):
+                  # 不是 repo 相對連結的，一律略過：fragment、network-path（`//host/path`）、
+                  # host-absolute（`/pricing`——那是站台根，不是 repo 根）、有 scheme 的 URL。
+                  if (target.startswith("#") or target.startswith("/")
+                          or SCHEME.match(target)):
                       continue
                   # URL 的順序是 path?query#fragment；兩者都不是路徑的一部分。
                   path = unquote(target.split("#", 1)[0].split("?", 1)[0])
                   if not path:
                       continue
                   nlink += 1
-                  full = path[1:] if path.startswith("/") else os.path.join(base, path)
+                  full = os.path.join(base, path)
                   full = os.path.normpath(full)
                   # 比對的是**路徑段**，不是字首：`..probe.md` 是一個合法的檔名，
                   # 用 startswith("..") 會把它判成逃出 repo（本機實測 exit 1）。
