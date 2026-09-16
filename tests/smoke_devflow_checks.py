@@ -208,29 +208,27 @@ def mut_tables_merge_bad_source(root):
 
 def mut_tables_merge_dup(root):
     """同一個 mapping 兩個 `<<`：PyYAML 後者覆蓋先者，本檢查先者優先，語意分歧。
-    改 coordinator 不改 implementer：後者會連帶讓 i5 ❌。"""
+    改 coordinator 不改 implementer：後者會連帶讓 i5 ❌。
+
+    先改 coordinator 再插 anchor：反過來的話 anchor 區塊裡的 `filler: hermes`
+    會變成「第一個」，replace_first 就打不到 coordinator（本檔曾犯此錯）。"""
     edit(root, "devflow.yml",
-         lambda t: replace_first(
-             t.replace("seats:", "_m1: &m1 {filler: hermes}\n"
-                                 "_m2: &m2 {filler: no-such-tool}\n\nseats:", 1),
-             "filler: hermes", "<<: *m1\n    <<: *m2"))
+         lambda t: "_m1: &m1 {filler: hermes}\n_m2: &m2 {filler: no-such-tool}\n\n"
+                   + replace_first(t, "filler: hermes", "<<: *m1\n    <<: *m2"))
 
 
 def mut_tables_merge_deep_bad(root):
     """直接值命中，但可達的深層 merge 來源壞掉——結構驗證不得被 lookup 短路略過。"""
     edit(root, "devflow.yml",
-         lambda t: replace_first(
-             t.replace("seats:", "_deep: &deep\n  <<: scalar-here\n\nseats:", 1),
-             "filler: hermes", "<<: *deep\n    filler: hermes"))
+         lambda t: "_deep: &deep\n  <<: scalar-here\n\n"
+                   + replace_first(t, "filler: hermes", "<<: *deep\n    filler: hermes"))
 
 
 def mut_tables_merge_later_bad(root):
     """第一個來源有效，後續來源壞掉——同上，不得因先命中而略過。"""
     edit(root, "devflow.yml",
-         lambda t: replace_first(
-             t.replace("seats:", "_good: &good {filler: hermes}\n"
-                                 "_later: &later\n  <<: scalar-x\n\nseats:", 1),
-             "filler: hermes", "<<: [*good, *later]"))
+         lambda t: "_good: &good {filler: hermes}\n_later: &later\n  <<: scalar-x\n\n"
+                   + replace_first(t, "filler: hermes", "<<: [*good, *later]"))
 
 
 CASES = [
