@@ -42,7 +42,8 @@ devflow/
 CLAUDE.md AGENTS.md       只含 devflow:begin/end 區塊（由 templates/entry-block.md 產生）
 docs/spec/                本 repo 自己的規格（dogfood）
 docs/guide/               人類專用
-.github/workflows/        devflow-checks.yml：CI 檢查器（check 列入 branch protection）。每項檢查各有關卡開關（`GATES`）：關卡失敗擋合併，其餘建議只寫進 log；哪幾項是關卡見該檔檔頭
+.github/workflows/        devflow-checks.yml：CI 入口（check 列入 branch protection），呼叫 scripts/devflow_checks.py
+scripts/                  devflow_checks.py：CI 檢查器本體。每項檢查各有關卡開關（`GATES`）：關卡失敗擋合併，其餘建議只寫進 log；哪幾項是關卡見該檔檔頭
 ```
 
 ## 執行順序
@@ -76,10 +77,11 @@ docs/guide/               人類專用
 - **required 現況**（2026-09-11 起）：`devflow-checks` 已列入 main 的 branch protection
   `required_status_checks`。檢查器裡每項檢查各有一個關卡開關（`GATES`；True＝關卡，False＝advisory）——
   關卡項 `❌` 使檢查器 exit 1、check 變紅、擋合併；advisory 項只寫進 log，不擋。
-  哪幾項是關卡、分界為何（定義域封不封閉），以 `devflow-checks.yml` 檔頭為準，本檔不複述。
+  哪幾項是關卡、分界為何（定義域封不封閉），以 `scripts/devflow_checks.py` 檔頭為準，本檔不複述。
 - **升 required 的判定方式**（已於 `i1` 首次走通；日後其餘 advisory 項升級仍適用，各項的 required 目標記在 #22）：
   - **前提**：workflow 把「這次實際 checkout 的 commit SHA」（`checkout_sha`）與「該 commit 上
-    `devflow-checks.yml` 的 blob id」（`checker_blob`）印進 log——PR #41 起印出。
+    檢查器的 blob id」（`checker_blob`）印進 log——PR #41 起印出；#82 把檢查器搬到
+    `scripts/devflow_checks.py` 後，`checker_blob` 印的是該腳本的 blob。
     `pull_request` 事件跑的是 GitHub 生成的 merge commit，該 commit 在 PR 合併後就查不到
     （`refs/pull/<N>/merge` 隨之消失），沒有這兩行，事後無從回推當時執行的是哪一份檔案。
   - **條件一**：正、反兩個 run 的 log 印出的 blob 相同——同一份檢查器，才談得上正反驗證。
