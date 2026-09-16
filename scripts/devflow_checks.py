@@ -176,10 +176,13 @@
 #       fail closed：推導不出來（YAML 壞掉、缺 `forge`／`seats`、implementer／reviewer 省略、
 #       職位不是 mapping、缺 `filler`、值不是字串、本項要讀的鍵重複）一律 ❌，不跳過也不 exit 2，
 #       理由寫在該節開頭。`filler` 的值在該職位的目錄找不到 `<值>.md` 也是 ❌。
-#   假陽性：合法設定裡會被擋的寫法——用 merge key（`<<: *base`）間接提供 `forge`／`filler`／職位：
-#       本項只 compose 不 construct（同 i5），merge key 不展開，會判成「缺」。alias（`reviewer: *x`、
-#       `filler: *f`）compose 後直接是被指向的節點，不受影響。本 repo 的 devflow.yml 沒有這種寫法；
-#       i5 對根、seats、seats.implementer 已經依 AC-13 擋 merge key，本項只是延伸到它要讀的另外兩個職位。
+#       假陽性：合法設定裡會被擋的寫法——AC-13 明列的三個 mapping（根、`seats`、
+#       `seats.implementer`）出現 merge key（`<<: *base`）時本項會判成「缺」。那是
+#       **與 `i5` 一致**：AC-13 明文要求那三處不展開 `<<`，`i5` 本來就擋。
+#       `seats.reviewer`／`seats.coordinator` 內層的 merge key **不在 AC-13 範圍**，
+#       既有 `i5` 對它們是通過的，所以本項依 YAML merge 語意展開（tables_get），
+#       不自行替 required gate 補規格沒有的禁令（審查者 PR #88 第二輪）。
+#       alias（`reviewer: *x`、`filler: *f`）compose 後直接是被指向的節點，不受影響。
 #       本地以反例複驗：`forge` 改 gitlab 後刪 github.md、`coordinator` 改 human 或整個省略後刪
 #       hermes.md，都 exit 0。**不宣稱「不存在假陽性」**。
 #
@@ -1175,15 +1178,55 @@ print("── 對照表集合：%s 指名的對照表都受版控（%s）" % (I5
 # 只對本項要讀的鍵負責（tables_get）：同名鍵重複＝推導有歧義 → ❌；同一個 mapping 裡
 # 別的鍵有什麼毛病不是本項的事（根、seats、seats.implementer 的鍵由 i5 依 AC-13 管）。
 
-def tables_get(parent, key, where):
+YAML_MERGE = "tag:yaml.org,2002:merge"
+
+
+def tables_merge_sources(parent):
+    """parent 裡 `<<` 帶進來的 mapping，依 YAML merge 語意由先到後。
+
+    AC-13 只禁止**它明列的三個 mapping**（根、`seats`、`seats.implementer`）出現
+    merge key；`seats.reviewer`／`seats.coordinator` 不在該範圍，既有 `i5` 對它們
+    的 merge key 實際是通過的（審查者 PR #88 第二輪實測）。本項若一律不展開，
+    就等於自行替 required gate 補上規格沒有的禁令——那是擴張規格，不是沿用。
+
+    仍不改用 `safe_load`：重複鍵、非字串鍵的檢查要靠 compose 的節點樹。
+    只在查不到直接鍵時，才依 merge 語意往 `<<` 的來源找。"""
+    out = []
+    for k, v in parent.value:
+        if not (isinstance(k, yaml.ScalarNode) and k.tag == YAML_MERGE):
+            continue
+        # `<<: *a` 是單一 mapping；`<<: [*a, *b]` 是序列，前者優先。
+        items = v.value if isinstance(v, yaml.SequenceNode) else [v]
+        for it in items:
+            if isinstance(it, yaml.MappingNode) and it.tag == YAML_MAP:
+                out.append(it)
+    return out
+
+
+def tables_get(parent, key, where, _seen=None):
     """parent（已確認是 !!map）裡 !!str 鍵 key 的值節點。回傳 (節點或 None, 違規或 None)。
     鍵以 compose 後的 .value 比對（引號鍵、alias 指向的鍵一視同仁，同 mapping_entries）。
-    出現不只一次是歧義：construct 是 last-wins，別的 parser 可能 first-wins 或直接報錯。"""
+    出現不只一次是歧義：construct 是 last-wins，別的 parser 可能 first-wins 或直接報錯。
+
+    直接鍵找不到時，依 YAML merge 語意往 `<<` 的來源找（直接鍵優先於 merge 來源，
+    多個來源以先出現者優先）——理由見 tables_merge_sources。"""
     hits = [v for k, v in parent.value
             if isinstance(k, yaml.ScalarNode) and k.tag == YAML_STR and k.value == key]
     if len(hits) > 1:
         return None, "%s 的鍵 `%s` 出現 %d 次，推導有歧義" % (where, key, len(hits))
-    return (hits[0] if hits else None), None
+    if hits:
+        return hits[0], None
+    seen = _seen if _seen is not None else set()
+    if id(parent) in seen:          # anchor 互指造成的環，停住
+        return None, None
+    seen.add(id(parent))
+    for src in tables_merge_sources(parent):
+        node, bad = tables_get(src, key, where, seen)
+        if bad:
+            return None, bad
+        if node is not None:
+            return node, None
+    return None, None
 
 
 tables_problems = []

@@ -190,6 +190,13 @@ def ok_tables_coordinator_omitted(root):
 #   mutate  = 怎麼把輸入弄壞（None＝不改檔案，只靠環境變數）
 #   env     = 疊在基準環境上的額外變數
 #   expect  = 輸出裡必須出現的訊息片段，用來確認擋下來的是**這一項**而不是別的
+def mut_tables_merge_missing(root):
+    """merge key 帶進來的 `filler` 指向不存在的工具——展開後仍要擋。
+    改 coordinator 不改 implementer：後者會連帶讓 i5 ❌。"""
+    edit(root, "devflow.yml",
+         lambda t: replace_first(t, "filler: hermes", "<<: {filler: no-such-tool}"))
+
+
 CASES = [
     ("d2", "d2", mut_d2, {}, "的 devflow 區塊沒有關閉"),
     ("i1", "i1", None, {"GITHUB_HEAD_REF": "no-issue-number"},
@@ -201,15 +208,28 @@ CASES = [
     ("tables:rm-coder", "tables", mut_tables_coder, {}, "指名的對照表不在版控內"),
     ("tables:no-such-tool", "tables", mut_tables_filler, {}, "指名的對照表不在版控內"),
     ("tables:no-forge", "tables", mut_tables_no_forge, {}, "推導不出必需的對照表"),
+    ("tables:merge-missing", "tables", mut_tables_merge_missing, {},
+     "指名的對照表不在版控內"),
     ("table", "table", mut_table, {}, "的對照表形狀不合 R9"),
     ("link", "link", mut_link, {}, "有相對連結指向不存在或 repo 之外的路徑"),
 ]
 
 # 「突變後仍應通過」的正向案例：判準不能誤擋正當變更。
 # 目標關卡照樣以 DEVFLOW_GATE_<KEY>=1 打開——就算它日後被降為建議，這裡驗的仍是「當關卡也不擋」。
+def ok_tables_merge_key(root):
+    """`seats.reviewer.filler` 只由 merge key 提供。
+
+    AC-13 只禁止它明列的三個 mapping（根、`seats`、`seats.implementer`）出現
+    merge key；`reviewer` 不在範圍內，既有 `i5` 對它是通過的。`tables` 若不
+    展開就等於自行補上規格沒有的禁令（審查者 PR #88 第二輪的精確反例）。"""
+    edit(root, "devflow.yml",
+         lambda t: replace_first(t, "filler: codex", "<<: {filler: codex}"))
+
+
 PASSING = [
     ("tables:forge-gitlab", "tables", ok_tables_forge_gitlab),
     ("tables:no-coordinator", "tables", ok_tables_coordinator_omitted),
+    ("tables:merge-key", "tables", ok_tables_merge_key),
 ]
 
 
