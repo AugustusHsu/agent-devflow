@@ -52,12 +52,23 @@ def repo_files():
 
 
 def make_sandbox(files, dest):
+    """把 index 裡的檔案重造到 dest。
+
+    **symlink 必須原樣重建，不能跟隨**：`Path.is_file()` 對 dangling symlink
+    回 False（整個被略過），`shutil.copy2` 對活的 symlink 會複製目標內容、
+    把 mode 120000 變成 100644。兩者都使沙箱與 index 不等價——PR #81 第五輪
+    的 symlink 反例在跟隨式沙箱裡不但重現不出來，還會把正確的檢查器誤判成
+    錯誤（審查者 PR #83 第一輪實測：來源 exit 0、沙箱 exit 1）。
+    """
     for rel in files:
         src = REPO / rel
-        if not src.is_file():          # 已刪除但還在 index 的，跳過
-            continue
         dst = dest / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
+        if src.is_symlink():           # mode 120000：照抄 target 字串，不跟隨
+            os.symlink(os.readlink(src), dst)
+            continue
+        if not src.is_file():          # 已刪除但還在 index 的，跳過
+            continue
         shutil.copy2(src, dst)
     for args in (["git", "-c", "init.defaultBranch=main", "init", "-q"],
                  ["git", "add", "-A"]):
@@ -211,7 +222,11 @@ def main():
             code, out = run_checker(work, gate=gate, extra_env=extra_env)
             marks = crosses(out)
             hit = any(expect in m for m in marks)
-            good = (code == 1 and hit)
+            # exit 1 **只能由目標項造成**（PR #81「Phase 1 第三出口」的條件三）：
+            # 只檢查「有沒有命中目標」會讓「目標錯誤 ＋ 別的錯誤」一起通過，
+            # 那時 exit 1 證明不了是哪一項擋的（審查者 PR #83 第一輪以故障
+            # 替身實測：七案各多一個非目標 ❌，煙霧測試仍印「全部通過」）。
+            good = (code == 1 and hit and len(marks) == 1)
             print("負向  %-8s 應擋              exit %d（期望 1）  ❌ %d 條  %s"
                   % (gate, code, len(marks), "PASS" if good else "FAIL"))
             for m in marks:
