@@ -1,5 +1,5 @@
 ---
-version: 0.0.0.0
+version: 0.0.0.1
 ---
 
 # install：把入口區塊安全插入其他專案的 CLAUDE.md／AGENTS.md
