@@ -1191,15 +1191,22 @@ def tables_merge_sources(parent, where):
     就等於自行替 required gate 補上規格沒有的禁令——那是擴張規格，不是沿用。
 
     仍不改用 `safe_load`：重複鍵、非字串鍵的檢查要靠 compose 的節點樹。
-    只在查不到直接鍵時，才依 merge 語意往 `<<` 的來源找。
 
-    `<<` 的值不是 mapping、也不是「全是 mapping 的 sequence」時 **fail closed**：
-    那是 PyYAML `safe_load` 自己會拋 ConstructorError 的輸入，靜默跳過等於替它
-    發明一套比 parser 寬鬆的語意（AC-3；審查者 PR #88 第三輪反例）。"""
+    **同一個 mapping 只允許一個 `<<`**：PyYAML 對兩個 `<<` 是後者覆蓋先者，
+    與本函式「先出現者優先」相反（審查者 PR #88 第四輪第 11 案：`safe_load`
+    得 `nosuchtool`、checker 得 `codex`）。語意分歧的輸入一律擋，不挑一邊。
+
+    `<<` 的值不是 mapping、也不是「全是 mapping 的 sequence」時 fail closed：
+    那是 PyYAML `safe_load` 自己會拋 ConstructorError 的輸入。"""
     out = []
+    seen_merge = False
     for k, v in parent.value:
         if not (isinstance(k, yaml.ScalarNode) and k.tag == YAML_MERGE):
             continue
+        if seen_merge:
+            return None, ("%s 有多個 `<<`：PyYAML 是後者覆蓋先者，本檢查是先者"
+                          "優先，語意分歧" % where)
+        seen_merge = True
         # `<<: *a` 是單一 mapping；`<<: [*a, *b]` 是序列，前者優先。
         items = v.value if isinstance(v, yaml.SequenceNode) else [v]
         for it in items:
@@ -1210,22 +1217,46 @@ def tables_merge_sources(parent, where):
     return out, None
 
 
+def tables_validate_merge(parent, where, _seen=None):
+    """遍歷 parent 可達的整個 merge graph，驗證結構。回傳違規或 None。
+
+    **與值查找拆開**（審查者 PR #88 第四輪）：查找會在直接鍵命中或第一個來源
+    有值時短路，壞掉的深層來源就永遠驗不到。結構是有限且可遍歷的，先整個驗完
+    再查值。"""
+    seen = _seen if _seen is not None else set()
+    if id(parent) in seen:
+        return None
+    seen.add(id(parent))
+    sources, bad = tables_merge_sources(parent, where)
+    if bad:
+        return bad
+    for src in sources:
+        bad = tables_validate_merge(src, where, seen)
+        if bad:
+            return bad
+    return None
+
+
 def tables_get(parent, key, where, _seen=None):
     """parent（已確認是 !!map）裡 !!str 鍵 key 的值節點。回傳 (節點或 None, 違規或 None)。
     鍵以 compose 後的 .value 比對（引號鍵、alias 指向的鍵一視同仁，同 mapping_entries）。
     出現不只一次是歧義：construct 是 last-wins，別的 parser 可能 first-wins 或直接報錯。
 
     直接鍵找不到時，依 YAML merge 語意往 `<<` 的來源找（直接鍵優先於 merge 來源，
-    多個來源以先出現者優先）——理由見 tables_merge_sources。"""
+    單一 `<<` 的 sequence 內先出現者優先）。呼叫端須先跑 tables_validate_merge。"""
     hits = [v for k, v in parent.value
             if isinstance(k, yaml.ScalarNode) and k.tag == YAML_STR and k.value == key]
     if len(hits) > 1:
         return None, "%s 的鍵 `%s` 出現 %d 次，推導有歧義" % (where, key, len(hits))
-    sources, bad = tables_merge_sources(parent, where)
-    if bad:                         # `<<` 本身壞掉：不論直接鍵有沒有命中都擋
-        return None, bad
+    if _seen is None:               # 進入點：先驗整個 merge graph 的結構
+        bad = tables_validate_merge(parent, where)
+        if bad:
+            return None, bad
     if hits:
         return hits[0], None
+    sources, bad = tables_merge_sources(parent, where)
+    if bad:
+        return None, bad
     seen = _seen if _seen is not None else set()
     if id(parent) in seen:          # anchor 互指造成的環，停住
         return None, None
