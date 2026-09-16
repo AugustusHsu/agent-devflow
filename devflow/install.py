@@ -21,7 +21,7 @@ Python ≥ 3.8、stdlib only；讀寫一律 bytes，區塊外逐 byte 不變（D
 「存在」以 os.path.lexists 判：symlink 一律視為存在；dangling symlink、目錄、指向目錄的
 symlink 都是 exit 2，安裝器不替使用者決定該建到哪裡。
 
-與 `d2` 判準 B 的關係（.github/workflows/devflow-checks.yml 的 entry_block()）：
+與 `d2` 判準 B 的關係（scripts/devflow_checks.py 的 entry_block()）：
 - 標記行＝檔案 bytes 以 \\n 切行、每行 UTF-8 decode（errors="replace"）後
   `line.strip() == "<!-- devflow:begin -->"`（或 end）。字面比對，不看 markdown 結構、
   不看縮排、不看是否在 code fence 內。第一組的選取與 strip() 語意與判準 B 一致。
