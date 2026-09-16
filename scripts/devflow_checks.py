@@ -1181,8 +1181,9 @@ print("── 對照表集合：%s 指名的對照表都受版控（%s）" % (I5
 YAML_MERGE = "tag:yaml.org,2002:merge"
 
 
-def tables_merge_sources(parent):
+def tables_merge_sources(parent, where):
     """parent 裡 `<<` 帶進來的 mapping，依 YAML merge 語意由先到後。
+    回傳 (mapping 清單, 違規或 None)。
 
     AC-13 只禁止**它明列的三個 mapping**（根、`seats`、`seats.implementer`）出現
     merge key；`seats.reviewer`／`seats.coordinator` 不在該範圍，既有 `i5` 對它們
@@ -1190,7 +1191,11 @@ def tables_merge_sources(parent):
     就等於自行替 required gate 補上規格沒有的禁令——那是擴張規格，不是沿用。
 
     仍不改用 `safe_load`：重複鍵、非字串鍵的檢查要靠 compose 的節點樹。
-    只在查不到直接鍵時，才依 merge 語意往 `<<` 的來源找。"""
+    只在查不到直接鍵時，才依 merge 語意往 `<<` 的來源找。
+
+    `<<` 的值不是 mapping、也不是「全是 mapping 的 sequence」時 **fail closed**：
+    那是 PyYAML `safe_load` 自己會拋 ConstructorError 的輸入，靜默跳過等於替它
+    發明一套比 parser 寬鬆的語意（AC-3；審查者 PR #88 第三輪反例）。"""
     out = []
     for k, v in parent.value:
         if not (isinstance(k, yaml.ScalarNode) and k.tag == YAML_MERGE):
@@ -1198,9 +1203,11 @@ def tables_merge_sources(parent):
         # `<<: *a` 是單一 mapping；`<<: [*a, *b]` 是序列，前者優先。
         items = v.value if isinstance(v, yaml.SequenceNode) else [v]
         for it in items:
-            if isinstance(it, yaml.MappingNode) and it.tag == YAML_MAP:
-                out.append(it)
-    return out
+            if not (isinstance(it, yaml.MappingNode) and it.tag == YAML_MAP):
+                return None, ("%s 的 `<<` 來源不是 !!map 的 MappingNode：%s"
+                              % (where, node_desc(it)))
+            out.append(it)
+    return out, None
 
 
 def tables_get(parent, key, where, _seen=None):
@@ -1214,13 +1221,16 @@ def tables_get(parent, key, where, _seen=None):
             if isinstance(k, yaml.ScalarNode) and k.tag == YAML_STR and k.value == key]
     if len(hits) > 1:
         return None, "%s 的鍵 `%s` 出現 %d 次，推導有歧義" % (where, key, len(hits))
+    sources, bad = tables_merge_sources(parent, where)
+    if bad:                         # `<<` 本身壞掉：不論直接鍵有沒有命中都擋
+        return None, bad
     if hits:
         return hits[0], None
     seen = _seen if _seen is not None else set()
     if id(parent) in seen:          # anchor 互指造成的環，停住
         return None, None
     seen.add(id(parent))
-    for src in tables_merge_sources(parent):
+    for src in sources:
         node, bad = tables_get(src, key, where, seen)
         if bad:
             return None, bad

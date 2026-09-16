@@ -197,6 +197,15 @@ def mut_tables_merge_missing(root):
          lambda t: replace_first(t, "filler: hermes", "<<: {filler: no-such-tool}"))
 
 
+def mut_tables_merge_bad_source(root):
+    """`<<` 指向 scalar——PyYAML safe_load 自己會拋 ConstructorError 的輸入。
+    直接鍵存在也要擋：靜默跳過等於替 parser 發明一套更寬鬆的語意（AC-3）。
+    改 coordinator 不改 implementer：後者會連帶讓 i5 ❌。"""
+    edit(root, "devflow.yml",
+         lambda t: replace_first(t, "filler: hermes",
+                                 "<<: not-a-mapping\n    filler: hermes"))
+
+
 CASES = [
     ("d2", "d2", mut_d2, {}, "的 devflow 區塊沒有關閉"),
     ("i1", "i1", None, {"GITHUB_HEAD_REF": "no-issue-number"},
@@ -210,6 +219,8 @@ CASES = [
     ("tables:no-forge", "tables", mut_tables_no_forge, {}, "推導不出必需的對照表"),
     ("tables:merge-missing", "tables", mut_tables_merge_missing, {},
      "指名的對照表不在版控內"),
+    ("tables:merge-bad-source", "tables", mut_tables_merge_bad_source, {},
+     "推導不出必需的對照表"),
     ("table", "table", mut_table, {}, "的對照表形狀不合 R9"),
     ("link", "link", mut_link, {}, "有相對連結指向不存在或 repo 之外的路徑"),
 ]
