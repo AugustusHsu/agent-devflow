@@ -702,11 +702,19 @@ def tables_of(tokens, lines):
 # 它也給 (行, 欄)，行號直接可用，不必回頭在原文搜字串（那正是第三輪行號錯置的
 # 根因）。容錯：HTMLParser 對畸形輸入不拋例外，照 HTML5 的錯誤復原規則繼續。
 class _TableTagFinder(HTMLParser):
-    """找出 raw HTML 裡的 `<table>` start tag，回報其相對行號（1-based）。"""
+    """找出 raw HTML 裡的 `<table>` start tag，回報其相對行號（1-based）。
+
+    `set_cdata_mode` 是 HTMLParser 的內部開關：碰到 `<script>`／`<style>` 後把後續
+    內容當 raw text，裡面的標籤不再回報。但 **markdown 的 `<script>` 在 GitHub 上會
+    被清掉、裡面的內容照樣渲染**——審查者 PR #92 第四輪實測 `<script>` 內的 table
+    最終有渲染出來。對照表檔不該有 script/style，一律當成普通標籤繼續解析。"""
 
     def __init__(self):
         super().__init__(convert_charrefs=False)
         self.hits = []
+
+    def set_cdata_mode(self, *args, **kwargs):   # noqa: N802（覆寫內部方法）
+        pass
 
     def handle_starttag(self, tag, attrs):
         if tag == "table":
@@ -739,10 +747,17 @@ def raw_html_tables(tokens, lines):
             for rel in html_table_lines(t.content):
                 out.append((t.map[0] + rel) if t.map else None)
         elif t.type == "inline":
+            # 同一個 inline token 的 html_inline children 是**同一段 HTML 被文字切開**
+            # （`<div>` 文字 `</div>`），要串起來才解析得出跨 child 的標籤。行號用
+            # parser 回報的相對行號 ＋ token 起始行，不用 token 起始行本身——那會把
+            # 多行 inline 裡的 table 一律報在第一行（審查者 PR #92 第四輪）。
             html = "".join(c.content for c in (t.children or [])
                            if c.type == "html_inline")
-            if html and html_table_lines(html):
-                out.append(locate(lines, t))
+            if not html:
+                continue
+            base = t.map[0] if t.map else None
+            for rel in html_table_lines(html):
+                out.append((base + rel) if base is not None else None)
     return out
 
 

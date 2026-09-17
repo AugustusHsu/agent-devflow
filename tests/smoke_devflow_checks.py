@@ -201,6 +201,14 @@ def mut_table_quoted_text(root):
          lambda t: append(t, '\n<div>\n"before\n' + RAW_HTML_TABLE + '\nafter"\n</div>\n'))
 
 
+def mut_table_script(root):
+    """`<script>` 內的 `<table>`——HTMLParser 預設把 script/style 內容當 raw text
+    而看不到，但 GitHub 會清掉 script 標籤、裡面的表格照樣渲染（審查者 PR #92
+    第四輪實測）。set_cdata_mode 已被覆寫成 no-op，這一案鎖住它。"""
+    edit(root, "devflow/orchestrators/paperclip.md",
+         lambda t: append(t, "\n<script>" + RAW_HTML_TABLE + "</script>\n"))
+
+
 def mut_link(root):
     """相對連結指向不存在的路徑。"""
     edit(root, "README.md",
@@ -322,6 +330,7 @@ CASES = [
      ("devflow/coders/codex.md 的對照表形狀不合 R9（1 項）", "列的狀態格為空")),
     ("table:quoted-text", "table", mut_table_quoted_text, {},
      "的對照表形狀不合 R9"),
+    ("table:script", "table", mut_table_script, {}, "的對照表形狀不合 R9"),
     ("link", "link", mut_link, {}, "有相對連結指向不存在或 repo 之外的路徑"),
 ]
 
