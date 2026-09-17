@@ -162,11 +162,13 @@
 #       生效性：同上。
 #       定義域：對照表檔 AST 裡含 `<table` 的 html_block／html_inline（標籤名恰為 table、
 #               大小寫不拘；blockquote、清單項、表格格內都算）。不解析 HTML 表的內容。
-#       假陽性：code fence、縮排 code block、code span 裡的 `<table>` 是示範，不報——它們是
-#               fence／code_block／code_inline token，不是 HTML token（本地以反例複驗）；
-#               `\<table>`、`&lt;table&gt;` 是文字，不報。**引號屬性值與 HTML 註解先挖空再掃**
-#               （`<div data-x="<table">`、`<!-- <table> -->` 都不渲染成表格，不報；審查者
-#               PR #92 第一輪反例）。挖空是等長空白，行號仍然對得上。
+#       假陽性：判定用標準庫的 `html.parser.HTMLParser`，只認它判成 start tag 的
+#               `<table>`——屬性名、屬性值、HTML 註解、未閉合引號裡的 `<table` 都不是
+#               start tag，一律不報（前三輪的每個反例）。code fence／縮排 code block／
+#               code span 的內容是 fence／code_block／code_inline token，根本不進 HTML
+#               判定。`<tablefoo>`、`&lt;table&gt;`、`\<table>` 同樣不是 table start tag。
+#               **不用正規式**：PR #92 三輪證明正規式在這裡不封閉（引號配對範圍、
+#               屬性值含 `>`、畸形標籤），審查者第三輪判定應換 tokenizer。
 #               對照表檔裡要示範 HTML 表格，放進 code fence。
 #
 #   * `link`（相對連結有效性）
@@ -343,6 +345,7 @@ import importlib.util
 import os
 import re
 import subprocess
+from html.parser import HTMLParser
 import sys
 import traceback
 from pathlib import Path
@@ -687,56 +690,59 @@ def tables_of(tokens, lines):
     return out
 
 
-# 標籤名恰為 table，大小寫不拘：HTML 標籤名不分大小寫，markdown-it 也把 `<TABLE>` 判成 html_block。
-# 後面不得再接標籤名字元——CommonMark 的標籤名是 [A-Za-z][A-Za-z0-9-]*，`<tablefoo>` 不是 table。
-RAW_TABLE_RE = re.compile(r"<table(?![A-Za-z0-9-])", re.I)
-# 屬性值裡的 `<table` 是字串內容，不是標籤（`<div data-x="<table">` 在 GitHub 上
-# 只渲染成一個 div，沒有表格）。但**只有標籤內部的引號才是屬性引號**——HTML 文字
-# 內容裡的引號是普通字元，拿它配對會把中間真正的 `<table>` 吃掉（審查者 PR #92
-# 第二輪反例）。所以先切出標籤，**整個標籤內部一律挖空**：`<foo ...>` 的開頭已經
-# 被 `<foo` 佔掉，裡面剩下的 `<table` 不論在屬性名、屬性值還是未閉合的引號裡，
-# 都不會渲染成表格（審查者實查 GitHub renderer）。只挖屬性值會漏掉前兩者。
-# 標籤的形狀依 CommonMark：`<` ＋ 標籤名 ＋ 其餘內容 ＋ `>`。
-HTML_TAG_RE = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^>]*?)?/?>", re.S)
-HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+# raw HTML `<table>` 的判定：用標準庫的 HTMLParser，不用正規式。
+#
+# 正規式做過三輪都不封閉（PR #92）：對整個 token 配對引號會把文字內容裡的引號
+# 當屬性引號、吃掉中間真正的表格；改切標籤後，`[^>]*?` 又在屬性值含 `>` 時提早
+# 結束，畸形標籤也切不準。審查者第三輪的結論是「應改用 HTML tokenizer/parser，
+# 而不是繼續擴充單一正規式」——用正規式解析 HTML 本來就不成立。
+#
+# HTMLParser 只回報**它判定為 start tag** 的東西：屬性名、屬性值、註解、未閉合
+# 引號裡的 `<table` 都不會變成 handle_starttag 的呼叫，前三輪的每個反例自然消失。
+# 它也給 (行, 欄)，行號直接可用，不必回頭在原文搜字串（那正是第三輪行號錯置的
+# 根因）。容錯：HTMLParser 對畸形輸入不拋例外，照 HTML5 的錯誤復原規則繼續。
+class _TableTagFinder(HTMLParser):
+    """找出 raw HTML 裡的 `<table>` start tag，回報其相對行號（1-based）。"""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.hits = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "table":
+            self.hits.append(self.getpos()[0])
+
+    handle_startendtag = handle_starttag
 
 
-def html_scannable(text):
-    """把不會渲染成 `<table>` 標籤的片段挖成等長空白，其餘原樣。
-
-    兩類：HTML 註解的整段內容、**標籤的內部**（標籤名之後到 `>` 之前）。
-    等長是為了讓行號仍然對得上。標籤外的引號不碰——那是文字內容，不是屬性。"""
-    text = HTML_COMMENT_RE.sub(lambda m: " " * len(m.group(0)), text)
-
-    def blank_tag_body(m):
-        tag = m.group(0)
-        # 保留 `<` 與標籤名（`<table` 本身要被 RAW_TABLE_RE 抓到），挖掉其餘。
-        head = re.match(r"</?[A-Za-z][A-Za-z0-9-]*", tag).group(0)
-        return head + " " * (len(tag) - len(head) - 1) + ">"
-
-    return HTML_TAG_RE.sub(blank_tag_body, text)
+def html_table_lines(text):
+    """text 裡 `<table>` start tag 的相對行號（1-based，相對於 text 的第一行）。"""
+    p = _TableTagFinder()
+    try:
+        p.feed(text)
+        p.close()
+    except Exception:            # HTMLParser 幾乎不拋，真拋了就當作有問題
+        return [1]
+    return p.hits
 
 
 def raw_html_tables(tokens, lines):
-    """AST 裡的 raw HTML `<table` 所在行號（issue #90 缺口 2）。
+    """AST 裡的 raw HTML `<table>` 所在行號（issue #90 缺口 2）。
 
     只認 parser 判成 HTML 的 token：區塊層的 html_block、行內的 html_inline（在 inline 的
     children 裡，容器內、表格格內都算）。code fence／縮排 code block／code span 的內容是
     fence／code_block／code_inline token，天然排除——那是示範，不是資料。
-    不解析 HTML 本身（表頭、欄位、狀態格都不看）：那會讓檢查器變成第二個 parser。
-    引號屬性值與 HTML 註解先挖空再掃——那些位置的 `<table` 不會渲染成表格。"""
+    不解析 HTML 表的內容（表頭、欄位、狀態格都不看）：那會讓檢查器變成第二個 parser。"""
     out = []
     for t in tokens:
         if t.type == "html_block":
-            m = RAW_TABLE_RE.search(html_scannable(t.content))
-            if m:
-                out.append(locate(lines, t, m.group(0)))
+            for rel in html_table_lines(t.content):
+                out.append((t.map[0] + rel) if t.map else None)
         elif t.type == "inline":
-            for c in t.children or []:
-                if c.type == "html_inline":
-                    m = RAW_TABLE_RE.search(html_scannable(c.content))
-                    if m:
-                        out.append(locate(lines, t, m.group(0)))
+            html = "".join(c.content for c in (t.children or [])
+                           if c.type == "html_inline")
+            if html and html_table_lines(html):
+                out.append(locate(lines, t))
     return out
 
 
