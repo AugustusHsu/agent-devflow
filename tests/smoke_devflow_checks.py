@@ -174,6 +174,19 @@ def ok_table_html_in_fence(root):
          lambda t: append(t, "\n```html\n" + RAW_HTML_TABLE + "\n```\n"))
 
 
+def ok_table_html_attr(root):
+    """引號屬性值裡的 `<table` 是字串內容，不是標籤——GitHub 只渲染成一個 div。
+    掃描前挖空引號字串（審查者 PR #92 第一輪反例）。"""
+    edit(root, "devflow/orchestrators/paperclip.md",
+         lambda t: append(t, '\n<div data-x="<table">x</div>\n'))
+
+
+def ok_table_html_comment(root):
+    """HTML 註解裡的 `<table>` 不渲染，同樣挖空後再掃。"""
+    edit(root, "devflow/orchestrators/paperclip.md",
+         lambda t: append(t, "\n<!-- <table> -->\n"))
+
+
 def mut_link(root):
     """相對連結指向不存在的路徑。"""
     edit(root, "README.md",
@@ -313,6 +326,8 @@ PASSING = [
     ("tables:no-coordinator", "tables", ok_tables_coordinator_omitted),
     ("tables:merge-key", "tables", ok_tables_merge_key),
     ("table:html-in-fence", "table", ok_table_html_in_fence),
+    ("table:html-attr", "table", ok_table_html_attr),
+    ("table:html-comment", "table", ok_table_html_comment),
 ]
 
 

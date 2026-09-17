@@ -164,8 +164,9 @@
 #               大小寫不拘；blockquote、清單項、表格格內都算）。不解析 HTML 表的內容。
 #       假陽性：code fence、縮排 code block、code span 裡的 `<table>` 是示範，不報——它們是
 #               fence／code_block／code_inline token，不是 HTML token（本地以反例複驗）；
-#               `\<table>`、`&lt;table&gt;` 是文字，不報。**會誤擋的已知一種**：HTML 註解裡的
-#               `<!-- <table> -->` 是 html_block，照擋——不為它剝註解，剝註解就是在解析 HTML。
+#               `\<table>`、`&lt;table&gt;` 是文字，不報。**引號屬性值與 HTML 註解先挖空再掃**
+#               （`<div data-x="<table">`、`<!-- <table> -->` 都不渲染成表格，不報；審查者
+#               PR #92 第一輪反例）。挖空是等長空白，行號仍然對得上。
 #               對照表檔裡要示範 HTML 表格，放進 code fence。
 #
 #   * `link`（相對連結有效性）
@@ -689,6 +690,19 @@ def tables_of(tokens, lines):
 # 標籤名恰為 table，大小寫不拘：HTML 標籤名不分大小寫，markdown-it 也把 `<TABLE>` 判成 html_block。
 # 後面不得再接標籤名字元——CommonMark 的標籤名是 [A-Za-z][A-Za-z0-9-]*，`<tablefoo>` 不是 table。
 RAW_TABLE_RE = re.compile(r"<table(?![A-Za-z0-9-])", re.I)
+# 屬性值裡的 `<table` 是字串內容，不是標籤（`<div data-x="<table">` 在 GitHub 上
+# 只渲染成一個 div，沒有表格）。掃描前先把引號字串挖空，避免誤擋合法 HTML
+# （審查者 PR #92 第一輪反例）。註解 `<!-- ... -->` 同理——內容不渲染。
+HTML_QUOTED_RE = re.compile(r'"[^"]*"|\'[^\']*\'')
+HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+
+
+def html_scannable(text):
+    """把不會渲染成標籤的片段挖成等長空白，其餘原樣。
+
+    等長是為了讓 locate() 算出的行號仍然對得上。"""
+    text = HTML_COMMENT_RE.sub(lambda m: " " * len(m.group(0)), text)
+    return HTML_QUOTED_RE.sub(lambda m: " " * len(m.group(0)), text)
 
 
 def raw_html_tables(tokens, lines):
@@ -697,17 +711,18 @@ def raw_html_tables(tokens, lines):
     只認 parser 判成 HTML 的 token：區塊層的 html_block、行內的 html_inline（在 inline 的
     children 裡，容器內、表格格內都算）。code fence／縮排 code block／code span 的內容是
     fence／code_block／code_inline token，天然排除——那是示範，不是資料。
-    不解析 HTML 本身（表頭、欄位、狀態格都不看）：那會讓檢查器變成第二個 parser。"""
+    不解析 HTML 本身（表頭、欄位、狀態格都不看）：那會讓檢查器變成第二個 parser。
+    引號屬性值與 HTML 註解先挖空再掃——那些位置的 `<table` 不會渲染成表格。"""
     out = []
     for t in tokens:
         if t.type == "html_block":
-            m = RAW_TABLE_RE.search(t.content)
+            m = RAW_TABLE_RE.search(html_scannable(t.content))
             if m:
                 out.append(locate(lines, t, m.group(0)))
         elif t.type == "inline":
             for c in t.children or []:
                 if c.type == "html_inline":
-                    m = RAW_TABLE_RE.search(c.content)
+                    m = RAW_TABLE_RE.search(html_scannable(c.content))
                     if m:
                         out.append(locate(lines, t, m.group(0)))
     return out
