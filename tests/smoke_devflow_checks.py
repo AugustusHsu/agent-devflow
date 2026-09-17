@@ -18,8 +18,9 @@
      臨時目錄，git init ＋ git add —— 檢查器認的是 `git ls-files`，所以 index 有就夠，
      不必 commit。
   2. 先跑一次**沒有突變**的正向案例，要求 exit 0 且一個 ❌ 都沒有。
-  3. 每個關卡各注入一個「應擋」的突變，要求 exit 1，且輸出裡出現該關卡的訊息。
+  3. 每個關卡至少注入一個「應擋」的突變，要求 exit 1，且輸出裡出現該關卡的訊息。
      每個案例都從乾淨的沙箱重造，突變之間不互相污染。
+  4. 另有「突變後仍應通過」的正向案例（PASSING）：證明判準不誤擋正當變更，要求 exit 0 且 0 個 ❌。
 
 正向案例 0 個 ❌ 這件事讓負向案例的 ❌ 有了歸因：乾淨輸入不產生任何 ❌，所以突變後冒出來的
 每一條 ❌ 都是該突變造成的。本檔會把每個案例實際冒出的 ❌ 全部印出來，供人核對「exit 1
@@ -89,6 +90,17 @@ def edit(root, rel, fn):
     path.write_text(new, encoding="utf-8")
 
 
+def remove(root, rel):
+    """從沙箱的 index 與工作樹一起刪掉。檢查器認的是 `git ls-files`，只刪工作樹等於沒刪。
+    沙箱沒有 commit，index 相對 HEAD 全是新檔，`git rm` 不加 `-f` 會拒絕。"""
+    if not (root / rel).is_file():
+        sys.exit("要刪的檔案不存在：%s（repo 內容和本測試的假設不符）" % rel)
+    p = subprocess.run(["git", "rm", "-q", "-f", "--", rel], cwd=root,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if p.returncode != 0:
+        sys.exit("git rm %s 失敗：%s" % (rel, p.stdout.decode("utf-8", "replace")))
+
+
 def drop_line(text, needle):
     return "\n".join(l for l in text.split("\n") if needle not in l)
 
@@ -136,19 +148,130 @@ def mut_link(root):
          lambda t: append(t, "\n[壞掉的連結](does/not/exist.md)\n"))
 
 
-# 每個關卡一個「應擋」案例。
+def mut_tables_forge(root):
+    """刪掉 `forge: github` 指名的 devflow/forges/github.md。"""
+    remove(root, "devflow/forges/github.md")
+
+
+def mut_tables_coder(root):
+    """刪掉 `seats.reviewer.filler: codex` 指名的 devflow/coders/codex.md。"""
+    remove(root, "devflow/coders/codex.md")
+
+
+def mut_tables_filler(root):
+    """`seats.coordinator.filler` 改成 coders/、orchestrators/ 都沒有對照表的工具名。
+    改 coordinator 不改 implementer：後者會連帶讓 i5 ❌，這個案例就不只觸發目標項。"""
+    edit(root, "devflow.yml",
+         lambda t: replace_first(t, "filler: hermes", "filler: no-such-tool"))
+
+
+def mut_tables_no_forge(root):
+    """devflow.yml 缺 `forge`：推導不出來要擋，不是跳過（issue #87 AC-3）。"""
+    edit(root, "devflow.yml", lambda t: drop_line(t, "forge: github"))
+
+
+def ok_tables_forge_gitlab(root):
+    """`forge` 改成 gitlab 後刪 github.md：它不再是必需的。"""
+    edit(root, "devflow.yml",
+         lambda t: replace_first(t, "forge: github", "forge: gitlab"))
+    remove(root, "devflow/forges/github.md")
+
+
+def ok_tables_coordinator_omitted(root):
+    """整個省略 `coordinator`（第 0 節：＝human）後刪 hermes.md：它不再是必需的。"""
+    edit(root, "devflow.yml",
+         lambda t: drop_line(drop_line(t, "filler: hermes"), "  coordinator:"))
+    remove(root, "devflow/orchestrators/hermes.md")
+
+
+# 「應擋」案例：每個關卡至少一個。
+#   name    = 案例名（印出用；同一關卡有多個案例時以 `關卡:說明` 區分）
+#   gate    = 目標關卡，以 DEVFLOW_GATE_<KEY>=1 打開
 #   mutate  = 怎麼把輸入弄壞（None＝不改檔案，只靠環境變數）
 #   env     = 疊在基準環境上的額外變數
 #   expect  = 輸出裡必須出現的訊息片段，用來確認擋下來的是**這一項**而不是別的
+def mut_tables_merge_missing(root):
+    """merge key 帶進來的 `filler` 指向不存在的工具——展開後仍要擋。
+    改 coordinator 不改 implementer：後者會連帶讓 i5 ❌。"""
+    edit(root, "devflow.yml",
+         lambda t: replace_first(t, "filler: hermes", "<<: {filler: no-such-tool}"))
+
+
+def mut_tables_merge_bad_source(root):
+    """`<<` 指向 scalar——PyYAML safe_load 自己會拋 ConstructorError 的輸入。
+    直接鍵存在也要擋：靜默跳過等於替 parser 發明一套更寬鬆的語意（AC-3）。
+    改 coordinator 不改 implementer：後者會連帶讓 i5 ❌。"""
+    edit(root, "devflow.yml",
+         lambda t: replace_first(t, "filler: hermes",
+                                 "<<: not-a-mapping\n    filler: hermes"))
+
+
+def mut_tables_merge_dup(root):
+    """同一個 mapping 兩個 `<<`：PyYAML 後者覆蓋先者，本檢查先者優先，語意分歧。
+    改 coordinator 不改 implementer：後者會連帶讓 i5 ❌。
+
+    先改 coordinator 再插 anchor：反過來的話 anchor 區塊裡的 `filler: hermes`
+    會變成「第一個」，replace_first 就打不到 coordinator（本檔曾犯此錯）。"""
+    edit(root, "devflow.yml",
+         lambda t: "_m1: &m1 {filler: hermes}\n_m2: &m2 {filler: no-such-tool}\n\n"
+                   + replace_first(t, "filler: hermes", "<<: *m1\n    <<: *m2"))
+
+
+def mut_tables_merge_deep_bad(root):
+    """直接值命中，但可達的深層 merge 來源壞掉——結構驗證不得被 lookup 短路略過。"""
+    edit(root, "devflow.yml",
+         lambda t: "_deep: &deep\n  <<: scalar-here\n\n"
+                   + replace_first(t, "filler: hermes", "<<: *deep\n    filler: hermes"))
+
+
+def mut_tables_merge_later_bad(root):
+    """第一個來源有效，後續來源壞掉——同上，不得因先命中而略過。"""
+    edit(root, "devflow.yml",
+         lambda t: "_good: &good {filler: hermes}\n_later: &later\n  <<: scalar-x\n\n"
+                   + replace_first(t, "filler: hermes", "<<: [*good, *later]"))
+
+
 CASES = [
-    ("d2", mut_d2, {}, "的 devflow 區塊沒有關閉"),
-    ("i1", None, {"GITHUB_HEAD_REF": "no-issue-number"},
+    ("d2", "d2", mut_d2, {}, "的 devflow 區塊沒有關閉"),
+    ("i1", "i1", None, {"GITHUB_HEAD_REF": "no-issue-number"},
      "不合 I1 的 `<N>-<slug>`"),
-    ("i5", mut_i5, {}, "投影與來源不一致"),
-    ("version", mut_version, {}, "不是四碼 a.b.c.d"),
-    ("fence", mut_fence, {}, "的 fenced code block 沒有關閉"),
-    ("table", mut_table, {}, "的對照表形狀不合 R9"),
-    ("link", mut_link, {}, "有相對連結指向不存在或 repo 之外的路徑"),
+    ("i5", "i5", mut_i5, {}, "投影與來源不一致"),
+    ("version", "version", mut_version, {}, "不是四碼 a.b.c.d"),
+    ("fence", "fence", mut_fence, {}, "的 fenced code block 沒有關閉"),
+    ("tables:rm-forge", "tables", mut_tables_forge, {}, "指名的對照表不在版控內"),
+    ("tables:rm-coder", "tables", mut_tables_coder, {}, "指名的對照表不在版控內"),
+    ("tables:no-such-tool", "tables", mut_tables_filler, {}, "指名的對照表不在版控內"),
+    ("tables:no-forge", "tables", mut_tables_no_forge, {}, "推導不出必需的對照表"),
+    ("tables:merge-missing", "tables", mut_tables_merge_missing, {},
+     "指名的對照表不在版控內"),
+    ("tables:merge-bad-source", "tables", mut_tables_merge_bad_source, {},
+     "推導不出必需的對照表"),
+    ("tables:merge-dup", "tables", mut_tables_merge_dup, {},
+     "推導不出必需的對照表"),
+    ("tables:merge-deep-bad", "tables", mut_tables_merge_deep_bad, {},
+     "推導不出必需的對照表"),
+    ("tables:merge-later-bad", "tables", mut_tables_merge_later_bad, {},
+     "推導不出必需的對照表"),
+    ("table", "table", mut_table, {}, "的對照表形狀不合 R9"),
+    ("link", "link", mut_link, {}, "有相對連結指向不存在或 repo 之外的路徑"),
+]
+
+# 「突變後仍應通過」的正向案例：判準不能誤擋正當變更。
+# 目標關卡照樣以 DEVFLOW_GATE_<KEY>=1 打開——就算它日後被降為建議，這裡驗的仍是「當關卡也不擋」。
+def ok_tables_merge_key(root):
+    """`seats.reviewer.filler` 只由 merge key 提供。
+
+    AC-13 只禁止它明列的三個 mapping（根、`seats`、`seats.implementer`）出現
+    merge key；`reviewer` 不在範圍內，既有 `i5` 對它是通過的。`tables` 若不
+    展開就等於自行補上規格沒有的禁令（審查者 PR #88 第二輪的精確反例）。"""
+    edit(root, "devflow.yml",
+         lambda t: replace_first(t, "filler: codex", "<<: {filler: codex}"))
+
+
+PASSING = [
+    ("tables:forge-gitlab", "tables", ok_tables_forge_gitlab),
+    ("tables:no-coordinator", "tables", ok_tables_coordinator_omitted),
+    ("tables:merge-key", "tables", ok_tables_merge_key),
 ]
 
 
@@ -205,17 +328,34 @@ def main():
         code, out = run_checker(pristine)
         marks = crosses(out)
         good = (code == 0 and not marks)
-        print("正向  乾淨輸入                    exit %d（期望 0）  ❌ %d 條  %s"
-              % (code, len(marks), "PASS" if good else "FAIL"))
+        print("正向  %-22s 通過    exit %d（期望 0）  ❌ %d 條  %s"
+              % ("乾淨輸入", code, len(marks), "PASS" if good else "FAIL"))
         if not good:
             failures.append("正向案例：exit %d、%d 條 ❌" % (code, len(marks)))
             for m in marks:
                 print("        ❌ %s" % m)
         print()
 
-        # 負向：每個關卡一個「應擋」案例。
-        for gate, mutate, extra_env, expect in CASES:
-            work = Path(tmp) / ("case-" + gate)
+        # 正向：突變後仍應通過，同樣 exit 0 且 0 個 ❌。
+        for n, (name, gate, mutate) in enumerate(PASSING):
+            work = Path(tmp) / ("pass-%02d" % n)
+            shutil.copytree(pristine, work)
+            mutate(work)
+            code, out = run_checker(work, gate=gate)
+            marks = crosses(out)
+            good = (code == 0 and not marks)
+            print("正向  %-22s 通過    exit %d（期望 0）  ❌ %d 條  %s"
+                  % (name, code, len(marks), "PASS" if good else "FAIL"))
+            for m in marks:
+                print("          ❌ %s" % m)
+            if not good:
+                failures.append("%s：exit %d（期望 0）、%d 條 ❌" % (name, code, len(marks)))
+            shutil.rmtree(work)
+            print()
+
+        # 負向：每個關卡至少一個「應擋」案例。
+        for n, (name, gate, mutate, extra_env, expect) in enumerate(CASES):
+            work = Path(tmp) / ("case-%02d" % n)
             shutil.copytree(pristine, work)
             if mutate:
                 mutate(work)
@@ -227,14 +367,14 @@ def main():
             # 那時 exit 1 證明不了是哪一項擋的（審查者 PR #83 第一輪以故障
             # 替身實測：七案各多一個非目標 ❌，煙霧測試仍印「全部通過」）。
             good = (code == 1 and hit and len(marks) == 1)
-            print("負向  %-8s 應擋              exit %d（期望 1）  ❌ %d 條  %s"
-                  % (gate, code, len(marks), "PASS" if good else "FAIL"))
+            print("負向  %-22s 應擋    exit %d（期望 1）  ❌ %d 條  %s"
+                  % (name, code, len(marks), "PASS" if good else "FAIL"))
             for m in marks:
                 print("        %s ❌ %s" % ("←" if expect in m else " ", m))
             if not good:
                 failures.append(
                     "%s：exit %d（期望 1）%s"
-                    % (gate, code, "" if hit else "，且輸出裡找不到「%s」" % expect))
+                    % (name, code, "" if hit else "，且輸出裡找不到「%s」" % expect))
             shutil.rmtree(work)
             print()
 
@@ -244,7 +384,8 @@ def main():
         for f in failures:
             print("  - %s" % f)
         return 1
-    print("煙霧測試全部通過：1 個正向 ＋ %d 個關卡的應擋案例" % len(CASES))
+    print("煙霧測試全部通過：%d 個正向 ＋ %d 個應擋案例（涵蓋 %d 個關卡）"
+          % (1 + len(PASSING), len(CASES), len({c[1] for c in CASES})))
     return 0
 
 

@@ -11,7 +11,7 @@
 # 注意不是 `G4`：`G4` 住第 9 節，依第 0 節與 `ST2` 要 stage 2 才生效，現在是 stage 1，
 # 不能引為依據。
 # 本檔每一項檢查都有自己的開關（下面的 GATES）：True＝必需關卡，False＝建議（只報告不擋）。
-# 十項裡七項是 True（`d2`、`i1`、`i5`、`version`、`fence`、`table`、`link`），三項是 False
+# 十一項裡八項是 True（`d2`、`i1`、`i5`、`version`、`fence`、`tables`、`table`、`link`），三項是 False
 # （`dupid`、`refs`、`r9`）——分界不是「哪一項比較重要」，而是**定義域封不封閉**，見下面各節。
 #
 # ── ⚠️ 這個 check 擋什麼、不擋什麼 ───────────────────────────────────────
@@ -21,9 +21,11 @@
 #                 及安裝器實際讀到的值三方一致、
 #                 `version` 規則本體與規格文檔的 frontmatter `version` 是四碼（`V1`／`V4`）、
 #                 `fence` 受版控 .md 的 fenced code block 都有關閉、
+#                 `tables` devflow.yml 指名的對照表檔（`forge`、各職位的 `filler`）都受版控、
 #                 `table` 對照表檔的表形狀合 `R9`（表頭欄位、狀態欄恰一、已分節時表要落在節內、
 #                 至少一張合格的表）、`link` 相對連結指向 repo 內存在的路徑。
-# 就這七項（後四項是 issue #80 開的，理由見下面「後四項為什麼現在可以是關卡」）。
+# 就這八項（`version`、`fence`、`table`、`link` 是 issue #80 開的，理由見下面「後四項為什麼現在
+# 可以是關卡」；`tables` 是 issue #87 開的，見「tables 為什麼可以是關卡」）。
 # 不擋（exit 0，只把發現印在 log）：`dupid`、`refs`、`r9` 三項，一律 advisory。
 #
 # 「GATES 是 True」只讓這個 check 自己變紅，**不等於它是 branch protection 的
@@ -156,6 +158,34 @@
 # CI 上的正反 run 要另外取（負向輸入不落在本檔上），那是升 branch protection 的前提，
 # 不是本檔自己變紅的前提。
 #
+# ── tables 為什麼可以是關卡（issue #87）──────────────────────────────────
+# `table` 驗的是「已被選入的檔案」裡的表形狀，檔案集合本身只 sanity 檢查「至少找到一個」：
+# `rm devflow/forges/github.md` 原本 exit 0，七張表刪掉六張也 exit 0（#22 第三輪審查的假陰性 1）。
+#   為什麼是獨立的 key，不併入 `table`：兩者的資料來源、定義域、假陽性面都不同——`table` 讀
+#       markdown AST、定義域是「目錄裡有什麼檔」；`tables` 讀 devflow.yml 的 YAML 節點、定義域是
+#       「設定說要有什麼檔」。各自一個開關，其中一項日後被找到假陽性而降為建議時，另一項不跟著
+#       失效；煙霧測試的「exit 1 只能由目標項造成」也才分得出是哪一半擋的。
+#   生效性：依據是第 0 節「自變數住 `devflow.yml`：`forge`，以及 `seats` 下各職位的綁定——`filler`
+#       ……其餘皆衍生值，見 `forges/`、`coders/`、`orchestrators/` 對照表」。第 0 節永遠生效。
+#       那一條沒有 ID，所以引節號不引 ID。不引 `I5`：本項沒有第二處事實要比對，只是從既有的
+#       自變數推導必須存在的檔案。
+#   定義域：一個檔案（devflow.yml）裡的固定路徑——`forge`、`seats.implementer.filler`、
+#       `seats.reviewer.filler`、`seats.coordinator.filler`——推導出至多四個檔名，逐字比對
+#       table_files（受版控、TABLE_DIRS 直屬）。對應規則逐條寫在 TABLES_* 常數的註解。
+#       不是「數量不得減少」：`forge` 改成 gitlab 之後 github.md 就可以刪，本項不擋。
+#       fail closed：推導不出來（YAML 壞掉、缺 `forge`／`seats`、implementer／reviewer 省略、
+#       職位不是 mapping、缺 `filler`、值不是字串、本項要讀的鍵重複）一律 ❌，不跳過也不 exit 2，
+#       理由寫在該節開頭。`filler` 的值在該職位的目錄找不到 `<值>.md` 也是 ❌。
+#       假陽性：合法設定裡會被擋的寫法——AC-13 明列的三個 mapping（根、`seats`、
+#       `seats.implementer`）出現 merge key（`<<: *base`）時本項會判成「缺」。那是
+#       **與 `i5` 一致**：AC-13 明文要求那三處不展開 `<<`，`i5` 本來就擋。
+#       `seats.reviewer`／`seats.coordinator` 內層的 merge key **不在 AC-13 範圍**，
+#       既有 `i5` 對它們是通過的，所以本項依 YAML merge 語意展開（tables_get），
+#       不自行替 required gate 補規格沒有的禁令（審查者 PR #88 第二輪）。
+#       alias（`reviewer: *x`、`filler: *f`）compose 後直接是被指向的節點，不受影響。
+#       本地以反例複驗：`forge` 改 gitlab 後刪 github.md、`coordinator` 改 human 或整個省略後刪
+#       hermes.md，都 exit 0。**不宣稱「不存在假陽性」**。
+#
 # ── 不發明規則：`i1` 的 slug 為什麼不限字元集 ─────────────────────────────
 # `I1` 的原文只有「分支名 `<N>-<slug>`」，沒有規定 slug 的字元集。
 # 收成 `^[0-9]+-[a-z0-9-]+$` 會擋掉 `26-封閉定義域`、`4-v0.0.2.0-bump`、`26-Fix-D2`——
@@ -193,14 +223,21 @@
 #   卻被判成 frontmatter 沒關閉。該 bug 已修，但這件事證明了這種宣稱不可靠。
 #
 # ── 擋不住什麼（已知不完備，不要假裝完備）──────────────────────────────
-#   * 【七個關卡以外的全部。】以下各條說的是「連報告都報不到」，
+#   * 【八個關卡以外的全部。】以下各條說的是「連報告都報不到」，
 #     或「報告了但沒有任何強制力」。
 #   * 【`i5` 只看本 repo 的 devflow.yml。】消費者 repo 的投影一致性不在範圍（spec「未決事項」）：
 #     它們只有安裝器 AC-7 的 advisory——「有 `seats:` 而無合規投影」會被提示，「兩處值不同」
 #     無人攔。L 的定義是「devflow/install.py 現在讀到什麼」：改了讀取器，`i5` 跟著它走，
 #     這是 AC-13 刻意的（唯一一份 AC-7 判定住在安裝器），不是漏洞。
 #     `seats` 以外的職位（reviewer／coordinator／approver）的結構不驗——AC-13 只管兩條路徑
-#     經過的三個 mapping。
+#     經過的三個 mapping。（reviewer／coordinator 的 `filler` 由 `tables` 讀，也只驗它讀的那幾個鍵。）
+#   * 【`tables` 只驗「devflow.yml 指名的對照表受版控」。】表的內容對不對、是不是那個工具的表，
+#     不驗（形狀歸 `table`；值與工具的對應要人讀）。沒被指名的表（現行的 gitlab.md、paperclip.md、
+#     none.md）刪掉不擋——那是刻意的，它們不在當前設定的依賴裡。
+#     `coordinator` 為 human 或整個省略時，不要求 orchestrators/none.md：issue #87 的判準是「human 不要求
+#     對照表（人不是工具）」。但 none.md 開頭自稱是這個設定的對照表，所以本 repo 若把協調位改成 human，
+#     none.md 被刪不會被擋——這個落差是判準的取捨，要改得由人裁決，不由本檔自己改。
+#     `approver`、`seats` 下四個職位以外的鍵、`model`／`reasoning` 都不讀。
 #   * 【`i5` 的 L 是在檢查器自己的行程裡執行 devflow/install.py 取得的——竄改該檔可繞過。】
 #     攔得住的：import 期或 read_implementer() 內的例外、sys.exit（foreign() 攔 BaseException →
 #     exit 2）、回傳非 str／str 子類（type() is str → exit 2）。攔不住的（PR #76 第二輪實測皆 exit 0）：
@@ -313,7 +350,7 @@ except ImportError as e:
 
 # ── 關卡開關 ──────────────────────────────────────────────────────
 # True＝必需關卡（失敗就擋）；False＝建議（只報告）。
-# 十項裡七項是 True，三項是 False。分界是定義域封不封閉，理由見檔頭。
+# 十一項裡八項是 True，三項是 False。分界是定義域封不封閉，理由見檔頭。
 # 驗證用：DEVFLOW_GATE_<KEY>=1 可單獨打開一項，環境變數只能加嚴不能放寬。
 GATES = {
     "d2":      True,    # D2 入口區塊 ≤30 行（第 13 節，永遠生效）
@@ -321,6 +358,7 @@ GATES = {
     "i5":      True,    # I5 devflow.yml 投影 implementer_filler 三方一致（第 1 節，永遠生效；spec AC-13）
     "version": True,    # V1 frontmatter version 四碼（第 3 節，ST1 起生效；issue #80）
     "fence":   True,    # fenced code block 未關閉（issue #80）
+    "tables":  True,    # devflow.yml 指名的對照表都受版控（第 0 節，永遠生效；issue #87）
     "table":   True,    # 對照表形狀，依 R9 分節（issue #80）
     "link":    True,    # 相對連結有效性（issue #80）
     "dupid":   False,   # 規則 ID 唯一定義（散文與定義分不出來，見檔頭）
@@ -356,7 +394,35 @@ YAML_STR = "tag:yaml.org,2002:str"
 # 不遞迴子目錄——devflow/orchestrators/hermes/SKILL.md 是該 orchestrator 的流程指令
 # （hermes.md 的「流程指令住哪」格就指向它），不是對照表；把它算進來會要求
 # 一個流程指令檔長出 `面向／值／狀態` 表，那是檢查器發明規則。
-TABLE_DIRS = ("devflow/forges/", "devflow/coders/", "devflow/orchestrators/")
+FORGES_DIR = "devflow/forges/"
+CODERS_DIR = "devflow/coders/"
+ORCHESTRATORS_DIR = "devflow/orchestrators/"
+TABLE_DIRS = (FORGES_DIR, CODERS_DIR, ORCHESTRATORS_DIR)
+# tables（issue #87）的定義域：devflow.yml 的固定鍵 → 必須受版控的對照表檔。
+# 依據是第 0 節「自變數住 devflow.yml：forge 與 seats 下各職位的 filler……其餘皆衍生值，
+# 見 forges/、coders/、orchestrators/ 對照表」。對應規則：
+#   `forge: <v>`                    → devflow/forges/<v>.md
+#   `seats.implementer.filler: <v>` → devflow/coders/<v>.md          實作位填的是 coder
+#   `seats.reviewer.filler: <v>`    → devflow/coders/<v>.md          審查位填的也是 coder
+#   `seats.coordinator.filler: <v>` → devflow/orchestrators/<v>.md   協調位填的是 orchestrator
+#   `seats.approver`                → 不讀（裁決位是人，seats/approver.md）
+#   `filler: human`                 → 不要求（人不是工具）
+#   省略整個 `coordinator`          → 等同 human，不要求（第 0 節「`coordinator` 省略＝`human`」）
+# 第 0 節只給 `coordinator` 定了省略的意思；implementer／reviewer 省略、或職位在但缺 `filler`，
+# 檢查器不替它發明預設值——推導不出來就 ❌（fail closed，見 tables 那一節）。
+# 值在該職位的目錄找不到 `<v>.md` 就是 ❌，不管別的目錄有沒有同名檔：`implementer.filler: hermes`
+# 要的是 coder 的表，orchestrators/hermes.md 補不了這個缺。兩個目錄都沒有＝設定指向一個
+# 沒有衍生值的工具，同樣 ❌（那也可能就是表被刪了，檢查器分不出來，也不需要分）。
+# 檔名是 `<目錄><值>.md` 這個**字串**，拿去比 table_files（受版控、直屬），不做路徑正規化：
+# `hermes/SKILL`、`../WORKFLOW` 這種值湊不出直屬檔名，自然判成找不到。
+TABLES_FORGE = ("forge", FORGES_DIR)
+TABLES_SEATS = "seats"
+TABLES_SEAT_DIRS = (("implementer", CODERS_DIR),
+                    ("reviewer", CODERS_DIR),
+                    ("coordinator", ORCHESTRATORS_DIR))
+TABLES_OPTIONAL_SEAT = "coordinator"
+TABLES_FILLER = "filler"
+TABLES_HUMAN = "human"
 TABLE_HEADER = ["面向", "值", "狀態"]
 STATUS_COL = "狀態"
 # R9 的分節：「對照表得分為通用節與本機節」。節名用詞以 R9 為準，
@@ -951,6 +1017,7 @@ except (RecursionError, MemoryError) as e:
         "這不是投影不一致，i5 無法判定" % (I5_FILE, type(e).__name__))
 if i5_root is None and not i5_problems:
     i5_problems.append("沒有任何 document（空檔或只有註解）")
+yml_parse_problems = list(i5_problems)    # 解析層的違規；tables 那一節共用同一份節點樹與訊息
 s_val = p_val = None
 if not i5_problems:
     i5_problems, s_node, p_node = i5_structure(i5_root)
@@ -1094,6 +1161,192 @@ if bad_fence:
         report("fence", "%s:%d 的 fenced code block 沒有關閉" % (f, n))
 else:
     ok("%d 個 md 檔的 code fence 都成對" % len(md_files))
+
+print()
+print("── 對照表集合：%s 指名的對照表都受版控（%s）" % (I5_FILE, tag("tables")))
+# 對應規則見上面 TABLES_* 常數的註解；為什麼是獨立關卡見檔頭「tables 為什麼可以是關卡」。
+# 節點樹沿用 i5 那一節 compose 出來的 i5_root（同一份 bytes、同一個 parser，不解析第二次）。
+# devflow.yml 不在版控內、讀不到、巢狀太深：i5 那一節已經 die()（exit 2），走不到這裡——
+# 那是 repo 佈局或環境與本檔假設不符，分類沿用 i5。
+#
+# 推導不出來一律 ❌（exit 1），不 die()、不跳過：
+#   * 跳過正是本項要消除的失敗模式——把 devflow.yml 寫壞的同一個 PR 再刪一張表，會整個放行。
+#   * 不 die()：壞 YAML、缺鍵、型別不符是**內容違規**，不是檢查器無法執行（檔首的 exit code 守則；
+#     i5 對同一份檔案的壞 YAML 也判 ❌）。die() 還會中斷整輪，後面各關卡的結果都看不到。
+#   * 不靠 i5 代擋：GATES 各自獨立，i5 被降為建議時本項仍要擋，所以自己報。
+#     同一份壞 YAML 因此 i5、tables 各一個 ❌——兩項都依賴它，各自如實回報。
+# 只對本項要讀的鍵負責（tables_get）：同名鍵重複＝推導有歧義 → ❌；同一個 mapping 裡
+# 別的鍵有什麼毛病不是本項的事（根、seats、seats.implementer 的鍵由 i5 依 AC-13 管）。
+
+YAML_MERGE = "tag:yaml.org,2002:merge"
+
+
+def tables_merge_sources(parent, where):
+    """parent 裡 `<<` 帶進來的 mapping，依 YAML merge 語意由先到後。
+    回傳 (mapping 清單, 違規或 None)。
+
+    AC-13 只禁止**它明列的三個 mapping**（根、`seats`、`seats.implementer`）出現
+    merge key；`seats.reviewer`／`seats.coordinator` 不在該範圍，既有 `i5` 對它們
+    的 merge key 實際是通過的（審查者 PR #88 第二輪實測）。本項若一律不展開，
+    就等於自行替 required gate 補上規格沒有的禁令——那是擴張規格，不是沿用。
+
+    仍不改用 `safe_load`：重複鍵、非字串鍵的檢查要靠 compose 的節點樹。
+
+    **同一個 mapping 只允許一個 `<<`**：PyYAML 對兩個 `<<` 是後者覆蓋先者，
+    與本函式「先出現者優先」相反（審查者 PR #88 第四輪第 11 案：`safe_load`
+    得 `nosuchtool`、checker 得 `codex`）。語意分歧的輸入一律擋，不挑一邊。
+
+    `<<` 的值不是 mapping、也不是「全是 mapping 的 sequence」時 fail closed：
+    那是 PyYAML `safe_load` 自己會拋 ConstructorError 的輸入。"""
+    out = []
+    seen_merge = False
+    for k, v in parent.value:
+        if not (isinstance(k, yaml.ScalarNode) and k.tag == YAML_MERGE):
+            continue
+        if seen_merge:
+            return None, ("%s 有多個 `<<`：PyYAML 是後者覆蓋先者，本檢查是先者"
+                          "優先，語意分歧" % where)
+        seen_merge = True
+        # `<<: *a` 是單一 mapping；`<<: [*a, *b]` 是序列，前者優先。
+        items = v.value if isinstance(v, yaml.SequenceNode) else [v]
+        for it in items:
+            if not (isinstance(it, yaml.MappingNode) and it.tag == YAML_MAP):
+                return None, ("%s 的 `<<` 來源不是 !!map 的 MappingNode：%s"
+                              % (where, node_desc(it)))
+            out.append(it)
+    return out, None
+
+
+def tables_validate_merge(parent, where, _seen=None):
+    """遍歷 parent 可達的整個 merge graph，驗證結構。回傳違規或 None。
+
+    **與值查找拆開**（審查者 PR #88 第四輪）：查找會在直接鍵命中或第一個來源
+    有值時短路，壞掉的深層來源就永遠驗不到。結構是有限且可遍歷的，先整個驗完
+    再查值。"""
+    seen = _seen if _seen is not None else set()
+    if id(parent) in seen:
+        return None
+    seen.add(id(parent))
+    sources, bad = tables_merge_sources(parent, where)
+    if bad:
+        return bad
+    for src in sources:
+        bad = tables_validate_merge(src, where, seen)
+        if bad:
+            return bad
+    return None
+
+
+def tables_get(parent, key, where, _seen=None):
+    """parent（已確認是 !!map）裡 !!str 鍵 key 的值節點。回傳 (節點或 None, 違規或 None)。
+    鍵以 compose 後的 .value 比對（引號鍵、alias 指向的鍵一視同仁，同 mapping_entries）。
+    出現不只一次是歧義：construct 是 last-wins，別的 parser 可能 first-wins 或直接報錯。
+
+    直接鍵找不到時，依 YAML merge 語意往 `<<` 的來源找（直接鍵優先於 merge 來源，
+    單一 `<<` 的 sequence 內先出現者優先）。呼叫端須先跑 tables_validate_merge。"""
+    hits = [v for k, v in parent.value
+            if isinstance(k, yaml.ScalarNode) and k.tag == YAML_STR and k.value == key]
+    if len(hits) > 1:
+        return None, "%s 的鍵 `%s` 出現 %d 次，推導有歧義" % (where, key, len(hits))
+    if _seen is None:               # 進入點：先驗整個 merge graph 的結構
+        bad = tables_validate_merge(parent, where)
+        if bad:
+            return None, bad
+    if hits:
+        return hits[0], None
+    sources, bad = tables_merge_sources(parent, where)
+    if bad:
+        return None, bad
+    seen = _seen if _seen is not None else set()
+    if id(parent) in seen:          # anchor 互指造成的環，停住
+        return None, None
+    seen.add(id(parent))
+    for src in sources:
+        node, bad = tables_get(src, key, where, seen)
+        if bad:
+            return None, bad
+        if node is not None:
+            return node, None
+    return None, None
+
+
+tables_problems = []
+tables_required = []          # [(來源鍵, 值, 目錄)]
+if i5_root is None:
+    tables_problems += yml_parse_problems
+elif not is_plain_map(i5_root):
+    tables_problems.append("根不是 !!map 的 MappingNode：%s" % node_desc(i5_root))
+else:
+    key, directory = TABLES_FORGE
+    node, bad = tables_get(i5_root, key, "根")
+    if not bad and node is None:
+        bad = "缺 `%s`（第 0 節的自變數）" % key
+    if not bad:
+        value, bad = i5_scalar(node, "`%s` 的值" % key)
+    if bad:
+        tables_problems.append(bad)
+    else:
+        tables_required.append((key, value, directory))
+
+    seats, bad = tables_get(i5_root, TABLES_SEATS, "根")
+    if not bad and seats is None:
+        bad = "缺 `%s`（第 0 節的自變數）" % TABLES_SEATS
+    if not bad and not is_plain_map(seats):
+        bad = "`%s` 的值不是 !!map 的 MappingNode：%s" % (TABLES_SEATS, node_desc(seats))
+    if bad:
+        tables_problems.append(bad)
+    else:
+        for seat, directory in TABLES_SEAT_DIRS:
+            where = "`%s.%s`" % (TABLES_SEATS, seat)
+            key = "%s.%s.%s" % (TABLES_SEATS, seat, TABLES_FILLER)
+            node, bad = tables_get(seats, seat, "`%s`" % TABLES_SEATS)
+            if not bad and node is None:
+                if seat == TABLES_OPTIONAL_SEAT:
+                    continue                      # 第 0 節：省略＝human，不要求
+                bad = ("缺 %s（第 0 節只定義 `%s` 省略＝%s，這個職位沒有省略的預設）"
+                       % (where, TABLES_OPTIONAL_SEAT, TABLES_HUMAN))
+            if not bad and not is_plain_map(node):
+                bad = "%s 的值不是 !!map 的 MappingNode：%s" % (where, node_desc(node))
+            if not bad:
+                node, bad = tables_get(node, TABLES_FILLER, where)
+            if not bad and node is None:
+                bad = "%s 缺 `%s`" % (where, TABLES_FILLER)
+            if not bad:
+                value, bad = i5_scalar(node, "`%s` 的值" % key)
+            if bad:
+                tables_problems.append(bad)
+            elif value != TABLES_HUMAN:
+                tables_required.append((key, value, directory))
+
+if tables_problems:
+    report("tables", "%s 推導不出必需的對照表（%d 項）" % (I5_FILE, len(tables_problems)),
+           tables_problems
+           + ["推導需要：根是 !!map；`forge` 是 !!str 純量；`seats` 是 !!map；"
+              "`seats.implementer`、`seats.reviewer` 是含 !!str `filler` 的 !!map；"
+              "`seats.coordinator` 同上或整個省略（＝human）；以上各鍵不重複"])
+table_file_set = set(table_files)
+tables_missing = []
+for key, value, directory in tables_required:
+    path = "%s%s.md" % (directory, value)
+    if path in table_file_set:
+        continue
+    have = sorted(f[len(directory):-len(".md")] for f in table_files if f.startswith(directory))
+    elsewhere = [d for d in TABLE_DIRS
+                 if d != directory and "%s%s.md" % (d, value) in table_file_set]
+    tables_missing.append(
+        "`%s` ＝ %r → %s 不在版控內（%s 現有：%s；%s）"
+        % (key, value, path, directory, "、".join(have) or "（無）",
+           "%s 有同名檔，但這個鍵要的是 %s 的表" % ("、".join(elsewhere), directory)
+           if elsewhere else
+           "%s 都沒有 %s.md：設定指向沒有對照表的值，或表被刪了"
+           % ("、".join(TABLE_DIRS), value)))
+if tables_missing:
+    report("tables", "%s 指名的對照表不在版控內（%d 項）" % (I5_FILE, len(tables_missing)),
+           tables_missing)
+if not tables_problems and not tables_missing:
+    ok("%s 指名的 %d 張對照表都受版控：%s（`human` 與省略的 coordinator 不要求，approver 不讀）"
+       % (I5_FILE, len(tables_required),
+          "、".join("`%s`→%s%s.md" % (k, d, v) for k, v, d in tables_required)))
 
 print()
 print("── 對照表的形狀（%s）" % tag("table"))
