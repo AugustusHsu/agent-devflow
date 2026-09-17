@@ -209,6 +209,15 @@ def mut_table_script(root):
          lambda t: append(t, "\n<script>" + RAW_HTML_TABLE + "</script>\n"))
 
 
+def mut_table_inline_multiline(root):
+    """多行 inline 裡的 `<table>`——`prefix <span>` 開頭使這段落成 html_inline 而非
+    html_block。換行在 inline 是 softbreak token（content 為空字串），串接時要認
+    token 型別才還原得出行號（審查者 PR #92 第五輪：真實 22 行曾報成 20）。"""
+    edit(root, "devflow/orchestrators/paperclip.md",
+         lambda t: append(t, "\nprefix <span>\nsecond line\nthird "
+                             + RAW_HTML_TABLE + " tail\n"))
+
+
 def mut_link(root):
     """相對連結指向不存在的路徑。"""
     edit(root, "README.md",
@@ -331,6 +340,8 @@ CASES = [
     ("table:quoted-text", "table", mut_table_quoted_text, {},
      "的對照表形狀不合 R9"),
     ("table:script", "table", mut_table_script, {}, "的對照表形狀不合 R9"),
+    ("table:inline-multiline", "table", mut_table_inline_multiline, {},
+     "的對照表形狀不合 R9"),
     ("link", "link", mut_link, {}, "有相對連結指向不存在或 repo 之外的路徑"),
 ]
 

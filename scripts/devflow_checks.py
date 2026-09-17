@@ -748,15 +748,25 @@ def raw_html_tables(tokens, lines):
                 out.append((t.map[0] + rel) if t.map else None)
         elif t.type == "inline":
             # 同一個 inline token 的 html_inline children 是**同一段 HTML 被文字切開**
-            # （`<div>` 文字 `</div>`），要串起來才解析得出跨 child 的標籤。行號用
-            # parser 回報的相對行號 ＋ token 起始行，不用 token 起始行本身——那會把
-            # 多行 inline 裡的 table 一律報在第一行（審查者 PR #92 第四輪）。
-            html = "".join(c.content for c in (t.children or [])
-                           if c.type == "html_inline")
-            if not html:
+            # （`<div>` 文字 `</div>`），要串起來才解析得出跨 child 的標籤。
+            #
+            # 但**不能只串 HTML、丟掉中間的文字**：那些位置的換行也佔行數，丟掉後
+            # parser 的相對行號就少算（審查者 PR #92 第五輪：真實第 22 行報成 20）。
+            # 換行在 inline 裡是 `softbreak`／`hardbreak` token，**`content` 是空字串**
+            # ——不能數 `content` 裡的 `\n`，要認 token 型別。
+            kids = t.children or []
+            if not any(c.type == "html_inline" for c in kids):
                 continue
+            parts = []
+            for c in kids:
+                if c.type == "html_inline":
+                    parts.append(c.content)
+                elif c.type in ("softbreak", "hardbreak"):
+                    parts.append("\n")
+                else:
+                    parts.append("\n" * c.content.count("\n"))
             base = t.map[0] if t.map else None
-            for rel in html_table_lines(html):
+            for rel in html_table_lines("".join(parts)):
                 out.append((base + rel) if base is not None else None)
     return out
 
