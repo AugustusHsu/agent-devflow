@@ -691,18 +691,30 @@ def tables_of(tokens, lines):
 # 後面不得再接標籤名字元——CommonMark 的標籤名是 [A-Za-z][A-Za-z0-9-]*，`<tablefoo>` 不是 table。
 RAW_TABLE_RE = re.compile(r"<table(?![A-Za-z0-9-])", re.I)
 # 屬性值裡的 `<table` 是字串內容，不是標籤（`<div data-x="<table">` 在 GitHub 上
-# 只渲染成一個 div，沒有表格）。掃描前先把引號字串挖空，避免誤擋合法 HTML
-# （審查者 PR #92 第一輪反例）。註解 `<!-- ... -->` 同理——內容不渲染。
-HTML_QUOTED_RE = re.compile(r'"[^"]*"|\'[^\']*\'')
+# 只渲染成一個 div，沒有表格）。但**只有標籤內部的引號才是屬性引號**——HTML 文字
+# 內容裡的引號是普通字元，拿它配對會把中間真正的 `<table>` 吃掉（審查者 PR #92
+# 第二輪反例）。所以先切出標籤，**整個標籤內部一律挖空**：`<foo ...>` 的開頭已經
+# 被 `<foo` 佔掉，裡面剩下的 `<table` 不論在屬性名、屬性值還是未閉合的引號裡，
+# 都不會渲染成表格（審查者實查 GitHub renderer）。只挖屬性值會漏掉前兩者。
+# 標籤的形狀依 CommonMark：`<` ＋ 標籤名 ＋ 其餘內容 ＋ `>`。
+HTML_TAG_RE = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^>]*?)?/?>", re.S)
 HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 
 
 def html_scannable(text):
-    """把不會渲染成標籤的片段挖成等長空白，其餘原樣。
+    """把不會渲染成 `<table>` 標籤的片段挖成等長空白，其餘原樣。
 
-    等長是為了讓 locate() 算出的行號仍然對得上。"""
+    兩類：HTML 註解的整段內容、**標籤的內部**（標籤名之後到 `>` 之前）。
+    等長是為了讓行號仍然對得上。標籤外的引號不碰——那是文字內容，不是屬性。"""
     text = HTML_COMMENT_RE.sub(lambda m: " " * len(m.group(0)), text)
-    return HTML_QUOTED_RE.sub(lambda m: " " * len(m.group(0)), text)
+
+    def blank_tag_body(m):
+        tag = m.group(0)
+        # 保留 `<` 與標籤名（`<table` 本身要被 RAW_TABLE_RE 抓到），挖掉其餘。
+        head = re.match(r"</?[A-Za-z][A-Za-z0-9-]*", tag).group(0)
+        return head + " " * (len(tag) - len(head) - 1) + ">"
+
+    return HTML_TAG_RE.sub(blank_tag_body, text)
 
 
 def raw_html_tables(tokens, lines):

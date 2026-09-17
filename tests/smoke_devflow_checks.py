@@ -187,6 +187,20 @@ def ok_table_html_comment(root):
          lambda t: append(t, "\n<!-- <table> -->\n"))
 
 
+def ok_table_html_attr_name(root):
+    """`<table` 出現在屬性名或未閉合的引號裡——標籤內部一律不渲染成表格
+    （審查者 PR #92 第二輪實查 GitHub renderer）。"""
+    edit(root, "devflow/orchestrators/paperclip.md",
+         lambda t: append(t, '\n<div data-<table="x">x</div>\n'))
+
+
+def mut_table_quoted_text(root):
+    """標籤外的引號是文字內容，不是屬性——不得拿它配對而把中間真正的
+    `<table>` 吃掉（審查者 PR #92 第二輪的漏放反例）。"""
+    edit(root, "devflow/orchestrators/paperclip.md",
+         lambda t: append(t, '\n<div>\n"before\n' + RAW_HTML_TABLE + '\nafter"\n</div>\n'))
+
+
 def mut_link(root):
     """相對連結指向不存在的路徑。"""
     edit(root, "README.md",
@@ -306,6 +320,8 @@ CASES = [
      ("devflow/coders/codex.md 的對照表形狀不合 R9（1 項）", "列的狀態格為空")),
     ("table:blank-status", "table", mut_table_blank_status, {},
      ("devflow/coders/codex.md 的對照表形狀不合 R9（1 項）", "列的狀態格為空")),
+    ("table:quoted-text", "table", mut_table_quoted_text, {},
+     "的對照表形狀不合 R9"),
     ("link", "link", mut_link, {}, "有相對連結指向不存在或 repo 之外的路徑"),
 ]
 
@@ -328,6 +344,7 @@ PASSING = [
     ("table:html-in-fence", "table", ok_table_html_in_fence),
     ("table:html-attr", "table", ok_table_html_attr),
     ("table:html-comment", "table", ok_table_html_comment),
+    ("table:html-attr-name", "table", ok_table_html_attr_name),
 ]
 
 
