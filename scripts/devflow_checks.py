@@ -23,7 +23,8 @@
 #                 `fence` 受版控 .md 的 fenced code block 都有關閉、
 #                 `tables` devflow.yml 指名的對照表檔（`forge`、各職位的 `filler`）都受版控、
 #                 `table` 對照表檔的表形狀合 `R9`（表頭欄位、狀態欄恰一、已分節時表要落在節內、
-#                 至少一張合格的表）、`link` 相對連結指向 repo 內存在的路徑。
+#                 資料列的狀態格非空、至少一張合格的表、不得有 raw HTML 表格）、
+#                 `link` 相對連結指向 repo 內存在的路徑。
 # 就這八項（`version`、`fence`、`table`、`link` 是 issue #80 開的，理由見下面「後四項為什麼現在
 # 可以是關卡」；`tables` 是 issue #87 開的，見「tables 為什麼可以是關卡」）。
 # 不擋（exit 0，只把發現印在 log）：`dupid`、`refs`、`r9` 三項，一律 advisory。
@@ -142,6 +143,33 @@
 #               在 #66／PR #67 分節後會誤擋，已依 `R9` 的分節條文改寫，見該節的註解。
 #       假陽性：本地以反例複驗——同一節兩張表、整檔未分節、節標題用 h3／粗體、
 #               表被 blockquote 包住、code fence 裡的示範表，都不報。
+#     issue #90 補兩類（#22 第三輪審查的假陰性 2、3；共同形狀是「parser 看到的」與
+#     「讀者看到的」不一致）。併入 `table` 不另開 key：兩者和既有斷言一樣讀同一份
+#     markdown AST、定義域同為上面七個檔、都是表形狀——#87 把 `tables` 分出去的理由
+#     （資料來源與定義域不同）在這裡不成立。
+#   * `table`：狀態格為空
+#       生效性：同上（`R9`，`ST5`）。
+#       定義域：合格表的資料列。markdown-it 把短列補成表頭欄數、補出的格為空字串，
+#               只有空白的格也被 strip 成空字串（本地以 markdown-it-py 4.0.0 實測）；
+#               兩者在 AST 上分不出來，讀者看到的同樣是空格，一併擋。
+#       假陽性：看起來像誤擋但不是的——表格最後一列後面沒空行就接一段文字，那段文字會被
+#               parser 收成一列、狀態格為空；GFM 規格的表格也是如此延伸（未在 GitHub 上實測），
+#               讀者看到的是多了一列。本地以反例複驗：短列、`| x | y | z |   |`、
+#               `| x | y | z ||`、tab／全形空白、表後緊接文字，都報。
+#       仍擋不住：`&nbsp;`、`<!-- -->` 這類讀者看來是空、parser 看來非空的狀態格——那是值
+#               不是形狀，交給 `r9`（建議）報「不是三值」。
+#   * `table`：raw HTML 表格
+#       生效性：同上。
+#       定義域：對照表檔 AST 裡含 `<table` 的 html_block／html_inline（標籤名恰為 table、
+#               大小寫不拘；blockquote、清單項、表格格內都算）。不解析 HTML 表的內容。
+#       假陽性：判定用標準庫的 `html.parser.HTMLParser`，只認它判成 start tag 的
+#               `<table>`——屬性名、屬性值、HTML 註解、未閉合引號裡的 `<table` 都不是
+#               start tag，一律不報（前三輪的每個反例）。code fence／縮排 code block／
+#               code span 的內容是 fence／code_block／code_inline token，根本不進 HTML
+#               判定。`<tablefoo>`、`&lt;table&gt;`、`\<table>` 同樣不是 table start tag。
+#               **不用正規式**：PR #92 三輪證明正規式在這裡不封閉（引號配對範圍、
+#               屬性值含 `>`、畸形標籤），審查者第三輪判定應換 tokenizer。
+#               對照表檔裡要示範 HTML 表格，放進 code fence。
 #
 #   * `link`（相對連結有效性）
 #       定義域：受版控 .md 裡 AST 看得到的相對連結（行內連結、圖片、reference 定義）。
@@ -303,7 +331,8 @@
 #     製造新的假陽性。留在 issue #22，本輪不做半套。
 #   * 從未定義過的規則家族（例如 `Q3`）連建議都不會報：前綴集合＝基線 ∪ 現有定義的
 #     前綴。放寬成「任何 ID 形狀」只會讓上面那個誤擋問題更嚴重。
-#   * 權威檔案清單、raw HTML 內容、對照表的分節 schema —— 都在 issue #22，本輪不做。
+#   * 權威檔案清單、raw HTML 內容（對照表檔內的 `<table` 除外，issue #90 起歸 `table`）、
+#     對照表的分節 schema —— 都在 issue #22，本輪不做。
 #   * frontmatter 的界定（首行 --- 到下一個 --- 或 ...，兩者後面都可以接註解）仍是
 #     字面掃描；那是慣例不是 markdown 語法，沒有 parser 可問。界定出來的內容才交給
 #     PyYAML。這一段的邊界寫法若還有沒想到的，仍可能誤判。
@@ -316,6 +345,7 @@ import importlib.util
 import os
 import re
 import subprocess
+from html.parser import HTMLParser
 import sys
 import traceback
 from pathlib import Path
@@ -657,6 +687,87 @@ def tables_of(tokens, lines):
             row = None
         elif t.type == "inline" and row is not None:
             row["cells"].append(t.content.strip())
+    return out
+
+
+# raw HTML `<table>` 的判定：用標準庫的 HTMLParser，不用正規式。
+#
+# 正規式做過三輪都不封閉（PR #92）：對整個 token 配對引號會把文字內容裡的引號
+# 當屬性引號、吃掉中間真正的表格；改切標籤後，`[^>]*?` 又在屬性值含 `>` 時提早
+# 結束，畸形標籤也切不準。審查者第三輪的結論是「應改用 HTML tokenizer/parser，
+# 而不是繼續擴充單一正規式」——用正規式解析 HTML 本來就不成立。
+#
+# HTMLParser 只回報**它判定為 start tag** 的東西：屬性名、屬性值、註解、未閉合
+# 引號裡的 `<table` 都不會變成 handle_starttag 的呼叫，前三輪的每個反例自然消失。
+# 它也給 (行, 欄)，行號直接可用，不必回頭在原文搜字串（那正是第三輪行號錯置的
+# 根因）。容錯：HTMLParser 對畸形輸入不拋例外，照 HTML5 的錯誤復原規則繼續。
+class _TableTagFinder(HTMLParser):
+    """找出 raw HTML 裡的 `<table>` start tag，回報其相對行號（1-based）。
+
+    `set_cdata_mode` 是 HTMLParser 的內部開關：碰到 `<script>`／`<style>` 後把後續
+    內容當 raw text，裡面的標籤不再回報。但 **markdown 的 `<script>` 在 GitHub 上會
+    被清掉、裡面的內容照樣渲染**——審查者 PR #92 第四輪實測 `<script>` 內的 table
+    最終有渲染出來。對照表檔不該有 script/style，一律當成普通標籤繼續解析。"""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.hits = []
+
+    def set_cdata_mode(self, *args, **kwargs):   # noqa: N802（覆寫內部方法）
+        pass
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "table":
+            self.hits.append(self.getpos()[0])
+
+    handle_startendtag = handle_starttag
+
+
+def html_table_lines(text):
+    """text 裡 `<table>` start tag 的相對行號（1-based，相對於 text 的第一行）。"""
+    p = _TableTagFinder()
+    try:
+        p.feed(text)
+        p.close()
+    except Exception:            # HTMLParser 幾乎不拋，真拋了就當作有問題
+        return [1]
+    return p.hits
+
+
+def raw_html_tables(tokens, lines):
+    """AST 裡的 raw HTML `<table>` 所在行號（issue #90 缺口 2）。
+
+    只認 parser 判成 HTML 的 token：區塊層的 html_block、行內的 html_inline（在 inline 的
+    children 裡，容器內、表格格內都算）。code fence／縮排 code block／code span 的內容是
+    fence／code_block／code_inline token，天然排除——那是示範，不是資料。
+    不解析 HTML 表的內容（表頭、欄位、狀態格都不看）：那會讓檢查器變成第二個 parser。"""
+    out = []
+    for t in tokens:
+        if t.type == "html_block":
+            for rel in html_table_lines(t.content):
+                out.append((t.map[0] + rel) if t.map else None)
+        elif t.type == "inline":
+            # 同一個 inline token 的 html_inline children 是**同一段 HTML 被文字切開**
+            # （`<div>` 文字 `</div>`），要串起來才解析得出跨 child 的標籤。
+            #
+            # 但**不能只串 HTML、丟掉中間的文字**：那些位置的換行也佔行數，丟掉後
+            # parser 的相對行號就少算（審查者 PR #92 第五輪：真實第 22 行報成 20）。
+            # 換行在 inline 裡是 `softbreak`／`hardbreak` token，**`content` 是空字串**
+            # ——不能數 `content` 裡的 `\n`，要認 token 型別。
+            kids = t.children or []
+            if not any(c.type == "html_inline" for c in kids):
+                continue
+            parts = []
+            for c in kids:
+                if c.type == "html_inline":
+                    parts.append(c.content)
+                elif c.type in ("softbreak", "hardbreak"):
+                    parts.append("\n")
+                else:
+                    parts.append("\n" * c.content.count("\n"))
+            base = t.map[0] if t.map else None
+            for rel in html_table_lines("".join(parts)):
+                out.append((base + rel) if base is not None else None)
     return out
 
 
@@ -1365,6 +1476,13 @@ print("── 對照表的形狀（%s）" % tag("table"))
 #       要求每張表落在某一節下；未分節的檔案不要求。
 #   (4) fail closed：對照表檔至少要有一張合格的表。整檔沒有表、或每張表都不合格，
 #       都是「這個檔案的對照資料不在任何格式契約之下」，要擋。
+#   (5) 資料列的狀態格 strip 後不得為空（issue #90 缺口 3）。markdown-it 會把短列補成
+#       表頭的欄數，補出來的格是空字串（本地以 markdown-it-py 4.0.0 實測）；只有空白的格
+#       parser 也 strip 成空字串，兩者在 AST 上分不出來，讀者看到的也同樣是空格，所以一併擋。
+#       「格數 ≤ 狀態欄索引」那條留著：parser 補格是它現在的行為，不是這裡能依賴的契約。
+#   (6) raw HTML 的 `<table` 出現在對照表檔內一律擋（issue #90 缺口 2）。對照表的格式契約
+#       是 markdown 表格；raw HTML 表格繞過上面每一條狀態欄檢查，在 GitHub 上卻照常渲染，
+#       讀者看到的對照資料就不在任何契約之下。不解析 HTML 表的內容，見 raw_html_tables()。
 status_tables = {}          # f -> [(table, 狀態欄索引), ...]，供 R9 用
 for f in table_files:
     d = docs[f]
@@ -1389,12 +1507,16 @@ for f in table_files:
                                "、".join(sections)))
             continue
         col = t["header"].index(STATUS_COL)
-        short = [r for r in t["body"] if len(r["cells"]) <= col]
+        short = [r for r in t["body"]
+                 if len(r["cells"]) <= col or not r["cells"][col].strip()]
         if short:
-            problems.append("%s 有 %d 列缺狀態欄（最早在第 %s 行）"
+            problems.append("%s 有 %d 列的狀態格為空（缺格或只有空白；最早在第 %s 行）"
                             % (where, len(short), short[0]["line"]))
             continue
         usable.append((t, col))
+    for n in raw_html_tables(d["tokens"], d["lines"]):
+        problems.append("%s:%s 有 raw HTML 的 <table>：對照表只能用 markdown 表格，"
+                        "HTML 表格不受狀態欄檢查" % (f, n))
     status_tables[f] = usable
     if not usable:
         problems.append("整個檔案沒有一張合格的對照表（至少要有一張：表頭含 %s、"

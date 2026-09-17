@@ -142,6 +142,82 @@ def mut_table(root):
          lambda t: replace_first(t, "| 面向 |", "| 項目 |"))
 
 
+# issue #90 的突變一律用 append，不用 replace_first：插入的文字不會搶走錨點。
+# 對照資料用 raw HTML 寫（缺口 2 的原反例，逐字取自 issue #90）。
+RAW_HTML_TABLE = ("<table><tr><td>面向</td><td>值</td><td>狀態</td></tr>"
+                  "<tr><td>x</td><td>y</td><td>亂寫</td></tr></table>")
+
+
+def mut_table_raw_html(root):
+    """對照表檔附加 raw HTML 表格（issue #90 缺口 2）。"""
+    edit(root, "devflow/orchestrators/paperclip.md",
+         lambda t: append(t, "\n" + RAW_HTML_TABLE + "\n"))
+
+
+def mut_table_short_row(root):
+    """資料列缺狀態格（issue #90 缺口 3）：markdown-it 會把它補成 4 格、狀態格為空字串。
+    codex.md 的最後一行是本機表的資料列，附加在檔尾才會接進同一張表；前面若多一個空行，
+    這一行就只是段落，本案會以 exit 0 失敗而不是靜默通過。"""
+    edit(root, "devflow/coders/codex.md",
+         lambda t: append(t, "| 短列 | coordinator |\n"))
+
+
+def mut_table_blank_status(root):
+    """狀態格有寫但只有空白。欄數與本機表相同，排除「短列」那條路徑。附加位置同上。"""
+    edit(root, "devflow/coders/codex.md",
+         lambda t: append(t, "| 空白狀態 | — | 值 |   |\n"))
+
+
+def ok_table_html_in_fence(root):
+    """code fence 裡的 `<table>` 是示範（fence token），不是 html_block，不擋。"""
+    edit(root, "devflow/orchestrators/paperclip.md",
+         lambda t: append(t, "\n```html\n" + RAW_HTML_TABLE + "\n```\n"))
+
+
+def ok_table_html_attr(root):
+    """引號屬性值裡的 `<table` 是字串內容，不是標籤——GitHub 只渲染成一個 div。
+    掃描前挖空引號字串（審查者 PR #92 第一輪反例）。"""
+    edit(root, "devflow/orchestrators/paperclip.md",
+         lambda t: append(t, '\n<div data-x="<table">x</div>\n'))
+
+
+def ok_table_html_comment(root):
+    """HTML 註解裡的 `<table>` 不渲染，同樣挖空後再掃。"""
+    edit(root, "devflow/orchestrators/paperclip.md",
+         lambda t: append(t, "\n<!-- <table> -->\n"))
+
+
+def ok_table_html_attr_name(root):
+    """`<table` 出現在屬性名或未閉合的引號裡——標籤內部一律不渲染成表格
+    （審查者 PR #92 第二輪實查 GitHub renderer）。"""
+    edit(root, "devflow/orchestrators/paperclip.md",
+         lambda t: append(t, '\n<div data-<table="x">x</div>\n'))
+
+
+def mut_table_quoted_text(root):
+    """標籤外的引號是文字內容，不是屬性——不得拿它配對而把中間真正的
+    `<table>` 吃掉（審查者 PR #92 第二輪的漏放反例）。"""
+    edit(root, "devflow/orchestrators/paperclip.md",
+         lambda t: append(t, '\n<div>\n"before\n' + RAW_HTML_TABLE + '\nafter"\n</div>\n'))
+
+
+def mut_table_script(root):
+    """`<script>` 內的 `<table>`——HTMLParser 預設把 script/style 內容當 raw text
+    而看不到，但 GitHub 會清掉 script 標籤、裡面的表格照樣渲染（審查者 PR #92
+    第四輪實測）。set_cdata_mode 已被覆寫成 no-op，這一案鎖住它。"""
+    edit(root, "devflow/orchestrators/paperclip.md",
+         lambda t: append(t, "\n<script>" + RAW_HTML_TABLE + "</script>\n"))
+
+
+def mut_table_inline_multiline(root):
+    """多行 inline 裡的 `<table>`——`prefix <span>` 開頭使這段落成 html_inline 而非
+    html_block。換行在 inline 是 softbreak token（content 為空字串），串接時要認
+    token 型別才還原得出行號（審查者 PR #92 第五輪：真實 22 行曾報成 20）。"""
+    edit(root, "devflow/orchestrators/paperclip.md",
+         lambda t: append(t, "\nprefix <span>\nsecond line\nthird "
+                             + RAW_HTML_TABLE + " tail\n"))
+
+
 def mut_link(root):
     """相對連結指向不存在的路徑。"""
     edit(root, "README.md",
@@ -189,7 +265,9 @@ def ok_tables_coordinator_omitted(root):
 #   gate    = 目標關卡，以 DEVFLOW_GATE_<KEY>=1 打開
 #   mutate  = 怎麼把輸入弄壞（None＝不改檔案，只靠環境變數）
 #   env     = 疊在基準環境上的額外變數
-#   expect  = 輸出裡必須出現的訊息片段，用來確認擋下來的是**這一項**而不是別的
+#   expect  = 輸出裡必須出現的訊息片段，用來確認擋下來的是**這一項**而不是別的。
+#             字串＝結尾摘要的 ❌ 要含它；(摘要片段, 明細片段)＝另外要求 ❌ 底下的明細含第二個
+#             片段——同一關卡的多種問題共用一條摘要時（`table`），靠明細分出是哪一種擋的
 def mut_tables_merge_missing(root):
     """merge key 帶進來的 `filler` 指向不存在的工具——展開後仍要擋。
     改 coordinator 不改 implementer：後者會連帶讓 i5 ❌。"""
@@ -253,6 +331,17 @@ CASES = [
     ("tables:merge-later-bad", "tables", mut_tables_merge_later_bad, {},
      "推導不出必需的對照表"),
     ("table", "table", mut_table, {}, "的對照表形狀不合 R9"),
+    ("table:raw-html", "table", mut_table_raw_html, {},
+     ("devflow/orchestrators/paperclip.md 的對照表形狀不合 R9（1 項）", "有 raw HTML 的 <table>")),
+    ("table:short-row", "table", mut_table_short_row, {},
+     ("devflow/coders/codex.md 的對照表形狀不合 R9（1 項）", "列的狀態格為空")),
+    ("table:blank-status", "table", mut_table_blank_status, {},
+     ("devflow/coders/codex.md 的對照表形狀不合 R9（1 項）", "列的狀態格為空")),
+    ("table:quoted-text", "table", mut_table_quoted_text, {},
+     "的對照表形狀不合 R9"),
+    ("table:script", "table", mut_table_script, {}, "的對照表形狀不合 R9"),
+    ("table:inline-multiline", "table", mut_table_inline_multiline, {},
+     "的對照表形狀不合 R9"),
     ("link", "link", mut_link, {}, "有相對連結指向不存在或 repo 之外的路徑"),
 ]
 
@@ -272,6 +361,10 @@ PASSING = [
     ("tables:forge-gitlab", "tables", ok_tables_forge_gitlab),
     ("tables:no-coordinator", "tables", ok_tables_coordinator_omitted),
     ("tables:merge-key", "tables", ok_tables_merge_key),
+    ("table:html-in-fence", "table", ok_table_html_in_fence),
+    ("table:html-attr", "table", ok_table_html_attr),
+    ("table:html-comment", "table", ok_table_html_comment),
+    ("table:html-attr-name", "table", ok_table_html_attr_name),
 ]
 
 
@@ -361,7 +454,8 @@ def main():
                 mutate(work)
             code, out = run_checker(work, gate=gate, extra_env=extra_env)
             marks = crosses(out)
-            hit = any(expect in m for m in marks)
+            expect, detail = (expect, None) if isinstance(expect, str) else expect
+            hit = any(expect in m for m in marks) and (detail is None or detail in out)
             # exit 1 **只能由目標項造成**（PR #81「Phase 1 第三出口」的條件三）：
             # 只檢查「有沒有命中目標」會讓「目標錯誤 ＋ 別的錯誤」一起通過，
             # 那時 exit 1 證明不了是哪一項擋的（審查者 PR #83 第一輪以故障
@@ -374,7 +468,8 @@ def main():
             if not good:
                 failures.append(
                     "%s：exit %d（期望 1）%s"
-                    % (name, code, "" if hit else "，且輸出裡找不到「%s」" % expect))
+                    % (name, code, "" if hit else "，且輸出裡找不到「%s」%s"
+                       % (expect, "" if detail is None else "＋明細「%s」" % detail)))
             shutil.rmtree(work)
             print()
 
