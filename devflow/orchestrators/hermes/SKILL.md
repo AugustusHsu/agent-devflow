@@ -192,9 +192,9 @@ gh issue view <N> --json state --jq .state
 - commit body 不能代替 issue 上的裁決（`L3`）。
 - 計數用 `grep -c` 會算進圖例句；用相同方法互驗等於沒驗（`R6`、`R8`）。
 - 改大檔（如 1500+ 行的 `scripts/devflow_checks.py`）的 coder 易撞 max-turns——prompt 明寫 `D4`。
-  PR #83 把該檔從 workflow inline python 搬出來時用了 79 turns；#82 的教訓是**大檔要能直接
-  執行與測試**，inline 在 YAML 裡的程式碼連跑一次都要先抽取，審查者與協調者各自實作抽取
-  邏輯、各自出過錯。
+  更根本的是**大檔要能直接執行與測試**：inline 在 YAML 裡的程式碼連跑一次都要先抽取，
+  而抽取邏輯本身就會出錯（PR #81：協調者以「最大 `run: |` 區塊」抽取、多切結尾標記，
+  跑出 `NameError` 一度誤判為內容問題）。issue #82 因此把檢查器搬進 `scripts/`。
 - `ps | grep 'claude -p'` 對多行 prompt 不可靠——用 `pstree -p`／`/proc/<pid>/cmdline`（`hermes.md` 「派工（`L2`）」格）。
 - `systemctl --user is-active <unit>.scope` 對從未存在的 unit 也回 `inactive`——先證 scope 曾 `active`（`hermes.md` 「中斷交接」格）。
 - 對照表引用行號會漂移——引用格用「面向」名稱，不用 `file:line`。
