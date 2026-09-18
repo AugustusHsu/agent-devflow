@@ -271,10 +271,62 @@ def ok_r9_prose(root):
          lambda t: append(t, "\n> 歷史：本表原本用 `✅ 實測`，#94 改為 `✅ 可用`。\n"))
 
 
+def ok_dupid_deep_heading(root):
+    """更深的同形標題（`### 3. 補充說明（R）`）是子節不是新家族——把它當家族節
+    會讓子節裡的舉例被判成重複定義（審查者 PR #97 第一輪反例）。"""
+    edit(root, "devflow/WORKFLOW.md",
+         lambda t: append(t, "\n### 3. 補充說明（R）\n\n- `R3` 這裡只是舉例\n"))
+
+
 def mut_link(root):
     """相對連結指向不存在的路徑。"""
     edit(root, "README.md",
          lambda t: append(t, "\n[壞掉的連結](does/not/exist.md)\n"))
+
+
+# ── dupid：規則 ID 唯一定義（issue #96 AC-4）───────────────────────────
+# 突變一律附加在 devflow/WORKFLOW.md 檔尾。檔案最後一行是 `- `D4` …`，也就是
+# 第 13 節「文檔（D）」的清單項——直接附加的清單項會接進同一個清單、落在同一節下，
+# 家族是 `D`。要造真重複就用 `D` 家族的 ID；要造「不算定義」的反例就換節或換行首。
+def mut_dupid(root):
+    """真正的重複定義：`D1` 在自己的家族節裡被定義第二次。
+
+    三個條件全部成立（在帶家族標記的節下、前綴＝家族、行首 `- `），所以它就是定義——
+    這正是 dupid 要擋的東西。附加的說明裡不放別的 ID 形狀 code span，`refs` 才不會
+    跟著冒出第二條 ❌。"""
+    edit(root, "devflow/WORKFLOW.md",
+         lambda t: append(t, "- `D1` 又寫了一次，這是真的重複定義。\n"))
+
+
+def ok_dupid_appendix(root):
+    """假陽性一：附錄用清單解釋既有規則（「- `R3` 常被誤讀成…」）。
+
+    「附錄：常見誤讀」的節標題沒有 `（<家族>）` 標記，該節不產生任何定義
+    ——條件 (1) 不成立，`R3` 不會被算成第二次定義。"""
+    edit(root, "devflow/WORKFLOW.md",
+         lambda t: append(t, "\n## 附錄：常見誤讀\n\n"
+                             "- `R3` 常被誤讀成「審查者要自己重跑測試」，其實不是。\n"))
+
+
+def ok_dupid_index(root):
+    """假陽性二：加一節「規則索引」把 ID 列一遍。
+
+    同樣沒有家族標記（條件 1），而且列進來的 `I1`、`I2` 和該節也談不上家族相符
+    （條件 2）——兩個條件各自都足以排除，索引不會讓每個 ID 都變成重複定義。"""
+    edit(root, "devflow/WORKFLOW.md",
+         lambda t: append(t, "\n## 規則索引\n\n"
+                             "- `I1` 一張 issue 一個任務\n"
+                             "- `I2` coder 不在主 checkout\n"))
+
+
+def ok_dupid_blockquote(root):
+    """假陽性三：blockquote 引述既有條文。
+
+    這一案刻意落在**家族相符**的節裡（檔尾＝第 13 節，引的也是 `D1`），條件 (1)(2)
+    都成立——擋下它的只有條件 (3)：行首是 `>` 不是 `- `。判準若哪天改回看 token 而
+    不看行首，本案就會以 exit 1 失敗。"""
+    edit(root, "devflow/WORKFLOW.md",
+         lambda t: append(t, "\n> - `D1` 一個來源、兩種投影：規範只有一份，指南引用它。\n"))
 
 
 # ── r9：狀態欄取 R9 三值之一（issue #94 AC-4）─────────────────────────
@@ -430,6 +482,8 @@ CASES = [
     ("table:inline-multiline", "table", mut_table_inline_multiline, {},
      "的對照表形狀不合 R9"),
     ("link", "link", mut_link, {}, "有相對連結指向不存在或 repo 之外的路徑"),
+    ("dupid", "dupid", mut_dupid, {},
+     ("規則 ID `D1` 被定義 2 次", "又寫了一次，這是真的重複定義")),
     # 四案共用同一條摘要（同一張表），靠明細裡的狀態格內容分出是哪一種擋的。
     ("r9:old-word", "r9", mut_r9_old_word, {},
      ("有 1 列的狀態欄不是 ✅ 可用／📝 已宣稱／⬜ 未測",
@@ -475,7 +529,12 @@ PASSING = [
     ("table:html-comment", "table", ok_table_html_comment),
     ("table:html-attr-name", "table", ok_table_html_attr_name),
     ("r9:prose", "r9", ok_r9_prose),
+    ("dupid:deep-heading", "dupid", ok_dupid_deep_heading),
     ("r9:separators", "r9", ok_r9_separators),
+    # issue #96 的三個「修不掉」的假陽性，逐案對應判準的三個條件。
+    ("dupid:appendix", "dupid", ok_dupid_appendix),
+    ("dupid:index", "dupid", ok_dupid_index),
+    ("dupid:blockquote", "dupid", ok_dupid_blockquote),
 ]
 
 # 「一個突變同時觸發多項」的案例（issue #91 AC-1 的 fail closed）。
