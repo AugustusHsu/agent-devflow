@@ -11,11 +11,13 @@
 # 注意不是 `G4`：`G4` 住第 9 節，依第 0 節與 `ST2` 要 stage 2 才生效，現在是 stage 1，
 # 不能引為依據。
 # 本檔每一項檢查都有自己的開關（下面的 GATES）：True＝必需關卡，False＝建議（只報告不擋）。
-# 十一項裡八項是 True（`d2`、`i1`、`i5`、`version`、`fence`、`tables`、`table`、`link`），三項是 False
-# （`dupid`、`refs`、`r9`）——分界不是「哪一項比較重要」，而是**定義域封不封閉**，見下面各節。
+# 十二項裡九項是 True（`encoding`、`d2`、`i1`、`i5`、`version`、`fence`、`tables`、`table`、`link`），
+# 三項是 False（`dupid`、`refs`、`r9`）——分界不是「哪一項比較重要」，而是**定義域封不封閉**，
+# 見下面各節。
 #
 # ── ⚠️ 這個 check 擋什麼、不擋什麼 ───────────────────────────────────────
-# 會擋（exit 1）：`d2` 入口區塊（第一個 begin 到其後第一個 end 這一段：缺 end 或 >30 行；
+# 會擋（exit 1）：`encoding` 受版控 .md 的內容是合法 UTF-8、
+#                 `d2` 入口區塊（第一個 begin 到其後第一個 end 這一段：缺 end 或 >30 行；
 #                 以及 begin 之前有落單的 end）、`i1` head branch 名稱、
 #                 `i5` devflow.yml 的 `implementer_filler` 投影與 `seats.implementer.filler`
 #                 及安裝器實際讀到的值三方一致、
@@ -25,8 +27,9 @@
 #                 `table` 對照表檔的表形狀合 `R9`（表頭欄位、狀態欄恰一、已分節時表要落在節內、
 #                 資料列的狀態格非空、至少一張合格的表、不得有 raw HTML 表格）、
 #                 `link` 相對連結指向 repo 內存在的路徑。
-# 就這八項（`version`、`fence`、`table`、`link` 是 issue #80 開的，理由見下面「後四項為什麼現在
-# 可以是關卡」；`tables` 是 issue #87 開的，見「tables 為什麼可以是關卡」）。
+# 就這九項（`version`、`fence`、`table`、`link` 是 issue #80 開的，理由見下面「後四項為什麼現在
+# 可以是關卡」；`tables` 是 issue #87 開的，見「tables 為什麼可以是關卡」；`encoding` 是
+# issue #91 開的——它原本不是關卡而是 exit 2，理由見下面「exit code 的分類守則」與該項自己的註解）。
 # 不擋（exit 0，只把發現印在 log）：`dupid`、`refs`、`r9` 三項，一律 advisory。
 #
 # 「GATES 是 True」只讓這個 check 自己變紅，**不等於它是 branch protection 的
@@ -340,7 +343,8 @@
 #   * 只看受版控的 .md。非 markdown 檔、PR body、commit 訊息都不在範圍內。
 #   * G5：required check 由 PR 分支上的 workflow 定義產生——想繞過的人可以直接改本檔。
 #     本檢查器擋的是失誤，不是蓄意規避；後者由審查擋。
-"""devflow 規則檢查。exit 0 通過／1 必需關卡失敗／2 檢查器本身無法執行。"""
+"""devflow 規則檢查。exit 0 通過／1 必需關卡失敗／2 檢查器本身無法執行。
+（`--print-pins`／`--check-pins` 是不跑關卡的查詢模式，exit code 另有意思，見下面 PINS 那節。）"""
 import importlib.util
 import os
 import re
@@ -359,6 +363,15 @@ from urllib.parse import unquote
 # 讓 yaml.compose 拋 RecursionError，投影明明一致卻被記成 i5 ❌）。這個 hook 把所有漏網的
 # 例外統一收成 exit 2；SystemExit 不經 hook，所以 die() 與關卡的 sys.exit(1) 不受影響。
 # traceback 照印（除錯要用），另補一行 💥 說明分類。
+#
+# 分界的判準是「壞掉的是誰」，不是「哪一步失敗」：
+#   * 受版控 .md 的**內容**不是合法 UTF-8 ── exit 1（`encoding` 關卡，issue #91 缺口 11）。
+#     檢查器執行得好好的，是被檢查的檔案有問題；判 2 會讓「有人 commit 了壞編碼的 md」
+#     看起來像 CI 故障。改判之前實測 exit 2（read_text 的 UnicodeDecodeError 走 die()）。
+#   * 同一個檔案**開不起來**（OSError）仍是 exit 2：`git ls-files` 說它在版控內、工作樹卻
+#     讀不到，那是 repo 佈局／執行環境與本檔假設不符，不是檔案內容違規。
+#   * 受版控的**檔名**不是 UTF-8 仍是 exit 2（tracked()）：本輪不動，它不在 issue #91
+#     AC-1 的定義域（「非 UTF-8 的受版控 markdown」指內容）內，改它等於自行擴大 AC。
 def _uncaught(exc_type, exc, tb):
     try:
         sys.stdout.flush()
@@ -370,6 +383,63 @@ def _uncaught(exc_type, exc, tb):
         sys.exit(2)               # 連印出訊息都失敗（stdout 編碼之類）也要是 2，不能退回預設的 1
 sys.excepthook = _uncaught
 
+
+# ── 相依版本 pin 的單一來源（issue #91 AC-3）──────────────────────
+# 版本號只寫在這裡一處（`I5`：一個事實一個來源）。workflow 的「準備檢查器相依」step
+# 以 `--print-pins` 取值去驗版本與安裝，不複寫版本號。
+#
+# 為什麼單一來源放檢查器而不是 workflow：README「Phase 1 第三出口」的條件一要求
+# 正反兩個 run 用同一份檢查器，而 workflow 的「記錄受測身分」step 印的是**本檔的 blob**。
+# pin 住在本檔，blob 相同就保證「要求的 parser 版本」也相同；pin 若住 workflow，
+# 只改 workflow 的 pin 不會動到 blob，條件一就只保證得了腳本、保證不了 parser。
+# 另外本檔是唯一真的 import 這兩個模組的地方——相依是它的事實，不是 CI 的事實。
+#
+# 這不是執行期的版本斷言：本檔不因裝的版本不符 pin 而報錯（那會擋死本機開發，
+# 也不在 AC 內）。實際跑的版本照樣印在下面的「檢查器：…」那一行，供人對照。
+PINS = (("markdown-it-py", "3.0.0"), ("PyYAML", "6.0.1"))
+
+# 兩個查詢模式。都在相依**安裝之前**跑，所以只能用標準庫——不得碰下面的 import。
+#   --print-pins  印出 `<套件>==<版本>` 每行一筆，直接可以餵給 pip install
+#   --check-pins  印出實際裝的版本；exit 0＝全部符合 pin，1＝有不符的（呼叫端該去裝）
+#
+# 查詢模式的 exit code **不是**檔頭那套守則：那套說的是「跑了關卡之後的結論」，
+# 而查詢模式一個關卡都沒跑。這裡的 1 只是「答案是否」，呼叫端（workflow 的準備 step）
+# 把它轉成安裝動作，不是轉成關卡失敗。2 仍然只有一個意思：檢查器本身無法執行。
+#
+# 為什麼版本比對寫在這裡而不是 workflow 的 shell：一來 pin 就住這裡，比對跟著它走才不會
+# 各自漂移；二來 issue #91 明寫 workflow 的改動要盡量小（改 CI 有自我驗證問題），
+# 邏輯留在腳本、workflow 只呼叫，改壞的面積最小；三來這段邏輯因此也被「記錄受測身分」
+# 印出的 blob 蓋住，和 pin 本身享有同一份可追溯性。
+_QUERY_MODES = ("--print-pins", "--check-pins")
+_args = sys.argv[1:]
+if [a for a in _args if a not in _QUERY_MODES]:
+    # 不默默忽略：認不得的旗標若被當成「沒有旗標」，準備 step 的一個錯字就會在那裡
+    # 跑起完整的規則檢查、以 exit 1 收場，看起來像關卡失敗。那正是本單要消滅的誤導。
+    print("💥 檢查器無法執行：認不得的參數 %s（只接受 %s，或完全不帶參數）"
+          % (" ".join(a for a in _args if a not in _QUERY_MODES), "／".join(_QUERY_MODES)))
+    sys.exit(2)
+
+if "--print-pins" in _args:
+    for _dist, _ver in PINS:
+        print("%s==%s" % (_dist, _ver))
+    sys.exit(0)
+
+if "--check-pins" in _args:
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _installed_version
+    _bad = []
+    for _dist, _ver in PINS:
+        try:
+            _got = _installed_version(_dist)
+        except PackageNotFoundError:
+            _got = None
+        print("%s：裝的是 %s，pin 是 %s%s"
+              % (_dist, _got or "（未安裝）", _ver, "" if _got == _ver else "  ←不符"))
+        if _got != _ver:
+            _bad.append(_dist)
+    # 只比 distribution 的版本，不 import：這條路徑的存在理由就是「裝之前也要能問」。
+    sys.exit(1 if _bad else 0)
+
 try:
     import yaml
     from markdown_it import MarkdownIt
@@ -380,9 +450,11 @@ except ImportError as e:
 
 # ── 關卡開關 ──────────────────────────────────────────────────────
 # True＝必需關卡（失敗就擋）；False＝建議（只報告）。
-# 十一項裡八項是 True，三項是 False。分界是定義域封不封閉，理由見檔頭。
+# 十二項裡九項是 True，三項是 False。分界是定義域封不封閉，理由見檔頭。
 # 驗證用：DEVFLOW_GATE_<KEY>=1 可單獨打開一項，環境變數只能加嚴不能放寬。
+# 順序＝執行順序：`encoding` 在讀檔當下就判，排在最前面。
 GATES = {
+    "encoding": True,   # 受版控 .md 的內容是合法 UTF-8（issue #91）
     "d2":      True,    # D2 入口區塊 ≤30 行（第 13 節，永遠生效）
     "i1":      True,    # I1 head branch 名為 <N>-<slug>（第 1 節，永遠生效）
     "i5":      True,    # I5 devflow.yml 投影 implementer_filler 三方一致（第 1 節，永遠生效；spec AC-13）
@@ -525,14 +597,43 @@ def tracked():
 
 
 def read_text(path):
-    # utf-8-sig：BOM 對 GitHub 的算繪無影響，不該讓 frontmatter 偵測失效。
+    """回傳 (text, err, nbytes)：err 是 UnicodeDecodeError，解得開就是 None；
+    nbytes 是檔案的位元組長度（算絕對位移要用，見 decode_error_detail）。
+
+    utf-8-sig：BOM 對 GitHub 的算繪無影響，不該讓 frontmatter 偵測失效。
+
+    解碼失敗**不 die()**（issue #91 缺口 11）：檔案內容不是合法 UTF-8 是內容違規
+    （exit 1 的 `encoding` 關卡），不是檢查器無法執行。而且要 fail closed——這裡仍以
+    errors="replace" 把文字交出去，讓該檔的其他關卡照跑，不因為「讀不乾淨」就把
+    整個檔案從 d2／fence／version／table／link 的定義域裡摘掉。壞掉的位元組變成
+    U+FFFD，其餘位元組原樣保留，行結構不變，所以行號仍然對得上。
+
+    開不起來（OSError）仍是 die()／exit 2：git 說它在版控內、工作樹卻讀不到，
+    那是執行環境與本檔假設不符，不是被檢查的內容有問題。
+    """
     try:
-        with open(path, encoding="utf-8-sig") as fh:
-            return fh.read()
+        raw = Path(path).read_bytes()
     except OSError as e:
         die("讀不到 %s：%s" % (path, e))
+    try:
+        return raw.decode("utf-8-sig"), None, len(raw)
     except UnicodeDecodeError as e:
-        die("%s 不是合法 UTF-8：%s" % (path, e))
+        return raw.decode("utf-8-sig", "replace"), e, len(raw)
+
+
+def decode_error_detail(path, raw_len, e):
+    """把 UnicodeDecodeError 講成「哪個檔、哪一行、哪個位元組」。
+
+    utf-8-sig 會先剝掉 BOM 再解，所以 e.object 是剝完的緩衝區、e.start 相對於它——
+    要換回檔案裡的絕對位移得補回被剝掉的長度，不然帶 BOM 的檔會報少 3。"""
+    skipped = raw_len - len(e.object)
+    line = e.object.count(b"\n", 0, e.start) + 1
+    return ["%s:%d 位元組偏移 %d（0-based，自檔首算起）是 %s"
+            % (path, line, e.start + skipped,
+               " ".join("0x%02x" % b for b in e.object[e.start:e.end])),
+            "codec 的說法：%s" % e.reason,
+            "受版控的 markdown 必須是 UTF-8（BOM 可有可無）；"
+            "多半是別的編碼（Big5／GBK／Latin-1）存進來的，用 iconv 轉回 UTF-8 即可"]
 
 
 # ── 從 AST 取事實：不用正規式猜「這是不是表格／清單項／程式碼」──────
@@ -889,9 +990,28 @@ print("必需關卡：%s ／ 建議：%s"
       % ("、".join(k for k in GATES if GATES[k]) or "（無）",
          "、".join(k for k in GATES if not GATES[k]) or "（無）"))
 
+print()
+print("── 編碼：受版控 .md 的內容是合法 UTF-8（%s）" % tag("encoding"))
+# 定義域封閉到不能再封閉：一個檔案的位元組序列是不是合法 UTF-8，由 codec 判，沒有啟發式、
+# 沒有「GitHub 算繪可能不一樣」的空間。合法 UTF-8 永遠解得開＝不可能有假陽性；
+# 解不開的檔案 GitHub 也算繪不出正確文字＝不可能有假陰性。所以直接是關卡（issue #91 AC-1）。
+#
+# 為什麼開新的 key 而不是併進既有項：既有八項每一項都對應一條規則或一個結構斷言
+# （`d2`→D2、`version`→V1／V4、`fence`／`table`／`link`→各自的形狀），而「檔案是 UTF-8」
+# 是**讀得到內容**的前提，先於所有那些判定發生，不屬於其中任何一條的定義域。
+# 併進去會讓那一項的失敗訊息同時代表兩種完全不同的問題，也讓它的假陽性紀錄不再可比。
+#
+# fail closed：解不開的檔案不從後面的關卡裡摘掉——read_text 以 errors="replace" 照樣
+# 交出文字，壞位元組變 U+FFFD，行結構不變，d2／fence／version／table／link 照跑。
+# 「讀不到就跳過」會讓一個壞編碼的檔案順帶豁免掉其餘所有檢查。
 docs = {}
+bad_encoding = []
 for f in md_files:
-    text = read_text(f)
+    text, enc_err, nbytes = read_text(f)
+    if enc_err is not None:
+        bad_encoding.append(f)
+        report("encoding", "%s 的內容不是合法 UTF-8" % f,
+               decode_error_detail(f, nbytes, enc_err))
     lines = text.split("\n")
     env = {}
     try:
@@ -899,6 +1019,11 @@ for f in md_files:
     except Exception as e:
         die("markdown-it 解析 %s 失敗：%s" % (f, e))
     docs[f] = {"lines": lines, "tokens": tokens, "env": env}
+if bad_encoding:
+    print("      —— 以上 %d 個檔仍以 U+FFFD 代替壞位元組往下檢查（fail closed），"
+          "後面各項若對它報錯，先修編碼再看" % len(bad_encoding))
+else:
+    ok("%d 個受版控 .md 都解得開（utf-8，BOM 可有可無）" % len(md_files))
 
 print()
 print("── D2：入口區塊 ≤%d 行（%s）" % (D2_MAX_LINES, tag("d2")))

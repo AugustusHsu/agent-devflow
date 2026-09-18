@@ -21,6 +21,8 @@
   3. 每個關卡至少注入一個「應擋」的突變，要求 exit 1，且輸出裡出現該關卡的訊息。
      每個案例都從乾淨的沙箱重造，突變之間不互相污染。
   4. 另有「突變後仍應通過」的正向案例（PASSING）：證明判準不誤擋正當變更，要求 exit 0 且 0 個 ❌。
+  5. 另有「一個突變同時觸發多項」的案例（MULTI）：要求 ❌ 的條數恰好等於列出的那幾條。
+     用來鎖 fail closed——某一項該報而沒報時，條數會少，本檔就失敗（issue #91 AC-1）。
 
 正向案例 0 個 ❌ 這件事讓負向案例的 ❌ 有了歸因：乾淨輸入不產生任何 ❌，所以突變後冒出來的
 每一條 ❌ 都是該突變造成的。本檔會把每個案例實際冒出的 ❌ 全部印出來，供人核對「exit 1
@@ -90,6 +92,16 @@ def edit(root, rel, fn):
     path.write_text(new, encoding="utf-8")
 
 
+def edit_bytes(root, rel, fn):
+    """位元組層級的突變。`edit()` 走 str（utf-8 進、utf-8 出），造不出非 UTF-8 的輸入。"""
+    path = root / rel
+    raw = path.read_bytes()
+    new = fn(raw)
+    if new == raw:
+        sys.exit("突變沒有改到任何東西：%s（檔案內容和本測試的假設不符）" % rel)
+    path.write_bytes(new)
+
+
 def remove(root, rel):
     """從沙箱的 index 與工作樹一起刪掉。檢查器認的是 `git ls-files`，只刪工作樹等於沒刪。
     沙箱沒有 commit，index 相對 HEAD 全是新檔，`git rm` 不加 `-f` 會拒絕。"""
@@ -111,6 +123,40 @@ def replace_first(text, old, new):
 
 def append(text, extra):
     return text + extra
+
+
+# issue #91 缺口 11：非 UTF-8 的受版控 .md 曾被 read_text 的 die() 判成 exit 2
+# （＝檢查器無法執行）。它是**內容**問題，必須是 exit 1。修正前本案會以 exit 2 失敗。
+BAD_BYTE = b"\xff"          # UTF-8 裡不可能出現的起始位元組（0xff 不在任何合法序列裡）
+
+
+def mut_encoding(root):
+    """受版控的 .md 內容不是合法 UTF-8。
+
+    選 devflow/seats/approver.md 是照抄 issue #91 裡 orchestrator 的重現路徑
+    （「在 devflow/seats/ 放一個非 UTF-8 的 .md」）。附加在檔尾、單獨一行，
+    除了編碼之外不觸發別的關卡——本案才驗得了「exit 1 只由 encoding 造成」。"""
+    edit_bytes(root, "devflow/seats/approver.md",
+               lambda b: b + b"\n\xe9\x9d\x9e UTF-8 " + BAD_BYTE + b"\n")
+
+
+def ok_encoding_bom(root):
+    """帶 UTF-8 BOM 的 .md 仍是合法 UTF-8，不得誤擋。
+
+    檢查器讀檔用 utf-8-sig（BOM 對 GitHub 的算繪無影響，不該讓 frontmatter 偵測失效），
+    這一案鎖住它：BOM 被剝掉、內容一字不差，所有關卡照樣通過。"""
+    edit_bytes(root, "devflow/seats/approver.md", lambda b: b"\xef\xbb\xbf" + b)
+
+
+def mut_encoding_fail_closed(root):
+    """同一個檔案又是非 UTF-8、又有沒關閉的 fence。
+
+    鎖住 AC-1 的 fail closed：解不開的檔案**不得**從其他關卡的定義域裡摘掉。
+    若哪天有人把 read_text 改回「解不開就跳過這個檔」，encoding 仍會 ❌、但 fence
+    那條會消失，本案就會以「❌ 只有 1 條」失敗。"""
+    edit_bytes(root, "README.md",
+               lambda b: b + b"\n\xe9\x9d\x9e UTF-8 " + BAD_BYTE
+                         + b"\n\n```\n\xe6\xb2\x92\xe6\x9c\x89\xe9\x97\x9c\xe9\x96\x89\n")
 
 
 def mut_d2(root):
@@ -310,6 +356,8 @@ def mut_tables_merge_later_bad(root):
 
 
 CASES = [
+    ("encoding", "encoding", mut_encoding, {},
+     ("devflow/seats/approver.md 的內容不是合法 UTF-8", "位元組偏移")),
     ("d2", "d2", mut_d2, {}, "的 devflow 區塊沒有關閉"),
     ("i1", "i1", None, {"GITHUB_HEAD_REF": "no-issue-number"},
      "不合 I1 的 `<N>-<slug>`"),
@@ -358,6 +406,7 @@ def ok_tables_merge_key(root):
 
 
 PASSING = [
+    ("encoding:bom", "encoding", ok_encoding_bom),
     ("tables:forge-gitlab", "tables", ok_tables_forge_gitlab),
     ("tables:no-coordinator", "tables", ok_tables_coordinator_omitted),
     ("tables:merge-key", "tables", ok_tables_merge_key),
@@ -365,6 +414,18 @@ PASSING = [
     ("table:html-attr", "table", ok_table_html_attr),
     ("table:html-comment", "table", ok_table_html_comment),
     ("table:html-attr-name", "table", ok_table_html_attr_name),
+]
+
+# 「一個突變同時觸發多項」的案例（issue #91 AC-1 的 fail closed）。
+# 和 CASES 的差別只在斷言：CASES 要求恰好 1 條 ❌（歸因到目標項），這裡要求恰好等於
+# expects 列出的那幾條——**少一條也是失敗**。少的那條就是被錯誤跳過的檢查。
+#   name    = 案例名
+#   gates   = 要打開的關卡（全部以 DEVFLOW_GATE_<KEY>=1 打開）
+#   mutate  = 怎麼把輸入弄壞
+#   expects = 摘要裡必須出現的 ❌ 片段，一條片段對一條 ❌
+MULTI = [
+    ("encoding:fail-closed", ("encoding", "fence"), mut_encoding_fail_closed,
+     ["README.md 的內容不是合法 UTF-8", "的 fenced code block 沒有關閉"]),
 ]
 
 
@@ -473,14 +534,38 @@ def main():
             shutil.rmtree(work)
             print()
 
+        # 一個突變同時觸發多項：要求恰好等於 expects 那幾條，少一條就是有檢查被跳過。
+        for n, (name, gates, mutate, expects) in enumerate(MULTI):
+            work = Path(tmp) / ("multi-%02d" % n)
+            shutil.copytree(pristine, work)
+            mutate(work)
+            code, out = run_checker(
+                work, extra_env={"DEVFLOW_GATE_" + g.upper(): "1" for g in gates})
+            marks = crosses(out)
+            missing = [e for e in expects if not any(e in m for m in marks)]
+            good = (code == 1 and not missing and len(marks) == len(expects))
+            print("多項  %-22s 應擋    exit %d（期望 1）  ❌ %d 條（期望 %d）  %s"
+                  % (name, code, len(marks), len(expects), "PASS" if good else "FAIL"))
+            for m in marks:
+                print("        %s ❌ %s"
+                      % ("←" if any(e in m for e in expects) else " ", m))
+            if not good:
+                failures.append(
+                    "%s：exit %d（期望 1）、%d 條 ❌（期望 %d）%s"
+                    % (name, code, len(marks), len(expects),
+                       "" if not missing else "，找不到：%s" % "／".join(missing)))
+            shutil.rmtree(work)
+            print()
+
     print("=" * 60)
     if failures:
         print("煙霧測試失敗（%d 項）：" % len(failures))
         for f in failures:
             print("  - %s" % f)
         return 1
-    print("煙霧測試全部通過：%d 個正向 ＋ %d 個應擋案例（涵蓋 %d 個關卡）"
-          % (1 + len(PASSING), len(CASES), len({c[1] for c in CASES})))
+    print("煙霧測試全部通過：%d 個正向 ＋ %d 個應擋案例 ＋ %d 個多項案例（涵蓋 %d 個關卡）"
+          % (1 + len(PASSING), len(CASES), len(MULTI),
+             len({c[1] for c in CASES} | {g for m in MULTI for g in m[1]})))
     return 0
 
 
