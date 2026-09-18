@@ -270,6 +270,38 @@ def mut_link(root):
          lambda t: append(t, "\n[壞掉的連結](does/not/exist.md)\n"))
 
 
+# ── r9：狀態欄取 R9 三值之一（issue #94 AC-4）─────────────────────────
+# 四個應擋案例的突變一律附加在 devflow/coders/codex.md 檔尾——最後一行是本機表的
+# 資料列，附加的列會接進同一張表（錨點同 mut_table_short_row）。每列都是四格、
+# 狀態格非空，所以 `table` 的形狀判定照樣通過：exit 1 只會由 r9 造成。
+# 舊詞那一案的 `✅ 實測` 落在表格的資料列上，不會另外觸發「敘述句仍用二值用語」
+# ——那條只掃合格表的資料列以外的行。
+def mut_r9_old_word(root):
+    """舊的二值用語 `✅ 實測`：issue #94 之前七個對照表檔的寫法，不是 R9 的三值。"""
+    edit(root, "devflow/coders/codex.md",
+         lambda t: append(t, "| 舊詞 | — | 值 | ✅ 實測 2026-09-11（驗證方式：…） |\n"))
+
+
+def mut_r9_no_sep(root):
+    """標記與詞之間少了分隔符（`✅可用`）：不是 `✅ 可用`，沒取到三值。"""
+    edit(root, "devflow/coders/codex.md",
+         lambda t: append(t, "| 黏著 | — | 值 | ✅可用 |\n"))
+
+
+def mut_r9_glued(root):
+    """三值之後黏成另一個詞（`✅ 可用性佳`）：R9_SEPS 那條的反例。
+    startswith 會通過，要看下一個字元是不是分隔符才擋得下來——只驗 startswith
+    的實作會放它過去，本案鎖住這一點。"""
+    edit(root, "devflow/coders/codex.md",
+         lambda t: append(t, "| 黏著詞 | — | 值 | ✅ 可用性佳 |\n"))
+
+
+def mut_r9_other_word(root):
+    """三值之外的詞（`✅ 完成`）：標記對、詞不對。"""
+    edit(root, "devflow/coders/codex.md",
+         lambda t: append(t, "| 別的詞 | — | 值 | ✅ 完成 |\n"))
+
+
 def mut_tables_forge(root):
     """刪掉 `forge: github` 指名的 devflow/forges/github.md。"""
     remove(root, "devflow/forges/github.md")
@@ -391,6 +423,16 @@ CASES = [
     ("table:inline-multiline", "table", mut_table_inline_multiline, {},
      "的對照表形狀不合 R9"),
     ("link", "link", mut_link, {}, "有相對連結指向不存在或 repo 之外的路徑"),
+    # 四案共用同一條摘要（同一張表），靠明細裡的狀態格內容分出是哪一種擋的。
+    ("r9:old-word", "r9", mut_r9_old_word, {},
+     ("有 1 列的狀態欄不是 ✅ 可用／📝 已宣稱／⬜ 未測",
+      "狀態欄=「✅ 實測 2026-09-11（驗證方式：…）」")),
+    ("r9:no-sep", "r9", mut_r9_no_sep, {},
+     ("有 1 列的狀態欄不是 ✅ 可用／📝 已宣稱／⬜ 未測", "狀態欄=「✅可用」")),
+    ("r9:glued", "r9", mut_r9_glued, {},
+     ("有 1 列的狀態欄不是 ✅ 可用／📝 已宣稱／⬜ 未測", "狀態欄=「✅ 可用性佳」")),
+    ("r9:other-word", "r9", mut_r9_other_word, {},
+     ("有 1 列的狀態欄不是 ✅ 可用／📝 已宣稱／⬜ 未測", "狀態欄=「✅ 完成」")),
 ]
 
 # 「突變後仍應通過」的正向案例：判準不能誤擋正當變更。
@@ -405,6 +447,17 @@ def ok_tables_merge_key(root):
          lambda t: replace_first(t, "filler: codex", "<<: {filler: codex}"))
 
 
+def ok_r9_separators(root):
+    """三值之後接分隔符與補充都合規（R9 要求 `✅` 附驗證方式、`📝` 標明是哪一種，
+    補充本來就得接在三值後面）。三值各一列，涵蓋全形括號、全形冒號、沒有補充
+    三種寫法——判準若收成「狀態格必須恰等於三值」，這一案就會誤擋。"""
+    edit(root, "devflow/coders/codex.md",
+         lambda t: append(t,
+                          "| 可用 | — | 值 | ✅ 可用（實測 2026-09-11，驗證方式：…） |\n"
+                          "| 已宣稱 | — | 值 | 📝 已宣稱：驗證未達 `✅` |\n"
+                          "| 未測 | — | 值 | ⬜ 未測 |\n"))
+
+
 PASSING = [
     ("encoding:bom", "encoding", ok_encoding_bom),
     ("tables:forge-gitlab", "tables", ok_tables_forge_gitlab),
@@ -414,6 +467,7 @@ PASSING = [
     ("table:html-attr", "table", ok_table_html_attr),
     ("table:html-comment", "table", ok_table_html_comment),
     ("table:html-attr-name", "table", ok_table_html_attr_name),
+    ("r9:separators", "r9", ok_r9_separators),
 ]
 
 # 「一個突變同時觸發多項」的案例（issue #91 AC-1 的 fail closed）。

@@ -8,11 +8,11 @@
 
 | 面向 | 職位 | 值 | 狀態 |
 |---|---|---|---|
-| 派工（`L2`） | coordinator（由人填） | 人建 worktree、起 coder | ⬜ 未實測 |
-| HITL（`L3`） | coordinator（由人填）／approver | coder 停下後人直接回答並寫回 issue | ⬜ 未實測 |
-| 平行上限 | coordinator（由人填） | 人自己掌控；`P1` 由人逐項確認 | ⬜ 未實測 |
-| 流程指令住哪 | coordinator（由人填） | 入口檔區塊指向 `devflow/WORKFLOW.md` | ⬜ 未實測 |
-| 換 orchestrator（`I6`） | coordinator（由人填） | 由 `none` 切到 `hermes` 不改 repo 內任何非衍生檔 | ⬜ 未實測 |
+| 派工（`L2`） | coordinator（由人填） | 人建 worktree、起 coder | ⬜ 未測 |
+| HITL（`L3`） | coordinator（由人填）／approver | coder 停下後人直接回答並寫回 issue | ⬜ 未測 |
+| 平行上限 | coordinator（由人填） | 人自己掌控；`P1` 由人逐項確認 | ⬜ 未測 |
+| 流程指令住哪 | coordinator（由人填） | 入口檔區塊指向 `devflow/WORKFLOW.md` | ⬜ 未測 |
+| 換 orchestrator（`I6`） | coordinator（由人填） | 由 `none` 切到 `hermes` 不改 repo 內任何非衍生檔 | ⬜ 未測 |
 
 ## 本機
 
