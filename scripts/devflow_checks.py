@@ -646,6 +646,8 @@ BASELINE_PREFIXES = {"I", "S", "V", "L", "R", "M", "F", "C", "G", "B", "ST", "P"
 # 不含括號字母的節（第 0 節「變數與基準」、附錄、索引）不產生任何定義。
 # 半形括號一併收：同一個形狀換個寫法就讓整節的定義憑空消失，是沉默的漏認。
 RULE_SECTION_RE = re.compile(r"[0-9]+\.\s+.+[（(]([A-Z]{1,4})[）)]")
+# 只有這個層級的標題能開家族節：WORKFLOW.md 的 13 個規則節全是 `##`。
+RULE_SECTION_DEPTH = 2
 # 一律用 fullmatch，不用 match：Python 的 $ 會匹配「字串最後一個換行之前」，
 # 所以 ^…$ ＋ match() 會讓 "0.0.2.0\n" 這種含換行的值矇混過關。
 ID_RE = re.compile(r"([A-Z]{1,4})[0-9]+")
@@ -766,6 +768,10 @@ def section_families(tokens):
     只認**文件層級**的標題：blockquote／清單等容器裡的 `## 1. 不變層（I）` 是引用
     或舉例，不是這份檔案的分節（同 r9_sections；markdown-it 對容器內的 token
     設 level > 0）。
+
+    **只有 h2 能開家族節**：`WORKFLOW.md` 的 13 個規則節全是 `##`，更深的同形標題
+    （`### 3. 補充說明（R）`）是子節不是新家族——把它當家族節會讓子節裡的舉例被判
+    成重複定義（審查者 PR #97 第一輪反例）。更深的標題照樣不關掉外層的節。
     """
     out = [None] * len(tokens)
     family = None
@@ -783,7 +789,7 @@ def section_families(tokens):
             lv, depth = depth, None
             if at_doc_level:
                 m = RULE_SECTION_RE.fullmatch(t.content.strip())
-                if m:
+                if m and lv == RULE_SECTION_DEPTH:
                     family, family_depth = m.group(1), lv
                 elif family is not None and lv <= family_depth:
                     family = None

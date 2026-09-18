@@ -271,6 +271,13 @@ def ok_r9_prose(root):
          lambda t: append(t, "\n> 歷史：本表原本用 `✅ 實測`，#94 改為 `✅ 可用`。\n"))
 
 
+def ok_dupid_deep_heading(root):
+    """更深的同形標題（`### 3. 補充說明（R）`）是子節不是新家族——把它當家族節
+    會讓子節裡的舉例被判成重複定義（審查者 PR #97 第一輪反例）。"""
+    edit(root, "devflow/WORKFLOW.md",
+         lambda t: append(t, "\n### 3. 補充說明（R）\n\n- `R3` 這裡只是舉例\n"))
+
+
 def mut_link(root):
     """相對連結指向不存在的路徑。"""
     edit(root, "README.md",
@@ -522,6 +529,7 @@ PASSING = [
     ("table:html-comment", "table", ok_table_html_comment),
     ("table:html-attr-name", "table", ok_table_html_attr_name),
     ("r9:prose", "r9", ok_r9_prose),
+    ("dupid:deep-heading", "dupid", ok_dupid_deep_heading),
     ("r9:separators", "r9", ok_r9_separators),
     # issue #96 的三個「修不掉」的假陽性，逐案對應判準的三個條件。
     ("dupid:appendix", "dupid", ok_dupid_appendix),
