@@ -264,7 +264,7 @@
 #       才算定義（見 RULE_SECTION_RE 與 rule_definitions 的 docstring）：
 #         (1) 落在 `## <數字>. <名>（<家族>）` 這種節之下；
 #         (2) ID 的字母前綴＝該節括號裡的家族；
-#         (3) 原始行以 `- ` 開頭。
+#         (3) 本項的原始行（list_item_open 那一行）以 `- ` 開頭。
 #       節標題**用正規式抓形狀，不硬編碼 13 個節名**：日後新增節自動納入，不含括號字母的
 #       節（第 0 節「變數與基準」）不產生定義。節的範圍到下一個同層或更淺的標題為止，
 #       更深的子標題仍在節內；容器（blockquote／清單）裡的 `## …` 不分節，同 r9_sections。
@@ -275,7 +275,7 @@
 #         - 加一節「規則索引」把所有 ID 列一遍——同樣沒有家族標記，且列進來的 `I1`、`I2`
 #           與該節家族不符，條件 (1)(2) 都不成立；
 #         - blockquote 引述既有條文（「> - `D1` …」）——行首是 `>`，條件 (3) 不成立。
-#       粗體開頭（「- **`R3`** …」）仍算定義：ID 是不是清單項的第一個內容由 token 層判，
+#       粗體開頭（「- **`R3`** …」）仍算定義：ID 是不是本項的開頭由 token 層判，
 #       條件 (3) 只看行首那個 `- `，不看後面的標記。fenced code block 裡的示範不產生
 #       list_item token，天然排除。判準在**現行內容**上的結果與舊判準相同——71 條定義、
 #       零重複（升關卡前實跑，exit 0）。**不宣稱「不存在假陽性」**：那個宣稱在本檔被推翻過
@@ -284,6 +284,37 @@
 #       例如把「- `I1` …」又寫進第 13 節。依判準它根本不算定義，所以不報。要連那種也擋，
 #       得先由人裁決「定義只能寫在帶家族標記的節裡」並寫進 WORKFLOW.md（`G2`），
 #       不由本檔自己發明規則。
+#
+# ── dupid 的「ID 是本項的開頭」為什麼不再窮舉（issue #98）────────────────────
+# #96 的實作是「逐個跳過開標記，取第一個實質 token」：
+#     if c.type in ("strong_open", "em_open", "s_open", "link_open"): continue
+# 這個跳過清單是**開放集合**，每多一種寫法就要補一次。orchestrator 實測五種寫法，四種漏認
+# （issue #98 的表）：`[](#x)` 停在 link_close、`[看這裡](#x)` 停在連結文字、`![](img.png)`
+# 停在 image、`~~舊~~` 根本連 token 都不是（commonmark preset 把它當字面文字）。
+# **這是必需關卡上的繞過**：`- [](#invisible) `X1` …` 加一個看不見的空連結，重複定義就不報。
+#
+# 改法不是把清單補長，是換問題：**不問「前面那個 token 是不是某種標記」，問「ID 前面有沒有
+# 裸文字」**（leading_code_span）。裸文字＝與 ID 的 code span 同層或更外層的文字 token；
+# 層級用 markdown-it 的 `level`——容器的內文恆比容器深一層，所以已經關掉的裝飾（連結文字、
+# 刪除線內文）比 ID 深，而還罩著 ID 的容器（`**注意 `R3`**`）其內文與 ID 同層。
+#   為什麼不必窮舉：承載字面文字的 token 型別是**封閉的一小組**（TEXT_TOKENS），其餘型別
+#     一律不看。任何新的行內語法產生的都是「自己的開／關 token（不是文字）＋更深一層的
+#     內文（不是同層）」，自動落在「不算裸文字」那邊。判準不隨語法數量成長。
+#   新的誤認風險（誠實記下，不宣稱封閉）：
+#     - 假陽性方向：ID 之前只要沒有裸文字就算定義，所以「- ![badge](x.svg) `D1` …」這種
+#       有 alt 文字的圖片、「- [](#a)」換行後才寫 ID，都會被當成定義。它們的形狀確實是
+#       「這一項在講這個 ID」，判成定義是刻意的；真正的散文（「- 見 `I2` 與 `L3`」）被
+#       擋掉，因為 `見 ` 是裸文字。tests 的 `dupid:prose-*` 三案鎖住這一邊，其中
+#       `prose-in-strong`（「- **注意 `D1` 在粗體裡**」）鎖的是「同層」那半句：只比
+#       頂層有沒有裸文字的實作會把整句包在粗體裡的散文誤判成定義。
+#     - 假陰性方向：parser **不認得**的語法會留成字面文字，於是變成裸文字而漏認
+#       （`==標記== `D1` …` 之類）。這一邊與 GitHub 的算繪一致——GitHub 也把它當文字——
+#       所以判準與讀者看到的同步；代價是這種寫法仍可藏重複定義。`~~` 屬於這一類，已靠
+#       把解析器對齊 GFM（MD 的 `strikethrough`）消掉，見該處註解。
+#   條件 (3) 的錨點同時改了：從「ID 所在的那一行」改成「list_item_open 自己那一行」。
+#     ID 前面既然可以有裝飾，裝飾裡就可以有換行，那時 ID 落在縮排的續行上，拿它判行首
+#     會把真定義判掉（又一個繞過）。本項的行首寫法只有一個來源，就是本項的第一行；
+#     三個假陽性案例（附錄、索引、`> - …`）的第一行寫法不變，判定與 #96 相同。
 #
 # ── 不發明規則：`i1` 的 slug 為什麼不限字元集 ─────────────────────────────
 # `I1` 的原文只有「分支名 `<N>-<slug>`」，沒有規定 slug 的字元集。
@@ -378,6 +409,10 @@
 #     兩條定義都落在自己家族的節裡；把「- `I1` …」又寫進第 13 節（家族不符），或寫進
 #     附錄、索引這種沒有家族標記的節，依判準都不算定義，**不報**。那是判準的取捨：
 #     要連那種也擋，得先由人把「定義只能寫在帶家族標記的節裡」寫進 WORKFLOW.md（`G2`）。
+#     另一種漏放（issue #98）：ID 前面寫了 parser **不認得**的標記（`==x== `D1` …`），
+#     那段留成字面文字＝裸文字，本項就不算定義。GitHub 也把它算繪成文字，所以檢查器
+#     與讀者看到的一致；但這種寫法仍藏得住重複定義。`~~` 曾屬於這一類，已靠把解析器
+#     對齊 GFM 消掉——**這是一次一種語法的補法，不是判準的通則**，仍可能有下一種。
 #   * 【改 ID 後別的檔案還指著舊號 —— 沒有東西在擋。】
 #     refs 這一項本來就是為這個失效而存在的，但它會把 `M5`（Apple 晶片）、`C5`
 #     （RFC 分類）這種合法的非規則代號判成懸空規則引用。WORKFLOW.md:7 只寫「引用規則
@@ -651,8 +686,22 @@ RULE_SECTION_DEPTH = 2
 # 一律用 fullmatch，不用 match：Python 的 $ 會匹配「字串最後一個換行之前」，
 # 所以 ^…$ ＋ match() 會讓 "0.0.2.0\n" 這種含換行的值矇混過關。
 ID_RE = re.compile(r"([A-Z]{1,4})[0-9]+")
+# 承載「字面文字」的 inline token 型別（issue #98）。dupid 的判準只問這一類 token
+# ——「有沒有裸文字」——不問任何標記型別，所以行內語法再多也不必補判準
+# （見 leading_code_span 與 rule_definitions 的 docstring）。
+# `text_special`（跳脫與 HTML entity）實測在 3.0.0（CI pin）與 4.0.0（本機）都已被
+# text_collapse 併回 `text`（`&#35211;` 到 children 裡是內容為「見」的 `text`，`\*` 是 `**`），
+# 兩個都收是為了不依賴 parser 版本——沒併回時它一樣承載字面文字，不能當成標記放行。
+TEXT_TOKENS = ("text", "text_special")
 
-MD = MarkdownIt("commonmark").enable("table")
+# 解析器：commonmark ＋ GitHub 也認得的兩個擴充。`table` 是對照表要用的；`strikethrough`
+# 是 issue #98 補的——GitHub 算繪的是 GFM，`~~舊~~` 在讀者眼裡是刪除線**標記**，
+# commonmark preset 卻把整段當字面文字，於是 `- ~~舊~~ `D1` …` 在 dupid 眼裡成了
+# 「ID 前面有裸文字」而漏認。這是**解析器保真度**的落差，不是判準的窮舉問題：判準只問
+# 「parser 看到的是文字還是標記」，parser 認得的語法愈接近 GitHub，兩邊看到的就愈一致。
+# 現行受版控的 md 一個 `~~` 都沒有（`git grep -n '~~' -- '*.md'` 無輸出），所以這個改動
+# 不改變任何一項在現行內容上的判定；升版後仍是 71 條定義、零重複。
+MD = MarkdownIt("commonmark").enable(["table", "strikethrough"])
 errors = []
 advisories = []
 
@@ -797,24 +846,65 @@ def section_families(tokens):
     return out
 
 
+def leading_code_span(children):
+    """一個 inline 開頭的 code span：第一個 `code_inline`，且它前面沒有裸文字。
+    開頭不是 code span 就回 None（issue #98 AC-1）。
+
+    **「裸文字」＝與這個 code span 同層或更外層的文字 token**（`TEXT_TOKENS`，內容
+    非空白）。層級用 markdown-it 給每個 token 的 `level`：容器（強調、連結、圖片、
+    刪除線…）的內文比容器本身深一層，所以「已經關掉的裝飾」其內文恆比後面的 code span
+    深，而「還罩著這個 code span 的容器」其內文與它同層。四個例子（實測見 issue #98）：
+
+        - **`R3`** …          strong_open lv0、code_inline lv1  → 前面沒有文字 → 是開頭
+        - [看這裡](#x) `R3` …  「看這裡」lv1 > code_inline lv0    → 裝飾 → 是開頭
+        - **注意 `R3`** …      「注意 」lv1 ＝ code_inline lv1     → 裸文字 → 不是開頭
+        - 見 `I2` 與 `L3`      「見 」lv0 ＝ code_inline lv0       → 裸文字 → 不是開頭
+
+    **為什麼不必窮舉**：舊寫法是「逐個跳過開標記」，跳過清單是開放集合——`link_close`、
+    `image`、`~~` 都是這樣漏掉的（issue #98 的實測表，五種寫法四種漏認）。這裡改成問
+    「有沒有文字」：markdown-it 承載字面文字的 token 型別是封閉的一小組（`TEXT_TOKENS`），
+    **其餘型別一律不看**。日後新增任何行內語法，它產生的是自己的開／關 token（不是文字）
+    ＋更深一層的內文（不是同層），兩者都自動落在「不是裸文字」那邊，判準不必改。
+    """
+    for k, c in enumerate(children):
+        if c.type != "code_inline":
+            continue
+        for prev in children[:k]:
+            if (prev.type in TEXT_TOKENS and prev.level <= c.level
+                    and prev.content.strip()):
+                return None
+        return c
+    return None
+
+
 def rule_definitions(tokens, lines):
-    """規則 ID 的定義。三個條件同時成立才算（issue #96 AC-1）：
+    """規則 ID 的定義。三個條件同時成立才算（issue #96 AC-1，條件 3 的錨點由 #98 改寫）：
 
       1. 落在帶家族標記的節下（`## <數字>. <名>（<家族>）`，見 RULE_SECTION_RE）；
       2. ID 的字母前綴＝該節括號裡的家族；
-      3. 原始行以 `- ` 開頭——不縮排、不在 blockquote 裡、不是有序清單。
+      3. 本項的原始行以 `- ` 開頭——不縮排、不在 blockquote 裡、不是有序清單。
 
     三者擋掉的正是 dupid 以前「修不掉」的三個假陽性：附錄／索引那種節沒有家族標記
     （條件 1）、索引把別家族的 ID 列進來（條件 2）、「> - `I1` …」這種引述（條件 3）。
 
-    粗體開頭仍算定義（「- **`R3`** …」）：ID 是不是清單項的第一個內容由下面的 token
-    判定，條件 3 只看行首那個 `- `，不看後面的標記。fenced code block 裡的示範不產生
-    list_item token，天然排除。
+    再加上「ID 是本項的開頭」——由 leading_code_span() 判，**不窮舉要跳過哪些標記**：
+    問的是「ID 前面有沒有裸文字」，不是「前面那個 token 是不是某種標記」。所以
+    「- **`R3`** …」「- [](#a) `R3` …」「- ~~舊~~ `R3` …」都算定義，而
+    「- 見 `I2` 與 `L3`」「- 這條規則參考了 `R3` 的做法」不算（AC-3）。
+    fenced code block 裡的示範不產生 list_item token，天然排除。
+
+    條件 3 看的是 **list_item_open 自己那一行**（`t.map[0]`），不是「ID 落在哪一行」：
+    ID 前面既然可以有裝飾，裝飾裡就可以有換行（`- [](#a)` 換行後才寫 `` `D1` ``），
+    那時 ID 所在的行是縮排的續行，拿它判行首會把一個真定義判掉——本項的行首寫法只有
+    一個來源，就是本項的第一行。三個假陽性案例的第一行分別是附錄項、索引項、
+    `> - …`，判定與 #96 相同。
     """
     families = section_families(tokens)
     out = []
     for i, t in enumerate(tokens):
-        if t.type != "list_item_open" or families[i] is None:
+        if t.type != "list_item_open" or families[i] is None or not t.map:
+            continue
+        if not lines[t.map[0]].startswith("- "):     # 條件 3
             continue
         for j in range(i + 1, len(tokens)):
             tj = tokens[j]
@@ -825,25 +915,13 @@ def rule_definitions(tokens, lines):
                 break
             if tj.type != "inline":
                 continue
-            first = None
-            for c in tj.children or []:
-                # 粗體／斜體／連結的開標記，以及它們前後產生的空 text token，
-                # 都不算「開頭」——`R3` 被 ** 包起來仍然是定義。
-                if c.type in ("strong_open", "em_open", "s_open", "link_open"):
-                    continue
-                if c.type == "text" and not c.content.strip():
-                    continue
-                first = c
-                break
-            if first is not None and first.type == "code_inline":
+            first = leading_code_span(tj.children or [])
+            if first is not None:
                 content = first.content.strip()
                 m = ID_RE.fullmatch(content)
                 if m and m.group(1) == families[i]:
-                    n = locate(lines, t, "`%s`" % content) or locate(lines, t)
-                    # 條件 3：ID 既然是本項的第一個內容，它就在本項的第一行上，
-                    # 所以這一行的行首寫法就是本項的行首寫法。
-                    if n and lines[n - 1].startswith("- "):
-                        out.append((content, n))
+                    out.append((content,
+                                locate(lines, t, "`%s`" % content) or t.map[0] + 1))
             break
     return out
 

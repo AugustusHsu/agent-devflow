@@ -329,6 +329,84 @@ def ok_dupid_blockquote(root):
          lambda t: append(t, "\n> - `D1` 一個來源、兩種投影：規範只有一份，指南引用它。\n"))
 
 
+# ── dupid：ID 之前有裝飾性內容（issue #98）─────────────────────────────
+# 缺口 7 及其同族：#96 的判準逐個跳過開標記，跳過清單漏了 link_close、image，`~~` 更
+# 根本不是 token——五種前綴寫法四種漏認，於是「重複定義可以靠加個空連結繞過」。
+# 前四個應擋案例各對應實測表的一列（判準改成「ID 前面有沒有裸文字」後全部認得出來），
+# 第五個（link-newline）鎖的是條件 (3) 的錨點——裝飾裡有換行時，ID 不在本項的第一行上。
+# 連結一律指 `#…` fragment、圖片一律指有 scheme 的 URL：兩者都不是 repo 路徑，
+# `link` 那一關會跳過，exit 1 才只由 dupid 造成。說明文字裡不放別的 ID 形狀 code span。
+def mut_dupid_empty_link(root):
+    """缺口 7 的原始反例：空連結之後的重複定義（`- [](#x) `D1` …`）。
+
+    舊判準取到的「第一個內容」是 link_close，不是 code_inline，於是整項不算定義、
+    `D1` 的第二次定義沒被看見。"""
+    edit(root, "devflow/WORKFLOW.md",
+         lambda t: append(t, "- [](#dup) `D1` 空連結後的重複定義。\n"))
+
+
+def mut_dupid_text_link(root):
+    """有文字的連結之後的重複定義（`- [看這裡](#x) `D2` …`）。
+
+    舊判準取到的是連結文字那個 text token。新判準看層級：連結文字比 code span 深一層
+    （lv1 > lv0），是已經關掉的裝飾，不是裸文字。"""
+    edit(root, "devflow/WORKFLOW.md",
+         lambda t: append(t, "- [看這裡](#dup) `D2` 有字連結後的重複定義。\n"))
+
+
+def mut_dupid_image(root):
+    """圖片之後的重複定義（`- ![](x.png) `D3` …`）。
+
+    舊判準取到的是 image token——它既不在跳過清單裡，也不是 code_inline。"""
+    edit(root, "devflow/WORKFLOW.md",
+         lambda t: append(t,
+                          "- ![](https://example.com/x.png) `D3` 圖片後的重複定義。\n"))
+
+
+def mut_dupid_strike(root):
+    """刪除線之後的重複定義（`- ~~舊~~ `D4` …`）。
+
+    這一列不是「跳過清單缺項」：commonmark preset 根本不認 `~~`，整段留成字面文字。
+    解析器對齊 GFM（`MD` 的 `strikethrough`）之後才變成 s_open／內文／s_close，
+    內文比 code span 深一層，判準自然放行。解析器若被改回不認 `~~`，本案會以 exit 0 失敗。"""
+    edit(root, "devflow/WORKFLOW.md",
+         lambda t: append(t, "- ~~舊~~ `D4` 刪除線後的重複定義。\n"))
+
+
+def mut_dupid_link_newline(root):
+    """裝飾裡有換行：`- [](#x)` 的下一行才寫 ID。
+
+    ID 前面既然可以有裝飾，裝飾裡就可以有換行——那時 ID 落在縮排的續行上。條件 (3)
+    若拿「ID 所在的行」判行首，這一項會被判成不是定義（又一個繞過）；改看
+    list_item_open 自己那一行才擋得下來。"""
+    edit(root, "devflow/WORKFLOW.md",
+         lambda t: append(t, "- [](#dup)\n  `D1` 換行之後才寫的重複定義。\n"))
+
+
+# AC-3 的散文：三案都刻意落在**家族相符**的節裡（檔尾＝第 13 節，引的也是 D 家族），
+# 條件 (1)(2)(3) 全部成立——擋下它們的只有「ID 前面有裸文字」。判準若退回「取第一個
+# code span、不管前面是什麼」，這三案會各冒出一條 dupid ❌ 而以 exit 1 失敗。
+def ok_dupid_prose_ref(root):
+    """散文一：ID 出現在句子中間（「- 這條規則參考了 `D1` 的做法」）。"""
+    edit(root, "devflow/WORKFLOW.md",
+         lambda t: append(t, "- 這條規則參考了 `D1` 的做法，這一項不是定義。\n"))
+
+
+def ok_dupid_prose_list(root):
+    """散文二：一句話列舉兩個 ID（「- 見 `D2` 與 `D3`」）。"""
+    edit(root, "devflow/WORKFLOW.md",
+         lambda t: append(t, "- 見 `D2` 與 `D3`，這一項不是定義。\n"))
+
+
+def ok_dupid_prose_in_strong(root):
+    """散文三：整句包在粗體裡（「- **注意 `D1` 在粗體裡**」）。
+
+    這一案鎖住判準的「同層或更外層」那半句：「注意 」和 code span 同在 lv1。只比
+    lv0 的實作（「頂層沒有裸文字就算定義」）會放它過去，本案就會以 exit 1 失敗。"""
+    edit(root, "devflow/WORKFLOW.md",
+         lambda t: append(t, "- **注意 `D1` 在粗體裡**，這一項不是定義。\n"))
+
+
 # ── r9：狀態欄取 R9 三值之一（issue #94 AC-4）─────────────────────────
 # 四個應擋案例的突變一律附加在 devflow/coders/codex.md 檔尾——最後一行是本機表的
 # 資料列，附加的列會接進同一張表（錨點同 mut_table_short_row）。每列都是四格、
@@ -484,6 +562,17 @@ CASES = [
     ("link", "link", mut_link, {}, "有相對連結指向不存在或 repo 之外的路徑"),
     ("dupid", "dupid", mut_dupid, {},
      ("規則 ID `D1` 被定義 2 次", "又寫了一次，這是真的重複定義")),
+    # issue #98：ID 之前有裝飾性內容的五種寫法，舊判準四種漏認。
+    ("dupid:empty-link", "dupid", mut_dupid_empty_link, {},
+     ("規則 ID `D1` 被定義 2 次", "空連結後的重複定義")),
+    ("dupid:text-link", "dupid", mut_dupid_text_link, {},
+     ("規則 ID `D2` 被定義 2 次", "有字連結後的重複定義")),
+    ("dupid:image", "dupid", mut_dupid_image, {},
+     ("規則 ID `D3` 被定義 2 次", "圖片後的重複定義")),
+    ("dupid:strike", "dupid", mut_dupid_strike, {},
+     ("規則 ID `D4` 被定義 2 次", "刪除線後的重複定義")),
+    ("dupid:link-newline", "dupid", mut_dupid_link_newline, {},
+     ("規則 ID `D1` 被定義 2 次", "換行之後才寫的重複定義")),
     # 四案共用同一條摘要（同一張表），靠明細裡的狀態格內容分出是哪一種擋的。
     ("r9:old-word", "r9", mut_r9_old_word, {},
      ("有 1 列的狀態欄不是 ✅ 可用／📝 已宣稱／⬜ 未測",
@@ -535,6 +624,10 @@ PASSING = [
     ("dupid:appendix", "dupid", ok_dupid_appendix),
     ("dupid:index", "dupid", ok_dupid_index),
     ("dupid:blockquote", "dupid", ok_dupid_blockquote),
+    # issue #98 AC-3：ID 不是本項主題的散文，三案都在家族相符的節裡。
+    ("dupid:prose-ref", "dupid", ok_dupid_prose_ref),
+    ("dupid:prose-list", "dupid", ok_dupid_prose_list),
+    ("dupid:prose-in-strong", "dupid", ok_dupid_prose_in_strong),
 ]
 
 # 「一個突變同時觸發多項」的案例（issue #91 AC-1 的 fail closed）。
