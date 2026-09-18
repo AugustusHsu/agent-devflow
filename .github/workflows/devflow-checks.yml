@@ -41,16 +41,49 @@ jobs:
         env:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
+      # 檢查器硬性要求這兩個模組，沒有 fallback 解析路徑：兩套解析＝兩種行為，
+      # 而實際在 CI 跑的會是比較弱的那一套。
+      #
+      # 這個 step 的狀態碼只會是 0 或 2（issue #91 缺口 10）。原本是 `set -euo pipefail`，
+      # pip 失敗就以 pip 的狀態碼（實測 1）結束整個 step：於是「相依裝不起來」＝環境問題，
+      # 和「規則檢查判了關卡失敗」＝內容問題撞同一個號碼，而且根本到不了規則檢查 step。
+      # 依 scripts/devflow_checks.py 檔頭的 exit code 守則，檢查器無法執行必須是 2。
+      # 注意 GitHub 預設以 `bash -e {0}` 執行 run:，errexit 本來就是開的——所以不是「拿掉
+      # set -e」就沒事，下面用一個 EXIT 守衛把任何漏出來的非零狀態碼一律收成 2。
+      #
+      # 版本號**不寫在本檔**（issue #91 AC-3／`I5`）：單一來源是 scripts/devflow_checks.py
+      # 的 PINS，這裡只呼叫 `--print-pins`／`--check-pins`。理由見該處註解——pin 住在
+      # 檢查器裡，「記錄受測身分」印出的 blob 才蓋得住「這個 run 要求哪個 parser 版本」。
+      #
+      # 驗的是**版本**不是 `import`（issue #91 缺口 12）：本機已有任意版本時 import 照樣
+      # 成功，pinned 版就永遠裝不上去。hosted runner 恰好是 3.0.0 是巧合、不是程式保證，
+      # 而 README「Phase 1 第三出口」條件一要的是正反兩個 run 跑同一份檢查器——blob 相同
+      # 但 parser 版本不同，那個條件就只成立一半。
+      # TODO(orchestrator)：要更嚴的供應鏈保證可改用 --require-hashes ＋ requirements 檔。
       - name: 準備檢查器相依
         run: |
-          set -euo pipefail
-          # 檢查器硬性要求這兩個模組，沒有 fallback 解析路徑：兩套解析＝兩種行為，
-          # 而實際在 CI 跑的會是比較弱的那一套。runner 上已有就用現成的，沒有才裝。
-          # TODO(orchestrator)：要更嚴的供應鏈保證可改用 --require-hashes ＋ requirements 檔。
-          if ! python3 -c 'import markdown_it, yaml' 2>/dev/null; then
-            python3 -m pip install --quiet --disable-pip-version-check \
-              'markdown-it-py==3.0.0' 'PyYAML==6.0.1'
+          set -uo pipefail
+          # 出口守衛：不管非零狀態碼是誰漏出來的（pip 的、errexit 的、set -u 的），
+          # 一律收成 2。這個 step 失敗的意思永遠是「檢查器無法執行」，不可能是「關卡失敗」。
+          trap 'rc=$?; if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+                  echo "💥 檢查器無法執行：準備相依時有指令以 exit $rc 結束（本 step 一律收成 2）"
+                  exit 2
+                fi' EXIT
+          fail() { echo "💥 檢查器無法執行：$1"; exit 2; }
+
+          pins="$(python3 scripts/devflow_checks.py --print-pins)" \
+            || fail "取不到相依版本 pin（scripts/devflow_checks.py --print-pins 失敗）"
+          [ -n "$pins" ] || fail "相依版本 pin 是空的"
+
+          if ! python3 scripts/devflow_checks.py --check-pins; then
+            # $pins 不加引號是刻意的：它是「一行一個 requirement」，要讓它斷成多個引數。
+            python3 -m pip install --quiet --disable-pip-version-check $pins \
+              || fail "pip 安裝相依失敗"
+            python3 scripts/devflow_checks.py --check-pins \
+              || fail "裝完之後版本仍不符 pin"
           fi
+          python3 -c 'import markdown_it, yaml' \
+            || fail "相依版本符合 pin，卻 import 不起來"
 
       - name: 規則檢查
         run: |
