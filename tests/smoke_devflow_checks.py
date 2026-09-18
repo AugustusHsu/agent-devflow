@@ -264,6 +264,13 @@ def mut_table_inline_multiline(root):
                              + RAW_HTML_TABLE + " tail\n"))
 
 
+def ok_r9_prose(root):
+    """表格外的敘述句提到舊詞——`R9` 管的是狀態欄，沒有規定散文怎麼寫。
+    討論用詞沿革、引用舊格式、遷移說明都會提到舊詞（審查者 PR #95 反例）。"""
+    edit(root, "devflow/orchestrators/paperclip.md",
+         lambda t: append(t, "\n> 歷史：本表原本用 `✅ 實測`，#94 改為 `✅ 可用`。\n"))
+
+
 def mut_link(root):
     """相對連結指向不存在的路徑。"""
     edit(root, "README.md",
@@ -467,6 +474,7 @@ PASSING = [
     ("table:html-attr", "table", ok_table_html_attr),
     ("table:html-comment", "table", ok_table_html_comment),
     ("table:html-attr-name", "table", ok_table_html_attr_name),
+    ("r9:prose", "r9", ok_r9_prose),
     ("r9:separators", "r9", ok_r9_separators),
 ]
 
