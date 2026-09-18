@@ -438,6 +438,10 @@ def run_checker(cwd, gate=None, extra_env=None):
             del env[k]
     env["GITHUB_EVENT_NAME"] = "pull_request"
     env["GITHUB_HEAD_REF"] = GOOD_HEAD_REF
+    # 煙霧測試驗的是**關卡判定**，不是相依版本是否符 pin。本機常裝別的版本，
+    # 不放行的話每一案都會先撞上 pin 守衛的 exit 2 而測不到關卡（issue #91）。
+    # CI 不設這個變數，pin 守衛在那裡照常生效。
+    env.setdefault("DEVFLOW_ALLOW_PIN_DRIFT", "1")
     if gate:
         # 環境變數只能加嚴不能放寬：目標項就算日後被改回 advisory，這個案例仍是關卡。
         env["DEVFLOW_GATE_" + gate.upper()] = "1"

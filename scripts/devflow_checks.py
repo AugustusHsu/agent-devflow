@@ -448,6 +448,26 @@ except ImportError as e:
     print("💥 檢查器無法執行：缺少相依模組 %s" % e.name)
     sys.exit(2)
 
+# import 成功之後再驗一次**實際 import 到的**版本。
+#
+# `--check-pins` 讀的是 distribution metadata（`importlib.metadata.version`），那只說明
+# 「裝了什麼」，不說明「import 到什麼」——兩者可以不一致（審查者 PR #93 第一輪實測：
+# metadata 報 3.0.0／6.0.1、實際 import 4.0.0／6.0.3，`--check-pins` 與完整檢查器都 exit 0）。
+# 路徑順序、同名套件、editable 安裝、殘留的舊 site-packages 都能造成這種落差。
+#
+# 這一段擋的是「CI 實際跑的 parser 不是 pin 的那一版」——README「Phase 1 第三出口」
+# 條件一要的是正反兩個 run 跑同一份檢查器，parser 版本不同就只成立一半。
+# exit 2 而非 1：檢查器是在**用一個沒被授權的 parser** 執行，那是無法執行，不是內容問題。
+_RUNTIME = {"markdown-it-py": markdown_it.__version__, "PyYAML": yaml.__version__}
+_drift = ["%s：import 到 %s，pin 是 %s" % (_d, _RUNTIME[_d], _v)
+          for _d, _v in PINS if _RUNTIME.get(_d) != _v]
+if _drift and os.environ.get("DEVFLOW_ALLOW_PIN_DRIFT") != "1":
+    print("💥 檢查器無法執行：實際 import 的相依版本不符 pin")
+    for _line in _drift:
+        print("    %s" % _line)
+    print("    （本機開發可設 DEVFLOW_ALLOW_PIN_DRIFT=1 略過；CI 不設）")
+    sys.exit(2)
+
 # ── 關卡開關 ──────────────────────────────────────────────────────
 # True＝必需關卡（失敗就擋）；False＝建議（只報告）。
 # 十二項裡九項是 True，三項是 False。分界是定義域封不封閉，理由見檔頭。
