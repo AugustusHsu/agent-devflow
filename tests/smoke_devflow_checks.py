@@ -383,6 +383,32 @@ def mut_dupid_link_newline(root):
          lambda t: append(t, "- [](#dup)\n  `D1` 換行之後才寫的重複定義。\n"))
 
 
+# ── dupid：裝飾與 ID 各在自己的容器裡（PR #99 第一輪審查）─────────────────
+# 下面兩案鎖的是 `leading_code_span()` 從「比 `level` 深度數字」改成「比容器堆疊前綴」
+# 的那一步。`level` 不帶容器身分：容器關掉之後深度會被重用，於是已關閉的裝飾內文
+# （`[裝飾]` 的文字、`~~舊~~` 的內文）與包住 ID 的另一個容器內文（`**…**`、`*…*`）
+# 碰巧同為 lv1，被當成「與 ID 同層的裸文字」而**漏認**真定義。
+# 方向是漏認不是誤認：判準若退回比 level，這兩案會以 exit 0 失敗——也就是
+# 「把空連結＋裸 ID 換成連結＋粗體 ID 就能藏住重複定義」那條必需關卡的繞過路徑。
+def mut_dupid_link_strong(root):
+    """有文字的連結 ＋ 粗體包住的 ID（`- [裝飾](#x) **`D1`** …`）。
+
+    「裝飾」在 link 容器裡、ID 在 strong 容器裡，兩個容器是 sibling（link 已關閉）。
+    堆疊快照 `(link,)` 不是 `(strong,)` 的前綴 → 裝飾，不是裸文字 → 是定義。"""
+    edit(root, "devflow/WORKFLOW.md",
+         lambda t: append(t, "- [裝飾](#dup) **`D1`** 連結後粗體 ID 的重複定義。\n"))
+
+
+def mut_dupid_strike_em(root):
+    """刪除線 ＋ 斜體包住的 ID（`- ~~舊~~ *`D2`* …`）。
+
+    同一個形狀換一組容器：`(s,)` 不是 `(em,)` 的前綴。這一案同時仍依賴解析器認得
+    `~~`（`MD` 的 `strikethrough`）——解析器若被改回不認，`~~舊~~` 整段留成字面文字，
+    那就成了與 ID 同層的裸文字，本案會以 exit 0 失敗。"""
+    edit(root, "devflow/WORKFLOW.md",
+         lambda t: append(t, "- ~~舊~~ *`D2`* 刪除線後斜體 ID 的重複定義。\n"))
+
+
 # AC-3 的散文：三案都刻意落在**家族相符**的節裡（檔尾＝第 13 節，引的也是 D 家族），
 # 條件 (1)(2)(3) 全部成立——擋下它們的只有「ID 前面有裸文字」。判準若退回「取第一個
 # code span、不管前面是什麼」，這三案會各冒出一條 dupid ❌ 而以 exit 1 失敗。
@@ -401,10 +427,38 @@ def ok_dupid_prose_list(root):
 def ok_dupid_prose_in_strong(root):
     """散文三：整句包在粗體裡（「- **注意 `D1` 在粗體裡**」）。
 
-    這一案鎖住判準的「同層或更外層」那半句：「注意 」和 code span 同在 lv1。只比
-    lv0 的實作（「頂層沒有裸文字就算定義」）會放它過去，本案就會以 exit 1 失敗。"""
+    這一案鎖住判準的「同層或更外層」那半句：「注意 」和 ID 同在 strong 容器裡，
+    堆疊快照相等。只比頂層有沒有裸文字的實作會放它過去，本案就會以 exit 1 失敗。"""
     edit(root, "devflow/WORKFLOW.md",
          lambda t: append(t, "- **注意 `D1` 在粗體裡**，這一項不是定義。\n"))
+
+
+def ok_dupid_task_list(root):
+    """GFM task-list（`- [x] `D1` …`）——**斷言的是現況行為，而且它是一個已知漏認**。
+
+    裁決與理由（PR #99 第二輪，F2 第三案）：
+
+      * 現況：`MD` 只啟用了 `table` 與 `strikethrough`，**沒有** task-list。parser
+        看不到 checkbox，`[x] ` 整段留成頂層的字面文字——那就是與 ID 同層的裸文字，
+        於是本項不算定義，重複的 `D1` 不報，exit 0。本案因此放在 PASSING。
+      * 這**不是判準正確**，是 issue #98 檔頭記的那一類假陰性：GitHub 認得
+        task-list、讀者看到的是「☑ 後面接 `D1`」＝這一項在講 `D1`，檢查器卻看成散文。
+        所以這種寫法仍藏得住重複定義。它與 `==x==` 那一類不同——`==x==` GitHub 也
+        算繪成文字，兩邊一致；task-list 是**兩邊不一致**，方向是漏認。
+      * 為什麼本輪不修：修法只有「讓 parser 也認得 task-list」一條，而 markdown-it-py
+        本體**沒有**這個規則（`md.get_all_rules()` 實跑：core／block／inline／inline2
+        四組裡沒有任何含 task 的規則），要引入 `mdit_py_plugins` 這個**新相依**
+        （`PINS` 要加、CI 的準備 step 跟著動）。那超出本輪的 write scope，也該由人
+        裁決要不要擴充相依，不由檢查器自己決定（`G2` 的同一個道理）。
+      * 為什麼仍要留這個案例：它是**絆線**。哪天有人啟用了 task-list，`[x] ` 不再是
+        字面文字，這一項就會被認成定義、本案變成 exit 1 而失敗，逼人當場把它從 PASSING
+        移到 CASES（應擋）並改寫檔頭那段敘述，而不是讓判準悄悄改變。反過來，判準若被
+        改鬆（不看頂層裸文字），它也會失敗。兩個方向都有人看著。
+        （「啟用後會變 exit 1」是**推論、未實跑**——本機沒有 mdit_py_plugins。但絆線
+        本身不依賴這個推論正確：行為只要一改，本案就失敗。）
+    """
+    edit(root, "devflow/WORKFLOW.md",
+         lambda t: append(t, "- [x] `D1` task-list 後的重複定義（目前漏認，見 docstring）。\n"))
 
 
 # ── r9：狀態欄取 R9 三值之一（issue #94 AC-4）─────────────────────────
@@ -573,6 +627,11 @@ CASES = [
      ("規則 ID `D4` 被定義 2 次", "刪除線後的重複定義")),
     ("dupid:link-newline", "dupid", mut_dupid_link_newline, {},
      ("規則 ID `D1` 被定義 2 次", "換行之後才寫的重複定義")),
+    # PR #99 第一輪審查：裝飾與 ID 各在自己的容器裡，比 level 深度數字會漏認。
+    ("dupid:link-strong", "dupid", mut_dupid_link_strong, {},
+     ("規則 ID `D1` 被定義 2 次", "連結後粗體 ID 的重複定義")),
+    ("dupid:strike-em", "dupid", mut_dupid_strike_em, {},
+     ("規則 ID `D2` 被定義 2 次", "刪除線後斜體 ID 的重複定義")),
     # 四案共用同一條摘要（同一張表），靠明細裡的狀態格內容分出是哪一種擋的。
     ("r9:old-word", "r9", mut_r9_old_word, {},
      ("有 1 列的狀態欄不是 ✅ 可用／📝 已宣稱／⬜ 未測",
@@ -628,6 +687,8 @@ PASSING = [
     ("dupid:prose-ref", "dupid", ok_dupid_prose_ref),
     ("dupid:prose-list", "dupid", ok_dupid_prose_list),
     ("dupid:prose-in-strong", "dupid", ok_dupid_prose_in_strong),
+    # 斷言的是**現況行為**，而且那是一個已知漏認（絆線）——理由見該函式的 docstring。
+    ("dupid:task-list", "dupid", ok_dupid_task_list),
 ]
 
 # 「一個突變同時觸發多項」的案例（issue #91 AC-1 的 fail closed）。
