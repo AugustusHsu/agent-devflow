@@ -11,8 +11,8 @@
 # 注意不是 `G4`：`G4` 住第 9 節，依第 0 節與 `ST2` 要 stage 2 才生效，現在是 stage 1，
 # 不能引為依據。
 # 本檔每一項檢查都有自己的開關（下面的 GATES）：True＝必需關卡，False＝建議（只報告不擋）。
-# 十二項裡十項是 True（`encoding`、`d2`、`i1`、`i5`、`version`、`fence`、`tables`、`table`、
-# `link`、`r9`），兩項是 False（`dupid`、`refs`）——分界不是「哪一項比較重要」，
+# 十二項裡十一項是 True（`encoding`、`d2`、`i1`、`i5`、`version`、`fence`、`tables`、`table`、
+# `link`、`r9`、`dupid`），一項是 False（`refs`）——分界不是「哪一項比較重要」，
 # 而是**定義域封不封閉**，見下面各節。
 #
 # ── ⚠️ 這個 check 擋什麼、不擋什麼 ───────────────────────────────────────
@@ -28,12 +28,16 @@
 #                 資料列的狀態格非空、至少一張合格的表、不得有 raw HTML 表格）、
 #                 `link` 相對連結指向 repo 內存在的路徑、
 #                 `r9` 對照表的狀態欄取 `R9` 三值之一（`✅ 可用`／`📝 已宣稱`／`⬜ 未測`；
-#                 三值之後可接分隔符與補充，見 R9_SEPS）。
-# 就這十項（`version`、`fence`、`table`、`link` 是 issue #80 開的，理由見下面「後四項為什麼現在
+#                 三值之後可接分隔符與補充，見 R9_SEPS）、
+#                 `dupid` 規則本體沒有把同一個規則 ID 定義兩次（定義＝節前綴判準，
+#                 見下面「dupid 為什麼可以是關卡」）。
+# 就這十一項（`version`、`fence`、`table`、`link` 是 issue #80 開的，理由見下面「後四項為什麼現在
 # 可以是關卡」；`tables` 是 issue #87 開的，見「tables 為什麼可以是關卡」；`encoding` 是
 # issue #91 開的——它原本不是關卡而是 exit 2，理由見下面「exit code 的分類守則」與該項自己的註解；
-# `r9` 是 issue #94 開的，見「r9 為什麼可以是關卡」）。
-# 不擋（exit 0，只把發現印在 log）：`dupid`、`refs` 兩項，一律 advisory。
+# `r9` 是 issue #94 開的，見「r9 為什麼可以是關卡」；`dupid` 是 issue #96 開的，
+# 見「dupid 為什麼可以是關卡」）。
+# 不擋（exit 0，只把發現印在 log）：`refs` 一項，仍是 advisory（issue #96 逐項評估過三個
+# 收斂方向，沒有一個封得住定義域，見下面「擋不住什麼」的 refs 那條）。
 #
 # 「GATES 是 True」只讓這個 check 自己變紅，**不等於它是 branch protection 的
 # required status check**——後者是 repo 設定，要另外設，前提見下面「升 required 的前提」。
@@ -41,8 +45,9 @@
 # 不應合併。B 關卡的意思只是還沒有機器替人擋，不是放行。
 #
 # ── 那七項為什麼曾經全部停在 advisory（PR #20 六輪的停損）──────────────────
-# 【歷史紀錄，寫於 stage 0。其中四項已於 issue #80 升為關卡、`r9` 已於 issue #94 升為關卡，
-#   各見下面專節；`dupid`、`refs` 兩項仍停在 advisory，理由一、二對它們仍然成立。】
+# 【歷史紀錄，寫於 stage 0。其中四項已於 issue #80 升為關卡、`r9` 已於 issue #94 升為關卡、
+#   `dupid` 已於 issue #96 升為關卡，各見下面專節；只剩 `refs` 停在 advisory，
+#   理由一、二對它仍然成立。】
 # 停損的理由，由輕到重：
 #
 #   一、六輪審查，每一輪都在當時的 required 項目上找到假陽性（誤擋合法內容）。
@@ -245,6 +250,41 @@
 #       依 `R9` 標明是哪一種、宣稱與證據符不符，都是語意，檢查器判不了，仍靠 `R4` 人工審查
 #       （留在 issue #22）。本項只鎖住「用詞不會再漂走」。
 #
+# ── dupid 為什麼可以是關卡（issue #96）───────────────────────────────────
+# 停在 advisory 的理由是三個假陽性（附錄的散文、規則索引、blockquote 引述），當時的診斷是
+# 「散文和定義在語法上分不出來；要分得出來就得知道哪幾節裡的清單項才是定義——那是分節
+# schema，屬 issue #22，同樣要等 stage 2」。**那個診斷不正確，本節取代它**：分節結構本來
+# 就在 WORKFLOW.md 裡，`## <數字>. <名>（<家族>）` 的括號字母就是該節定義的 ID 家族，
+# 不必新增任何 schema，也和 stage 無關。
+#   一、生效性：本項不引任何依 `stage` 啟用的條文。它驗的是規則本體自己的內部一致性——
+#       同一個 ID 指向兩條規則時，`WORKFLOW.md:7`「引用規則一律用 ID」就無法定位到唯一
+#       一條規則（`I5`「一個事實只住一處」是同一個方向）；這兩處都在「永遠生效」的節裡
+#       （第 0 節：第 0、1、13 節永遠生效）。停損理由三（拿休眠條文當 gate 依據）不成立。
+#   二、定義域封閉：一個已知檔案（devflow/WORKFLOW.md），一個定義判準，三個條件同時成立
+#       才算定義（見 RULE_SECTION_RE 與 rule_definitions 的 docstring）：
+#         (1) 落在 `## <數字>. <名>（<家族>）` 這種節之下；
+#         (2) ID 的字母前綴＝該節括號裡的家族；
+#         (3) 原始行以 `- ` 開頭。
+#       節標題**用正規式抓形狀，不硬編碼 13 個節名**：日後新增節自動納入，不含括號字母的
+#       節（第 0 節「變數與基準」）不產生定義。節的範圍到下一個同層或更淺的標題為止，
+#       更深的子標題仍在節內；容器（blockquote／清單）裡的 `## …` 不分節，同 r9_sections。
+#   三、假陽性：三個都不再成立，本地以 tests/smoke_devflow_checks.py 的三個 `dupid:*`
+#       正向案例逐案複驗（各對應一個條件）：
+#         - 附錄「常見誤讀」用清單解釋既有規則（「- `R3` 常被誤讀成…」）——附錄的節標題
+#           沒有家族標記，條件 (1) 不成立；
+#         - 加一節「規則索引」把所有 ID 列一遍——同樣沒有家族標記，且列進來的 `I1`、`I2`
+#           與該節家族不符，條件 (1)(2) 都不成立；
+#         - blockquote 引述既有條文（「> - `D1` …」）——行首是 `>`，條件 (3) 不成立。
+#       粗體開頭（「- **`R3`** …」）仍算定義：ID 是不是清單項的第一個內容由 token 層判，
+#       條件 (3) 只看行首那個 `- `，不看後面的標記。fenced code block 裡的示範不產生
+#       list_item token，天然排除。判準在**現行內容**上的結果與舊判準相同——71 條定義、
+#       零重複（升關卡前實跑，exit 0）。**不宣稱「不存在假陽性」**：那個宣稱在本檔被推翻過
+#       兩次（停損理由二）。
+#   仍擋不住（刻意的代價，不是漏洞）：寫在無家族標記的節裡、或家族與節不符的重複定義——
+#       例如把「- `I1` …」又寫進第 13 節。依判準它根本不算定義，所以不報。要連那種也擋，
+#       得先由人裁決「定義只能寫在帶家族標記的節裡」並寫進 WORKFLOW.md（`G2`），
+#       不由本檔自己發明規則。
+#
 # ── 不發明規則：`i1` 的 slug 為什麼不限字元集 ─────────────────────────────
 # `I1` 的原文只有「分支名 `<N>-<slug>`」，沒有規定 slug 的字元集。
 # 收成 `^[0-9]+-[a-z0-9-]+$` 會擋掉 `26-封閉定義域`、`4-v0.0.2.0-bump`、`26-Fix-D2`——
@@ -333,26 +373,38 @@
 #   * 【`i1` 只在 pull_request 事件有對象。】第 10 節的 bypass 是直推 main，不開 PR，
 #     所以不需要在 `i1` 裡開例外——它根本不會跑到。反過來說，走 bypass 進 main 的
 #     變更，`i1` 也擋不到。
-#   * 【同一個規則 ID 被定義兩次 —— 沒有東西在擋。】
-#     dupid 本來是關卡，第五輪被審查者找到一個假陽性（清單項只含 fence 時會吃到
-#     清單外的段落）。那個 bug 已修，但作者接著自己又找到三個修不掉的：
-#       - 附錄用清單解釋既有規則：「- `R3` 常被誤讀成…」
-#       - 加一節「規則索引」把所有 ID 列一遍
-#       - blockquote 引述既有條文
-#     三者都是人會自然寫進 WORKFLOW.md 的東西，而 WORKFLOW.md 的定義寫法就是
-#     「- `ID` 說明」，散文和定義在語法上分不出來。要分得出來就得知道「哪幾節裡的
-#     清單項才是定義」——那是分節 schema，屬 issue #22（同樣要等 stage 2）。
-#     它現在只報告：CI log 會列出來，但不會擋人。dupid 的 📝 需要人判斷是真重複
-#     還是散文，不要當成一定有錯。
+#   * 【同一個規則 ID 被定義兩次 —— 只擋「家族節內」的那種。】
+#     dupid 自 issue #96 起是關卡（判準見上面「dupid 為什麼可以是關卡」）。它擋的是
+#     兩條定義都落在自己家族的節裡；把「- `I1` …」又寫進第 13 節（家族不符），或寫進
+#     附錄、索引這種沒有家族標記的節，依判準都不算定義，**不報**。那是判準的取捨：
+#     要連那種也擋，得先由人把「定義只能寫在帶家族標記的節裡」寫進 WORKFLOW.md（`G2`）。
 #   * 【改 ID 後別的檔案還指著舊號 —— 沒有東西在擋。】
 #     refs 這一項本來就是為這個失效而存在的，但它會把 `M5`（Apple 晶片）、`C5`
 #     （RFC 分類）這種合法的非規則代號判成懸空規則引用。WORKFLOW.md:7 只寫「引用規則
 #     一律用 ID」，並沒有反向把所有這種形狀的 code span 保留給規則命名空間——所以那是
 #     誤擋，不是使用者誤用。它現在是建議：CI log 會列出來，但**不會擋人，也沒有任何
 #     機制保證有人讀**。實際擋這個失效的只剩人工審查（R4）。
-#     升為關卡的條件（issue #22，且要等 stage 2）：建立保留命名空間，或把掃描範圍限定到可以宣告
-#     「此處 ID 形狀的 code span 一律是規則引用」的檔案集合。在那之前，改動規則 ID 的
-#     PR（#12／#17）建議手動跑一次 DEVFLOW_GATE_REFS=1。
+#     issue #96 把家族的來源從「基線 ∪ 現有定義的前綴」換成節標題宣告的家族（見
+#     BASELINE_PREFIXES），但那只是第一層：`M5` 的前綴 `M` 本來就是家族，誤擋照舊。
+#     同一單逐項評估過 issue 列的三個第二層方向，沒有一個封得住定義域，所以本項留在
+#     advisory（分析與實測數據記在 issue #96，結論留給母單 #22）：
+#       - 只掃 `devflow/` 下的檔案：治不了——`M5`／`C5` 這種受測環境記載（`R10`）正是
+#         寫在 devflow/ 的對照表裡；反而把 CLAUDE.md／AGENTS.md／README.md／docs/
+#         （「別的檔案還指著舊號」的主要現場）整批移出定義域，兩頭都更差。
+#       - 排除特定上下文（受測環境、值欄）：對照表的值欄、面向欄、狀態欄補充裡本來就
+#         有大量**合法**的規則引用（「依 `R9`」、「審查證據（`R3`／`R5`）」、「合併（`I3`）」），
+#         而「受測環境記載」和它們住同一格、沒有任何語法邊界分得開。要分得開就得先給
+#         對照表的格子訂格式契約——那要動條文，走 `G2`，不在檢查器這邊。
+#       - 只檢查「家族 ＋ 該家族已定義的編號範圍」：能消掉 `M5`／`C5`（M 家族只定義到
+#         M4、C 家族只到 C4），但代價是本項只剩「編號有洞」才報得出來。現行 13 個家族
+#         的編號全部連號、零洞，等於裝一個永遠不會響的關卡；而最常見的懸空成因——刪掉
+#         或改掉家族裡編號最大的那條（例如 `R10`）——正好不會留下洞，會被靜默放過。
+#         判準本身也是循環的：「`X5` 沒有定義所以它不是規則引用」，而本項要找的就是
+#         「指向未定義 ID 的引用」。
+#     升為關卡的條件不變：建立保留命名空間，或把掃描範圍限定到可以宣告「此處 ID 形狀的
+#     code span 一律是規則引用」的檔案集合。兩者都要人裁決、都要動 WORKFLOW.md（`G2`），
+#     不由本檔自己發明。在那之前，改動規則 ID 的 PR（#12／#17）建議手動跑一次
+#     DEVFLOW_GATE_REFS=1；refs 的 📝 需要人判斷是真懸空還是非規則代號。
 #   * 另外三項：fenced code block 未關閉、對照表形狀、相對連結有效性。
 #     六輪審查的缺口幾乎都落在這些項目裡，因為它們驗的是「任意 markdown 內容」。
 #     每項都能用 DEVFLOW_GATE_<KEY>=1 單獨打開，當成手動檢查工具跑。
@@ -498,7 +550,7 @@ if _drift and os.environ.get("DEVFLOW_ALLOW_PIN_DRIFT") != "1":
 
 # ── 關卡開關 ──────────────────────────────────────────────────────
 # True＝必需關卡（失敗就擋）；False＝建議（只報告）。
-# 十二項裡十項是 True，兩項是 False。分界是定義域封不封閉，理由見檔頭。
+# 十二項裡十一項是 True，一項是 False。分界是定義域封不封閉，理由見檔頭。
 # 驗證用：DEVFLOW_GATE_<KEY>=1 可單獨打開一項，環境變數只能加嚴不能放寬。
 # 順序＝執行順序：`encoding` 在讀檔當下就判，排在最前面。
 GATES = {
@@ -511,7 +563,7 @@ GATES = {
     "tables":  True,    # devflow.yml 指名的對照表都受版控（第 0 節，永遠生效；issue #87）
     "table":   True,    # 對照表形狀，依 R9 分節（issue #80）
     "link":    True,    # 相對連結有效性（issue #80）
-    "dupid":   False,   # 規則 ID 唯一定義（散文與定義分不出來，見檔頭）
+    "dupid":   True,    # 規則 ID 唯一定義（定義域＝節前綴判準；issue #96）
     "refs":    False,   # 規則 ID 無懸空引用（會誤擋非規則代號，見檔頭）
     "r9":      True,    # R9 對照表狀態欄三值（issue #94：64 格已換成條文原文）
 }
@@ -583,9 +635,17 @@ R9_STATUSES = ("✅ 可用", "📝 已宣稱", "⬜ 未測")
 # 三值後面可以接補充（R9 要求 ✅ 附驗證方式、📝 標明是哪一種），
 # 但必須是「三值 ＋ 分隔符」，不能是「✅ 可用性佳」這種黏著詞。
 R9_SEPS = " \t（(：:，,。、；;）)"
-# 規則家族前綴的基線。實際集合是「基線 ∪ WORKFLOW.md 現有定義的前綴」：
-# 加新家族自動納入，整個家族被刪掉時基線仍擋得住懸空引用。
+# 規則家族前綴的基線。實際集合是「基線 ∪ WORKFLOW.md 的節標題宣告的家族」
+# （issue #96 AC-2 的第一層；家族的來源見 RULE_SECTION_RE）：加新節自動納入，
+# 整個家族被刪掉時基線仍擋得住懸空引用。
+# 不另外併「現有定義的前綴」——依 AC-1 的判準，定義的前綴恆等於它所在節的家族，
+# 那個集合是節家族的子集，併進來不會多出任何東西。
 BASELINE_PREFIXES = {"I", "S", "V", "L", "R", "M", "F", "C", "G", "B", "ST", "P", "D"}
+# 規則定義住哪一節：`## <數字>. <名>（<家族>）`，括號裡的字母就是該節定義的 ID 家族
+# （issue #96 AC-1）。**抓形狀，不硬編碼 13 個節名**，日後新增節才不會漏。
+# 不含括號字母的節（第 0 節「變數與基準」、附錄、索引）不產生任何定義。
+# 半形括號一併收：同一個形狀換個寫法就讓整節的定義憑空消失，是沉默的漏認。
+RULE_SECTION_RE = re.compile(r"[0-9]+\.\s+.+[（(]([A-Z]{1,4})[）)]")
 # 一律用 fullmatch，不用 match：Python 的 $ 會匹配「字串最後一個換行之前」，
 # 所以 ^…$ ＋ match() 會讓 "0.0.2.0\n" 這種含換行的值矇混過關。
 ID_RE = re.compile(r"([A-Z]{1,4})[0-9]+")
@@ -696,12 +756,59 @@ def locate(lines, tok, needle=None):
     return start + 1
 
 
+def section_families(tokens):
+    """與 tokens 等長的清單：每個 token 所在的規則節家族（不在任何家族節下＝None）。
+
+    節的範圍＝從帶家族標記的標題到下一個**同層或更淺**的標題為止；更深的子標題
+    （`## 1. 不變層（I）` 下的 `### 細節`）仍在該節內——把子標題當成節結束會誤擋
+    合法的結構（和 tables_of 取節範圍的道理相同）。
+
+    只認**文件層級**的標題：blockquote／清單等容器裡的 `## 1. 不變層（I）` 是引用
+    或舉例，不是這份檔案的分節（同 r9_sections；markdown-it 對容器內的 token
+    設 level > 0）。
+    """
+    out = [None] * len(tokens)
+    family = None
+    family_depth = 0
+    depth = None
+    at_doc_level = False
+    for i, t in enumerate(tokens):
+        if t.type == "heading_open":
+            # h1…h6；抓不出數字就當成最深，只會讓它不去關掉外層的節。
+            depth = int(t.tag[1:]) if t.tag[1:].isdigit() else 99
+            at_doc_level = (t.level == 0)
+        elif t.type == "heading_close":
+            depth = None
+        elif depth is not None and t.type == "inline":
+            lv, depth = depth, None
+            if at_doc_level:
+                m = RULE_SECTION_RE.fullmatch(t.content.strip())
+                if m:
+                    family, family_depth = m.group(1), lv
+                elif family is not None and lv <= family_depth:
+                    family = None
+        out[i] = family
+    return out
+
+
 def rule_definitions(tokens, lines):
-    """清單項開頭是 `ID` 的都算定義——縮排、巢狀、粗體、blockquote 一律算。
-    寧可多認（誤報看得見）也不少認（漏報是沉默的）。"""
+    """規則 ID 的定義。三個條件同時成立才算（issue #96 AC-1）：
+
+      1. 落在帶家族標記的節下（`## <數字>. <名>（<家族>）`，見 RULE_SECTION_RE）；
+      2. ID 的字母前綴＝該節括號裡的家族；
+      3. 原始行以 `- ` 開頭——不縮排、不在 blockquote 裡、不是有序清單。
+
+    三者擋掉的正是 dupid 以前「修不掉」的三個假陽性：附錄／索引那種節沒有家族標記
+    （條件 1）、索引把別家族的 ID 列進來（條件 2）、「> - `I1` …」這種引述（條件 3）。
+
+    粗體開頭仍算定義（「- **`R3`** …」）：ID 是不是清單項的第一個內容由下面的 token
+    判定，條件 3 只看行首那個 `- `，不看後面的標記。fenced code block 裡的示範不產生
+    list_item token，天然排除。
+    """
+    families = section_families(tokens)
     out = []
     for i, t in enumerate(tokens):
-        if t.type != "list_item_open":
+        if t.type != "list_item_open" or families[i] is None:
             continue
         for j in range(i + 1, len(tokens)):
             tj = tokens[j]
@@ -724,9 +831,13 @@ def rule_definitions(tokens, lines):
                 break
             if first is not None and first.type == "code_inline":
                 content = first.content.strip()
-                if ID_RE.fullmatch(content):
-                    out.append((content, locate(lines, t, "`%s`" % content)
-                                or locate(lines, t)))
+                m = ID_RE.fullmatch(content)
+                if m and m.group(1) == families[i]:
+                    n = locate(lines, t, "`%s`" % content) or locate(lines, t)
+                    # 條件 3：ID 既然是本項的第一個內容，它就在本項的第一行上，
+                    # 所以這一行的行首寫法就是本項的行首寫法。
+                    if n and lines[n - 1].startswith("- "):
+                        out.append((content, n))
             break
     return out
 
@@ -1412,9 +1523,9 @@ else:
 
 print()
 print("── 規則 ID 無懸空引用（md 內的 `ID` 都要有定義，%s）" % tag("refs"))
-prefixes = set(BASELINE_PREFIXES)
-for rid in defined:
-    prefixes.add(ID_RE.fullmatch(rid).group(1))
+# 家族的來源是 WORKFLOW.md 的節標題（issue #96 AC-2 第一層），不是「現有定義的前綴」：
+# 後者依 AC-1 的判準恆為前者的子集。基線仍保留——整個節被刪掉時還擋得住懸空引用。
+prefixes = set(BASELINE_PREFIXES) | {f for f in section_families(rd["tokens"]) if f}
 refs = {}
 nref = 0
 for f in md_files:
