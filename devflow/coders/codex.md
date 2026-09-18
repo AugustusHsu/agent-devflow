@@ -6,16 +6,16 @@
 
 | 面向 | 職位 | 值 | 狀態 |
 |---|---|---|---|
-| headless 執行（`L2`） | implementer | `codex exec -C <worktree> --sandbox workspace-write "<prompt>"`；`--json` 取事件、`-o <file>` 取最後訊息；不需 PTY | ⬜ 未實測 |
-| 入口檔（`D2`） | — | `AGENTS.md` | ⬜ 未實測 |
-| 權限 | — | `--sandbox read-only\|workspace-write`；服務環境 bubblewrap 失敗時先診斷，不自動降級到 `danger-full-access` | ⬜ 未實測 |
-| worktree（`I2`） | coordinator（建）／implementer（不自建） | 由 orchestrator 建 | ⬜ 未實測 |
-| HITL（`L3`） | implementer | headless 無互動 → issue 留言後停 | ⬜ 未實測 |
-| 審查用法（`R1`） | reviewer | `codex exec review` 或 `codex exec "<review-prompt>"` 於乾淨 checkout | ⬜ 未實測 |
-| 交接 | implementer（context 延續）／coordinator（重派） | `codex exec resume <id>` | ⬜ 未實測 |
+| headless 執行（`L2`） | implementer | `codex exec -C <worktree> --sandbox workspace-write "<prompt>"`；`--json` 取事件、`-o <file>` 取最後訊息；不需 PTY | ⬜ 未測 |
+| 入口檔（`D2`） | — | `AGENTS.md` | ⬜ 未測 |
+| 權限 | — | `--sandbox read-only\|workspace-write`；服務環境 bubblewrap 失敗時先診斷，不自動降級到 `danger-full-access` | ⬜ 未測 |
+| worktree（`I2`） | coordinator（建）／implementer（不自建） | 由 orchestrator 建 | ⬜ 未測 |
+| HITL（`L3`） | implementer | headless 無互動 → issue 留言後停 | ⬜ 未測 |
+| 審查用法（`R1`） | reviewer | `codex exec review` 或 `codex exec "<review-prompt>"` 於乾淨 checkout | ⬜ 未測 |
+| 交接 | implementer（context 延續）／coordinator（重派） | `codex exec resume <id>` | ⬜ 未測 |
 
 ## 本機
 
 | 面向 | 職位 | 值 | 狀態 |
 |---|---|---|---|
-| 版本 | — | 本機 0.149.1 | ⬜ 未實測（原狀態欄寫「記錄」，非 `R9` 三值：無具名來源、無驗證方式，依 `R9` 定義為 `⬜`） |
+| 版本 | — | 本機 0.149.1 | ⬜ 未測（原狀態欄寫「記錄」，非 `R9` 三值：無具名來源、無驗證方式，依 `R9` 定義為 `⬜`） |
