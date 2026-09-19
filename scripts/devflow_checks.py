@@ -187,7 +187,8 @@
 #   * `link`（相對連結有效性）
 #       定義域：受版控 .md 裡 AST 看得到的相對連結（行內連結、圖片、reference 定義）；
 #               issue #100 起加上 raw HTML 裡承載連結的屬性（HTML_LINK_ATTRS：`<a href>`、
-#               `<img src>`）。有 scheme 的、純 fragment 的不驗。
+#               `<img src>`；issue #102 起加上 `<img srcset>`、`<source srcset>`，切成
+#               候選 URL 逐一驗）。有 scheme 的、純 fragment 的不驗。
 #       假陽性：#22 缺口 9（連結帶 query）已修（切 fragment 也切 query）；另修一個本地
 #               找到的——`..probe.md` 這種合法檔名被 `startswith("..")` 判成逃出 repo，
 #               改成比對路徑段。本地以反例複驗四種 query／fragment 組合皆不報。
@@ -375,8 +376,10 @@
 # 標籤、標籤後又接了文字，整行是段落裡的 html_inline；html_block 那一路是 `<img>` 單獨一行
 # 與 `<div>` 包住的寫法。兩條路徑 tests 都有案例。）
 #   判準：**列舉什麼承載連結，不列舉要擋什麼**（#98 的教訓：繞過清單窮舉不完）。承載連結的
-#     是 HTML_LINK_ATTRS 這一小組 (標籤, 屬性)，目前是 `<a href>`、`<img src>` 兩個；不在這一組
-#     的標籤與屬性一律不看。取出的值交給 markdown 連結用的**同一個**判定迴圈（下面 link 那一節）：
+#     是 HTML_LINK_ATTRS 這一小組 (標籤, 屬性)，目前是 `<a href>`、`<img src>`、`<img srcset>`、
+#     `<source srcset>` 四個，每一組附一個「從值切出 URL」的切法（href／src 整個值就是一個
+#     URL；srcset 見下面 issue #102 那一段）；不在這一組的標籤與屬性一律不看。切出的每個
+#     URL 交給 markdown 連結用的**同一個**判定迴圈（下面 link 那一節）：
 #     有 scheme 的、純 fragment、`//host` 不驗；先切 fragment 再切 query（#22 缺口 9）；比對
 #     路徑段而非 `startswith("..")`（`..probe.md`）；存在性問 `git ls-files` 而非
 #     `os.path.exists`（#22 缺口 6）。**這四條只有一份實作**——raw HTML 那一路若另寫判定，
@@ -397,26 +400,73 @@
 #     能抓到的，只有這些：
 #       - 規則完全沒註冊、或 HTML_POS 寫成探針值以外的東西 → 自檢 exit 2。
 #       - HTML_POS 固定成探針那個值（4）→ 自檢通過，tests 三個非 4 位移案例抓到。
-#     抓不到的（已知有，不是推測）：把字元位移誤當 UTF-8 byte 位移——自檢通過、67 案
-#     全過，某些 CJK ＋跨行的組合行號會多算一行。要收掉這一類得補對應的 tests 案例；
-#     在那之前，**不要把這段讀成「錯的位移都會被擋下」**。
-#   擴充（新增一種承載連結的屬性）：在 HTML_LINK_ATTRS 加一組 (標籤, 屬性)，並在
-#     tests/smoke_devflow_checks.py 補一個應擋案例。前提是那個屬性的值**就是一個 URL**；
-#     `srcset` 這種「一串 URL ＋描述」的微語法不能直接加進來，要先決定怎麼切——那是新政策，
-#     不是補清單。不論哪種，都**不得**在取出的地方另做判定。
-#   仍擋不住（不宣稱「所有 HTML 連結都擋得住」）。分兩類：
+#     抓不到的（已知有，不是推測）：把字元位移誤當 UTF-8 byte 位移——自檢通過、PR #101
+#     當時的 67 案與 issue #102 補完後的 75 案都全過（後者本地重跑該突變實測），某些 CJK ＋
+#     跨行的組合行號會多算一行。要收掉這一類得補對應的 tests 案例；在那之前，**不要把這段
+#     讀成「錯的位移都會被擋下」**。
+#   srcset（issue #102）：值不是一個 URL，是「候選 URL ＋ descriptor」的串（`a.png 480w,
+#     b.png 800w`、`a.png 1x, b.png 2x`、`a.png`）。切法照 HTML 規格的「parse a srcset
+#     attribute」：跳過前導的空白與逗號 → 到下一個空白為止是 URL（URL 以逗號結尾就剝掉結尾
+#     逗號、沒有 descriptor）→ 其後到括號外的下一個逗號為止是 descriptor → 重複。
+#     **不是 split(",")**：URL 本身可以含逗號（`a.png?x=1,2 480w`、`data:` URI），而沒有空白的
+#     `a.png,b.png` 在規格裡是**一個** URL（瀏覽器照原樣去抓）。空白指規格的 ASCII whitespace
+#     （space、tab、LF、FF、CR），不含 NBSP、全形空白。
+#     切出的每個 URL 各自做上面那兩步 URL 前處理、各自進同一個判定迴圈——壞的那一個單獨成一條
+#     明細（`檔:行 -> 那個 URL`），不是整串。切法（srcset_urls）只切字串，不判定。
+#     `<img>` 同時有 `src` 與 `srcset` 時兩者都驗。
+#     行號：同一個標籤切出的 URL 都報該 start tag 的 `<` 所在行（HTMLParser 只給標籤的位置，
+#     不給屬性值的位置）。srcset 的值自己跨行時（候選之間以換行分隔），第二行以後的候選報的
+#     仍是 `<` 那一行，不是候選自己那一行。
+#   擴充（新增一種承載連結的屬性）：在 HTML_LINK_ATTRS 加一組 (標籤, 屬性) 與它的切法，並在
+#     tests/smoke_devflow_checks.py 補一個應擋案例。值就是一個 URL 的，切法用 `_one_url`；
+#     值是別種微語法的，要先寫出它的切法——那是新政策，不是補清單（issue #102 為 srcset 定過
+#     一次）。不論哪種，切法都只切字串，**不得**在取出的地方另做判定。
+#   仍擋不住（不宣稱「所有 HTML 連結都擋得住」，也不宣稱「所有 srcset 都擋得住」）。分兩類：
 #     刻意的政策（有意不做；要改，由人裁決）：
-#     - HTML_LINK_ATTRS 以外的屬性：`<img srcset>`／`<source srcset>`、`<img longdesc>`、
-#       `cite`（blockquote／q／del／ins）、`<video src>`／`poster`、`<source src>`、
-#       `<object data>`、`<iframe src>`、`<area href>`、`<link href>`、`<form action>`、
-#       `style` 屬性裡的 `url()`。GitHub 算繪時保留哪些、改不改寫它們的相對路徑，本檔沒有核對。
+#     - HTML_LINK_ATTRS 以外的屬性：`<img longdesc>`、`cite`（blockquote／q／del／ins）、
+#       `<video src>`／`poster`、`<object data>`、`<iframe src>`、`<area href>`、`<link href>`、
+#       `<form action>`、`style` 屬性裡的 `url()`。除了 `style` 的 `url()`，這些 PR #101 第一輪
+#       審查都以 GitHub renderer（`gh api markdown`）實測過：被移除、失效、escape 成文字，或保留
+#       屬性但不呈現成可點連結（issue #102 的表）。`style` 的 `url()` 沒有實測。
+#     - `<source src>`（issue #102 AC-3 的裁決）：**維持放行，是政策不是遺漏**。`<source src>`
+#       只在 `<audio>`／`<video>` 裡作用，而 GitHub 算繪時移除媒體元素。orchestrator 於
+#       `1d0e7f5` 以 `gh api markdown --raw-field mode=gfm --raw-field context=<repo>` 實測：
+#       `<video><source src>` 整個被移除（算繪成空的 `<p>`）；`<audio><source src>` 的
+#       `<audio>` 被移除、`<source>` 自己留下但 `src` 消失，沒有媒體父元素也不會載入任何
+#       東西。讀者看不到的東西壞了，不是本項要擋的落差。
+#       `<picture>` 裡的 `<source src>` 是同一個結論：renderer 一樣把 `src` 剝掉（PR #103
+#       兩輪審查各自實測），而且它本來就不參與選圖（HTML 規格：`<picture>` 只看 `<source>`
+#       的 srcset）。`<source>` 的合法父元素就是 `<picture>` 與 media element（`<audio>`／
+#       `<video>`）兩類，所以 `<source src>` 放行涵蓋全部合法用法；放在別處（孤立、`<div>`
+#       內）屬無效用法，renderer 同樣剝掉 `src`。本檔沒有為它另立 tests 案例。
+#     - `<img srcset>` 照驗，**即使 GitHub 會把整個 srcset 屬性剝掉**（orchestrator 實測：
+#       `<img srcset="a.png 1x, b.png 2x" src="c.png">` 算繪成 `<img src="c.png">`）。留著是
+#       刻意的：方向是只會多擋、不會漏放，可擋住「打算給別處用、路徑就是錯的」srcset。
+#     - `<source srcset>` 的**合法多候選**：GitHub 的 sanitizer 只留下第一個 URL（PR #103
+#       第一輪審查實測：`<picture><source srcset="README.md 1x, does/not/exist.png 2x">` 算繪成
+#       `<source srcset="README.md">`，第二候選與 descriptor 都消失）。本檔仍驗全部候選，所以
+#       後續候選指到不存在的路徑時會擋下一個讀者其實看不到的連結——**這是刻意的假陽性**，
+#       方向仍是只會多擋、不會漏放。
+#       縮減與否的變因是**有沒有構成合法的 `<picture>`**，不是 renderer 的 repo `context`
+#       （PR #103 第二輪審查以四格矩陣實測：合法 picture 帶或不帶 context 都縮成第一個
+#       URL；孤立的 `<source srcset>` 帶或不帶 context 都原樣保留）。
 #     - `<base href>`：瀏覽器會拿它改寫整份文件的相對連結；本檔一律相對於 md 檔所在目錄解析
 #       （和 markdown 連結同一個規則），不讀 `<base>`。
 #     - 圖片 alt 裡的 HTML（`![<a href="x">](y.png)`）：alt 是純文字屬性，讀者看不到連結，
 #       不看（parser 把它放在 image 自己的 children，以另一個 src 解析）。
 #     - 同一個標籤重複的屬性（`<a href="ok" href="bad">`）：瀏覽器只用第一個，本檔每個都驗——
 #       只會更嚴，代價是可見的誤擋，不會漏放。
+#     - srcset 的 descriptor 不解析：規格裡會被瀏覽器捨棄的候選（descriptor 不合法，例如
+#       `a.png 1q`；密度與前面的候選重複），本檔照樣驗它的 URL——只會更嚴，不會漏放。
+#     - `<source srcset>` 不看所在位置與條件：不在 `<picture>` 裡的、`media`／`type` 不符而瀏覽器
+#       不會選到的，本檔照樣驗——只會更嚴，不會漏放。
 #     推論或未實測（不是有意不做，是判不了或沒驗過）：
+#     - GitHub 怎麼處理 srcset 的相對路徑，**沒有實測**。本檔把它和 `<img src>` 一樣相對於 md 檔
+#       所在目錄解析、問 `git ls-files` 存不存在；PR #101 第一輪審查的 renderer 輸出只證明
+#       `<picture><source srcset>` 被保留，沒有證明 GitHub 在頁面上會把 srcset 的相對路徑改寫成
+#       載入得到的位址。若不改寫，指向存在檔案的相對 srcset 讀者端也可能載不出來——本項驗的只有
+#       「指到 repo 裡存在的路徑」。
+#     - srcset 切法照規格步驟寫、tests 有正反案例；沒有拿真的瀏覽器的選圖結果對照過。
 #     - JS 產生的連結：不在檔案的靜態內容裡，本檔讀的是原始碼，看不到。
 #     - HTMLParser 不是瀏覽器的 HTML5 tokenizer：對畸形標記的錯誤復原可能不一致（例如沒閉合的
 #       標籤被後面的算繪結果補齊），兩邊看到的 start tag 就不同。本地實跑過 HTMLParser 對未閉合
@@ -427,8 +477,11 @@
 #     - markdown 連結的行號仍是段落的第一行（locate），不像 raw HTML 那樣精確；那一路本單沒動。
 #   假陽性：正文裡直接寫 `<a href="路徑/示範.md">` 當例子、不包 code span 會被擋——要示範就放進
 #     code span 或 code fence（同 `table` 的做法）。現行受版控 md 沒有任何 raw HTML 連結（issue
-#     #100 orchestrator 確認；改動後完整檢查仍 exit 0、相對連結數不變），所以本項不改變現行內容
-#     的判定。tests 的四個 `link:html-*` 正向案例（fence、code span、註解、合法連結）鎖住這一邊。
+#     #100 orchestrator 確認；改動後完整檢查仍 exit 0、相對連結數不變），也沒有任何 `srcset`
+#     （issue #102 orchestrator 確認；改動後同樣 exit 0、相對連結數不變），所以本項不改變現行
+#     內容的判定。tests 的四個 `link:html-*` 正向案例（fence、code span、註解、合法連結）與兩個
+#     `link:srcset-*` 正向案例（合法的 descriptor／URL 含逗號／data: URI／各種空白、fence 與
+#     code span 裡的示範）鎖住這一邊。srcset 已知會誤擋的寫法見上面「刻意的政策」的後兩條。
 #     **不宣稱「不存在假陽性」**。
 #
 # ── 不發明規則：`i1` 的 slug 為什麼不限字元集 ─────────────────────────────
@@ -1274,38 +1327,100 @@ def html_table_lines(text):
     return [ln for ln, tag, _ in tags if tag == "table"]
 
 
-# raw HTML 裡**承載連結**的東西（issue #100）：(標籤名, 屬性名)，兩者都是 HTMLParser
-# 轉過的小寫。判準是**列舉承載連結的屬性**，不是「遇到某些標籤就特別處理」——
-# 不在這一組裡的 tag／屬性一律不看，在這一組裡的就取出它的值、交給 `link` 那一節的
-# **同一個**判定迴圈（scheme／fragment、query、路徑段、git ls-files 都只有那一份）。
+# `srcset` 的值不是一個 URL，是「候選 URL ＋ descriptor」的串（issue #102）：
+# `a.png 480w, b.png 800w`、`a.png 1x, b.png 2x`、`a.png`。切法照 HTML 規格的
+# 「parse a srcset attribute」，**先按空白切出 URL、再處理其後的 descriptor**，不是
+# split(",")——URL 本身可以含逗號（`a.png?x=1,2 480w`、`data:image/png;base64,…`），
+# 按逗號切會把一個 URL 切成兩段、後一段根本不是 URL（兩個方向都錯：誤擋那一段，
+# 也漏掉沒有空白的 `a.png,b.png`——規格裡那是**一個** URL，瀏覽器會照原樣去抓）。
 #
-# 這一組是**刻意的政策**，不是「所有 URL 型屬性」的推論結果：只收「值就是一個 URL」、
-# 而且讀者點得到或看得到的那兩個。其餘的（`srcset`、`longdesc`、`cite`、`poster`、
-# `<source src>`、`<object data>`、`style` 裡的 `url()`……）都不在，理由與擴充方式
-# 見檔頭「link 的 raw HTML 連結」那一節。
-HTML_LINK_ATTRS = frozenset({("a", "href"), ("img", "src")})
+# 只切，不判：descriptor 的內容不解析、不驗。規格裡 descriptor 不合法的候選會被瀏覽器
+# 丟掉，本檔照樣驗它的 URL——只會更嚴，不會漏放（檔頭「link 的 raw HTML 連結」）。
+# 空白是規格的 ASCII whitespace 五個字元，不是 str.isspace()：後者還含 NBSP、全形空白，
+# 那些在 srcset 裡是 URL 的一部分。
+_HTML_WS = "\t\n\f\r "
+
+
+def srcset_urls(value):
+    """srcset 屬性值裡每個候選的 URL 字串（原樣，不含 descriptor），依出現順序。"""
+    out = []
+    pos, n = 0, len(value)
+    while True:
+        # 規格的 splitting loop：跳過前導的空白與逗號。
+        while pos < n and (value[pos] in _HTML_WS or value[pos] == ","):
+            pos += 1
+        if pos >= n:
+            return out
+        # 到下一個空白為止是 URL——逗號在這裡**不**斷開。
+        start = pos
+        while pos < n and value[pos] not in _HTML_WS:
+            pos += 1
+        url = value[start:pos]
+        # URL 以逗號結尾（`a.png, b.png`）＝沒有 descriptor，剝掉結尾逗號就是 URL。
+        if url.endswith(","):
+            out.append(url.rstrip(","))
+            continue
+        out.append(url)
+        # 否則其後到「括號外的下一個逗號」為止是 descriptor（規格的 descriptor
+        # tokenizer；它的三個狀態裡，只有括號內的逗號不結束這個候選）。
+        in_parens = False
+        while pos < n:
+            c = value[pos]
+            pos += 1
+            if in_parens:
+                in_parens = c != ")"
+            elif c == ",":
+                break
+            elif c == "(":
+                in_parens = True
+
+
+def _one_url(value):
+    """值就是一個 URL 的屬性（href、src）。"""
+    return [value]
+
+
+# raw HTML 裡**承載連結**的東西（issue #100、#102）：(標籤名, 屬性名) → 怎麼從值切出 URL。
+# 標籤名、屬性名都是 HTMLParser 轉過的小寫。判準是**列舉承載連結的屬性**，不是「遇到
+# 某些標籤就特別處理」——不在這一組裡的 tag／屬性一律不看，在這一組裡的就依右邊的切法
+# 取出一或多個 URL、交給 `link` 那一節的**同一個**判定迴圈（scheme／fragment、query、
+# 路徑段、git ls-files 都只有那一份）。切法只切字串，不做任何判定。
+#
+# 這一組是**刻意的政策**，不是「所有 URL 型屬性」的推論結果。其餘的（`longdesc`、`cite`、
+# `poster`、`<source src>`、`<object data>`、`style` 裡的 `url()`……）都不在，理由與擴充
+# 方式見檔頭「link 的 raw HTML 連結」那一節。
+HTML_LINK_ATTRS = {
+    ("a", "href"): _one_url,
+    ("img", "src"): _one_url,
+    ("img", "srcset"): srcset_urls,
+    ("source", "srcset"): srcset_urls,
+}
 # URL 的前處理，照 WHATWG URL 標準對屬性值做的那兩步：去掉前後的 C0 控制字元與空白、
 # 刪掉所有 tab／換行。瀏覽器對 `href=" README.md "` 解析出的就是 `README.md`；不做的話
-# 會把合法連結判成壞的（方向只有誤擋，不會漏放）。除此之外不動值——percent-decode、
-# 切 query／fragment 都是那個共用迴圈的事，不在這裡做第二次。
+# 會把合法連結判成壞的（方向只有誤擋，不會漏放）。srcset 先切出候選、再對每個候選的
+# URL 各做一次（規格就是這個順序）。除此之外不動值——percent-decode、切 query／fragment
+# 都是那個共用迴圈的事，不在這裡做第二次。
 _URL_EDGE = "".join(chr(c) for c in range(0x21))
 _URL_TAB_NL = re.compile("[\t\n\r]")
 
 
 def html_link_urls(text):
     """text 裡承載連結的屬性值：[(url, 相對行號)]。解析拋例外回 [(None, 1)]——
-    看不完就不知道裡面有沒有壞連結，交給呼叫端當成一條判不了的連結擋下。"""
+    看不完就不知道裡面有沒有壞連結，交給呼叫端當成一條判不了的連結擋下。
+    行號是 start tag 的 `<` 所在行：同一個標籤切出的每個 URL 都報這一行。"""
     tags = html_start_tags(text)
     if tags is None:
         return [(None, 1)]
     out = []
     for ln, tag, attrs in tags:
         for name, value in attrs:
-            if (tag, name) not in HTML_LINK_ATTRS or value is None:
+            split = HTML_LINK_ATTRS.get((tag, name))
+            if split is None or value is None:
                 continue
-            url = _URL_TAB_NL.sub("", value.strip(_URL_EDGE))
-            if url:
-                out.append((url, ln))
+            for raw in split(value):
+                url = _URL_TAB_NL.sub("", raw.strip(_URL_EDGE))
+                if url:
+                    out.append((url, ln))
     return out
 
 
@@ -1392,8 +1507,9 @@ def raw_html_tables(tokens, lines):
 
 def link_targets(tokens, env, lines):
     """行內連結、圖片、未被使用的 reference 定義，以及 raw HTML 裡承載連結的屬性
-    （HTML_LINK_ATTRS，issue #100）。跨行、成對括號、角括號形式都由 parser 處理，
-    不是我在猜。raw HTML 那一路的 target 可能是 None：那段 HTML 解析不完。"""
+    （HTML_LINK_ATTRS，issue #100；srcset 切成候選 URL 各算一條，issue #102）。
+    跨行、成對括號、角括號形式都由 parser 處理，不是我在猜。raw HTML 那一路的 target
+    可能是 None：那段 HTML 解析不完。"""
     out = []
     for t in tokens:
         if t.type != "inline":
