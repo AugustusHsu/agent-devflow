@@ -433,8 +433,12 @@
 #       `1d0e7f5` 以 `gh api markdown --raw-field mode=gfm --raw-field context=<repo>` 實測：
 #       `<video><source src>` 整個被移除（算繪成空的 `<p>`）；`<audio><source src>` 的
 #       `<audio>` 被移除、`<source>` 自己留下但 `src` 消失，沒有媒體父元素也不會載入任何
-#       東西。讀者看不到的東西壞了，不是本項要擋的落差。（`<picture>` 裡的 `<source src>`
-#       同樣被剝掉 `src`，也是已實測，見下一類的 `<picture>` 那條。）
+#       東西。讀者看不到的東西壞了，不是本項要擋的落差。
+#       `<picture>` 裡的 `<source src>` 是同一個結論：renderer 一樣把 `src` 剝掉（PR #103
+#       兩輪審查各自實測），而且它本來就不參與選圖（HTML 規格：`<picture>` 只看 `<source>`
+#       的 srcset）。`<source>` 的合法父元素就是 `<picture>` 與 media element（`<audio>`／
+#       `<video>`）兩類，所以 `<source src>` 放行涵蓋全部合法用法；放在別處（孤立、`<div>`
+#       內）屬無效用法，renderer 同樣剝掉 `src`。本檔沒有為它另立 tests 案例。
 #     - `<img srcset>` 照驗，**即使 GitHub 會把整個 srcset 屬性剝掉**（orchestrator 實測：
 #       `<img srcset="a.png 1x, b.png 2x" src="c.png">` 算繪成 `<img src="c.png">`）。留著是
 #       刻意的：方向是只會多擋、不會漏放，可擋住「打算給別處用、路徑就是錯的」srcset。
@@ -443,8 +447,9 @@
 #       `<source srcset="README.md">`，第二候選與 descriptor 都消失）。本檔仍驗全部候選，所以
 #       後續候選指到不存在的路徑時會擋下一個讀者其實看不到的連結——**這是刻意的假陽性**，
 #       方向仍是只會多擋、不會漏放。
-#       renderer 的行為對是否帶 repo `context` 敏感（不帶 context 時 `<source srcset>` 原樣
-#       保留），上述結果都是帶 context 測的。
+#       縮減與否的變因是**有沒有構成合法的 `<picture>`**，不是 renderer 的 repo `context`
+#       （PR #103 第二輪審查以四格矩陣實測：合法 picture 帶或不帶 context 都縮成第一個
+#       URL；孤立的 `<source srcset>` 帶或不帶 context 都原樣保留）。
 #     - `<base href>`：瀏覽器會拿它改寫整份文件的相對連結；本檔一律相對於 md 檔所在目錄解析
 #       （和 markdown 連結同一個規則），不讀 `<base>`。
 #     - 圖片 alt 裡的 HTML（`![<a href="x">](y.png)`）：alt 是純文字屬性，讀者看不到連結，
@@ -461,10 +466,6 @@
 #       `<picture><source srcset>` 被保留，沒有證明 GitHub 在頁面上會把 srcset 的相對路徑改寫成
 #       載入得到的位址。若不改寫，指向存在檔案的相對 srcset 讀者端也可能載不出來——本項驗的只有
 #       「指到 repo 裡存在的路徑」。
-#     - `<picture>` 裡的 `<source src>`：同樣是**已實測**——PR #103 第一輪審查確認 renderer 把
-#       `src` 剝掉（`<source>` 留下、`src` 消失），且它本來就不參與選圖（HTML 規格：`<picture>`
-#       只看 `<source>` 的 srcset）。與 `<audio>`／`<video>` 同一個結論，所以 `<source src>`
-#       放行在三種父元素下都成立。本檔沒有為它另立 tests 案例。
 #     - srcset 切法照規格步驟寫、tests 有正反案例；沒有拿真的瀏覽器的選圖結果對照過。
 #     - JS 產生的連結：不在檔案的靜態內容裡，本檔讀的是原始碼，看不到。
 #     - HTMLParser 不是瀏覽器的 HTML5 tokenizer：對畸形標記的錯誤復原可能不一致（例如沒閉合的
