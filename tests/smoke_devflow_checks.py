@@ -409,6 +409,85 @@ def ok_link_html_valid(root):
                           '<a href=" README.md ">前後空白</a>、<a name="x">沒有 href</a>\n'))
 
 
+# ── link：srcset 承載的連結（issue #102）─────────────────────────────────
+# srcset 的值是「候選 URL ＋ descriptor」的串，檢查器切出每個候選的 URL、各自送進同一個
+# 判定迴圈。錨點同上（README.md 檔尾、空行開頭）。`<picture>`／`<img>` 開頭、後面還有東西
+# 的那一行是段落裡的 html_inline；`<picture>` 不是 type 6 的區塊標籤。
+SRCSET_SOURCE = '\n<picture><source srcset="does/not/exist.png"><img src="README.md"></picture>\n'
+SRCSET_IMG = '\n<img srcset="does/not/exist.png 2x" src="README.md">\n'
+# 三個候選只有中間那個壞，而且帶 descriptor：明細要是**那一個 URL**，不是整串、也不帶
+# `800w`（期望以換行收尾，見 CASES 那一列的註解）。
+SRCSET_MULTI = ('\n<img srcset="README.md 480w, does/not/exist.png 800w, '
+                'devflow/WORKFLOW.md 1200w" src="README.md">\n')
+# 沒有空白的逗號**不**分隔候選：規格裡 `README.md,devflow/WORKFLOW.md` 是一個 URL，
+# 瀏覽器照原樣去抓，讀者看到壞圖。按逗號切的實作會把它切成兩個存在的路徑而放行。
+SRCSET_NO_SPACE = '\n<img srcset="README.md,devflow/WORKFLOW.md">\n'
+# NBSP 不是規格的 ASCII whitespace：`README.md` 後面緊接的 NBSP 是 URL 的一部分（URL 標準
+# 的前處理也只剝 U+0020 以下），瀏覽器去抓 `README.md%C2%A0`。拿 str.isspace() 切的實作
+# 會切出 `README.md` 而放行。
+SRCSET_NBSP = '\n<img srcset="README.md  1x">\n'
+# 行號：壞候選前面有兩個「不在任何 token 裡」的換行（同 HTML_LINK_LINE）——srcset 切出的
+# URL 用的是同一個 HTML_POS 機制，報 `<img` 的真實行。
+SRCSET_LINE = ('\n前 `多行\ncode span` 與 [連結](\nREADME.md) 之後\n'
+               '看 <img srcset="README.md 1x, does/not/exist.png 2x" src="README.md">\n')
+
+
+def mut_link_srcset_source(root):
+    """`<picture><source srcset>` 指向不存在的路徑，fallback 的 `<img src>` 合法——
+    GitHub 會保留並拿它選圖（issue #102 的缺口，PR #101 第一輪審查以 renderer 實測）。"""
+    edit(root, "README.md", lambda t: append(t, SRCSET_SOURCE))
+
+
+def mut_link_srcset_img(root):
+    """`<img srcset>` 的候選壞、`src` 合法：兩者都要驗（AC-2）。"""
+    edit(root, "README.md", lambda t: append(t, SRCSET_IMG))
+
+
+def mut_link_srcset_multi(root):
+    """多個候選其中一個壞（見 SRCSET_MULTI）。"""
+    edit(root, "README.md", lambda t: append(t, SRCSET_MULTI))
+
+
+def mut_link_srcset_no_space(root):
+    """逗號後沒有空白（見 SRCSET_NO_SPACE）。"""
+    edit(root, "README.md", lambda t: append(t, SRCSET_NO_SPACE))
+
+
+def mut_link_srcset_nbsp(root):
+    """URL 後面接 NBSP（見 SRCSET_NBSP）。"""
+    edit(root, "README.md", lambda t: append(t, SRCSET_NBSP))
+
+
+def mut_link_srcset_line(root):
+    """行號（見 SRCSET_LINE）。"""
+    edit(root, "README.md", lambda t: append(t, SRCSET_LINE))
+
+
+def ok_link_srcset_valid(root):
+    """合法的 srcset，不得誤擋。逐項對應 AC-1 的切法要求：
+      - descriptor：`1x`／`2x`、浮點 `1.5x`、`480w`；單一候選沒有 descriptor。
+      - **URL 含逗號**：`README.md?a=1,2 480w`——按逗號切會切出 `2 480w` 這種不是 URL 的段而誤擋。
+      - data: URI 裡的逗號（有 scheme，判定迴圈本來就不驗；按逗號切會切出沒有 scheme 的後半段）。
+      - 候選之間的空白是 space／tab／換行，URL 直接以逗號收尾（`README.md,`）。
+    `<picture><source>` 與 `<img>` 各有，`<img>` 同時帶合法的 src。"""
+    edit(root, "README.md",
+         lambda t: append(t,
+                          '\n<img srcset="README.md 1x, devflow/WORKFLOW.md 2x, '
+                          'scripts/devflow_checks.py 1.5x" src="README.md">\n\n'
+                          '<picture><source srcset="README.md?a=1,2 480w, '
+                          'devflow/WORKFLOW.md 800w"><img src="README.md"></picture>\n\n'
+                          '<img srcset="data:image/png;base64,iVBORw0KGgo= 1x,'
+                          '\n\tREADME.md,\tdevflow/WORKFLOW.md 2x">\n\n'
+                          '<img srcset="README.md">\n'))
+
+
+def ok_link_srcset_in_code(root):
+    """code fence／code span 裡的 srcset 是示範（fence／code_inline token），不進 HTML 判定。"""
+    edit(root, "README.md",
+         lambda t: append(t, "\n```html" + SRCSET_SOURCE + SRCSET_MULTI.lstrip() + "```\n\n"
+                             '寫法：`<img srcset="does/not/exist.png 1x, x.png 2x">`\n'))
+
+
 # ── dupid：規則 ID 唯一定義（issue #96 AC-4）───────────────────────────
 # 突變一律附加在 devflow/WORKFLOW.md 檔尾。檔案最後一行是 `- `D4` …`，也就是
 # 第 13 節「文檔（D）」的清單項——直接附加的清單項會接進同一個清單、落在同一節下，
@@ -756,6 +835,20 @@ CASES = [
      (LINK_BROKEN, readme_link(HTML_LINK_BLOCK, "does/not/exist.md"))),
     ("link:html-line", "link", mut_link_html_line, {},
      (LINK_BROKEN, readme_link(HTML_LINK_LINE, "does/not/exist.md"))),
+    # issue #102：srcset。明細比對到**行尾**（suffix 是換行）：送進判定的若是整個候選或整串，
+    # 明細會是 `-> does/not/exist.png 2x`，與期望前綴相同，不比到行尾就分不出來。
+    ("link:srcset-source", "link", mut_link_srcset_source, {},
+     (LINK_BROKEN, readme_link(SRCSET_SOURCE, "does/not/exist.png", "\n"))),
+    ("link:srcset-img", "link", mut_link_srcset_img, {},
+     (LINK_BROKEN, readme_link(SRCSET_IMG, "does/not/exist.png", "\n"))),
+    ("link:srcset-multi", "link", mut_link_srcset_multi, {},
+     (LINK_BROKEN, readme_link(SRCSET_MULTI, "does/not/exist.png", "\n"))),
+    ("link:srcset-no-space", "link", mut_link_srcset_no_space, {},
+     (LINK_BROKEN, readme_link(SRCSET_NO_SPACE, "README.md,devflow/WORKFLOW.md", "\n"))),
+    ("link:srcset-nbsp", "link", mut_link_srcset_nbsp, {},
+     (LINK_BROKEN, readme_link(SRCSET_NBSP, "README.md ", "\n"))),
+    ("link:srcset-line", "link", mut_link_srcset_line, {},
+     (LINK_BROKEN, readme_link(SRCSET_LINE, "does/not/exist.png", "\n"))),
     ("dupid", "dupid", mut_dupid, {},
      ("規則 ID `D1` 被定義 2 次", "又寫了一次，這是真的重複定義")),
     # issue #98：ID 之前有裝飾性內容的五種寫法，舊判準四種漏認。
@@ -823,6 +916,9 @@ PASSING = [
     ("link:html-in-code-span", "link", ok_link_html_in_code_span),
     ("link:html-comment", "link", ok_link_html_comment),
     ("link:html-valid", "link", ok_link_html_valid),
+    # issue #102 AC-4：合法的 srcset（含 URL 帶逗號）與示範裡的 srcset 不誤擋。
+    ("link:srcset-valid", "link", ok_link_srcset_valid),
+    ("link:srcset-in-code", "link", ok_link_srcset_in_code),
     ("r9:prose", "r9", ok_r9_prose),
     ("dupid:deep-heading", "dupid", ok_dupid_deep_heading),
     ("r9:separators", "r9", ok_r9_separators),
