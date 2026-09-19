@@ -449,13 +449,15 @@
 #       `<picture><source srcset>` 被保留，沒有證明 GitHub 在頁面上會把 srcset 的相對路徑改寫成
 #       載入得到的位址。若不改寫，指向存在檔案的相對 srcset 讀者端也可能載不出來——本項驗的只有
 #       「指到 repo 裡存在的路徑」。
-#     - `<img srcset>` 在 GitHub 上保不保留，本單沒有打 renderer 確認（本單的執行環境未獲核准
-#       呼叫 `gh api markdown`）。本檔照樣驗它；若 GitHub 會移除，這一路只會多擋，不會漏放。
-#     - `<audio>` 裡的 `<source src>`：依 PR #101 第一輪審查「媒體元素的 src／poster 被移除或
-#       失去作用」的紀錄，本單沒有另外實測。`<video>` 被移除後，裡面的 `<source>` 自己會不會
-#       留下也沒有實測；留下的話沒有媒體父元素可作用——依 HTML 規格推論。`<picture>` 裡的
-#       `<source src>`：依 HTML 規格（`<picture>` 只看 `<source>` 的 srcset，src 不參與選圖）
-#       推論，未在 GitHub 上實測。
+#     - `<img srcset>`：GitHub **會把整個 srcset 屬性剝掉**（orchestrator 於 `1d0e7f5` 打
+#       `gh api markdown --raw-field mode=gfm` 實測：`<img srcset="a.png 1x, b.png 2x" src="c.png">`
+#       算繪成 `<img src="c.png">`，srcset 不見了）。本檔照樣驗它——那是**只會多擋、不會漏放**
+#       的方向，留著可擋住「打算給別處用、路徑就是錯的」的 srcset。
+#     - `<audio>`／`<video>` 裡的 `<source src>`：orchestrator 實測——`<video><source src>` 整個
+#       被移除（算繪成空的 `<p>`）；`<audio><source src>` 的 `<audio>` 被移除、`<source>` 自己
+#       留下（算繪成 `<p><source></p>`），但沒有媒體父元素就不會載入任何東西。兩者都沒有讀者
+#       落差，所以 `<source src>` 放行是刻意的。`<picture>` 裡的 `<source src>`：依 HTML 規格
+#       （`<picture>` 只看 `<source>` 的 srcset，src 不參與選圖）推論，未在 GitHub 上實測。
 #     - srcset 切法照規格步驟寫、tests 有正反案例；沒有拿真的瀏覽器的選圖結果對照過。
 #     - JS 產生的連結：不在檔案的靜態內容裡，本檔讀的是原始碼，看不到。
 #     - HTMLParser 不是瀏覽器的 HTML5 tokenizer：對畸形標記的錯誤復原可能不一致（例如沒閉合的
