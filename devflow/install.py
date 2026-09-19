@@ -27,7 +27,15 @@ symlink 都是 exit 2，安裝器不替使用者決定該建到哪裡。
   不看縮排、不看是否在 code fence 內。第一組的選取與 strip() 語意與判準 B 一致。
 - 與 CI **刻意不同**的一點：檔首 UTF-8 BOM（EF BB BF）不剝除，屬第一行內容，所以
   「BOM＋begin」的首行不是標記行；CI 以 utf-8-sig 讀檔會先剝 BOM。安裝器以 bytes 為準、
-  不解碼整檔。差異只影響「BOM 開頭且首行為 begin」一種輸入，記 #22 待對齊。
+  不解碼整檔。差異只影響「BOM 開頭且首行為 begin」一種輸入，後果是安裝器看不見那行
+  begin、檔內第一個 end 成為落單 end → exit 1 拒絕安裝。#104 的處置是**維持差異、
+  只改訊息**（AC-5c，見 bom_hides_begin()）：BOM 開頭的檔案照樣裝不起來，但使用者看到
+  的是 BOM 而不是一個不存在的落單 end。
+- AC-5c 的分支只在「命中 AC-5b（有落單 end）且 bom_hides_begin() 為真」時觸發。它**不**
+  涵蓋（列舉，非概括）：BOM＋begin 但全檔無 end（無任何標記行 → AC-2 檔首插入、exit 0，
+  根本不經過錯誤路徑）；BOM＋begin 之後另有 begin 而無 end（AC-5——拿掉 BOM 仍是 AC-5，
+  只差行號，BOM 不是原因，改訊息反而誤導）；U+FEFF 出現在檔首以外；UTF-16／UTF-32 的
+  BOM（那種檔案整檔不是 UTF-8，逐行 decode 以 U+FFFD 代換後不會等於標記）。
 - 第一組＝檔案第一個 begin 標記行到其後第一個 end 標記行。第一個 begin 之前若有任何 end
   標記行（或全檔無 begin 但有 end）＝違反 `D2`（1.0.0.0：區塊須為第一個標記組、其前不得有
   任何標記行）→ exit 1、不寫任何檔（AC-5b）——不替使用者清理，區塊外是專案的內容。
@@ -49,6 +57,7 @@ from pathlib import Path
 
 BEGIN = "<!-- devflow:begin -->"
 END = "<!-- devflow:end -->"
+BOM = b"\xef\xbb\xbf"   # 檔首 UTF-8 BOM。不剝除（見 is_marker），只在 AC-5c 用來診斷錯誤原因
 ENTRY_FILES = ("CLAUDE.md", "AGENTS.md")
 D2_MAX_LINES = 30
 TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "entry-block.md"
@@ -124,7 +133,8 @@ def is_marker(line, marker):
     用 str.strip() 而非 bytes.strip()：兩者的空白集合不同（str 多 \\x1c-\\x1f、U+00A0 等），
     判準 B 在 str 上比對，這裡同語意。errors="replace" 讓非 UTF-8 的行也能比（U+FFFD 不是
     空白，不會誤判）。逐行 decode、不剝 BOM：檔首 BOM 留在第一行內，U+FEFF 不是空白，
-    「BOM＋begin」不是標記行（spec 名詞定義，與 CI 刻意不同）。
+    「BOM＋begin」不是標記行（spec 名詞定義，與 CI 刻意不同）；判定不變，只有命中 AC-5b
+    時另由 bom_hides_begin() 把錯誤訊息指回 BOM（AC-5c）。
     """
     return line.decode("utf-8", "replace").strip() == marker
 
@@ -142,6 +152,16 @@ def first_group(lines):
         return stray, None, None
     end = next((i for i in range(begin + 1, len(lines)) if is_marker(lines[i], END)), None)
     return stray, begin, end
+
+
+def bom_hides_begin(lines):
+    """檔首有 BOM、且去掉 BOM 後的第一行是 begin 標記行 → True（AC-5c 的判定）。
+
+    這個組合下第一行不是標記行（is_marker 不剝 BOM），安裝器看不見它，檔內第一個 end
+    於是成為落單 end、命中 AC-5b。本函式只供錯誤訊息指回真正的原因，不參與 first_group
+    的判定：拿掉 BOM 才是使用者的修法，安裝器不替他改檔。
+    """
+    return bool(lines) and lines[0].startswith(BOM) and is_marker(lines[0][len(BOM):], BEGIN)
 
 
 # ── 模板 ─────────────────────────────────────────────────────────────
@@ -306,6 +326,11 @@ def decide(root, name, template):
     stray, begin, end = first_group(lines)
     # AC-5b 先於 AC-5：落單 end 在檔案裡一定比 begin 早，先報最早的那個違規
     if stray is not None:
+        if bom_hides_begin(lines):
+            # AC-5c：落單 end 只是後果，原因是 BOM 遮住第一行的 begin。exit code 與「不寫檔」
+            # 都同 AC-5b，只換訊息；行號固定 1（BOM 那一行），指向要動手的地方
+            raise InstallError(1, "%s:1: UTF-8 BOM before devflow:begin; "
+                                  "remove the BOM (see issue #104)" % display)
         raise InstallError(1, "%s:%d: stray devflow:end before begin" % (display, stray + 1))  # AC-5b
     if begin is None:
         decision = Decision(name, display, "insert", data, template + b"\n" + data)  # AC-2（無任何標記行）
