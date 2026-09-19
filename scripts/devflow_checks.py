@@ -429,10 +429,22 @@
 #       審查都以 GitHub renderer（`gh api markdown`）實測過：被移除、失效、escape 成文字，或保留
 #       屬性但不呈現成可點連結（issue #102 的表）。`style` 的 `url()` 沒有實測。
 #     - `<source src>`（issue #102 AC-3 的裁決）：**維持放行，是政策不是遺漏**。`<source src>`
-#       只在 `<audio>`／`<video>` 裡作用，而 GitHub 算繪時移除媒體元素——`<video>`（連同 src、
-#       poster）整個被移除，由 PR #101 第一輪審查以 renderer 實測（issue #102 的表）。讀者看不到
-#       的東西壞了，不是本項要擋的落差。`<audio>` 與 `<picture>` 裡的 `<source src>` 本單沒有
-#       實測，見下一類。
+#       只在 `<audio>`／`<video>` 裡作用，而 GitHub 算繪時移除媒體元素。orchestrator 於
+#       `1d0e7f5` 以 `gh api markdown --raw-field mode=gfm --raw-field context=<repo>` 實測：
+#       `<video><source src>` 整個被移除（算繪成空的 `<p>`）；`<audio><source src>` 的
+#       `<audio>` 被移除、`<source>` 自己留下但 `src` 消失，沒有媒體父元素也不會載入任何
+#       東西。讀者看不到的東西壞了，不是本項要擋的落差。（`<picture>` 裡的 `<source src>`
+#       同樣被剝掉 `src`，也是已實測，見下一類的 `<picture>` 那條。）
+#     - `<img srcset>` 照驗，**即使 GitHub 會把整個 srcset 屬性剝掉**（orchestrator 實測：
+#       `<img srcset="a.png 1x, b.png 2x" src="c.png">` 算繪成 `<img src="c.png">`）。留著是
+#       刻意的：方向是只會多擋、不會漏放，可擋住「打算給別處用、路徑就是錯的」srcset。
+#     - `<source srcset>` 的**合法多候選**：GitHub 的 sanitizer 只留下第一個 URL（PR #103
+#       第一輪審查實測：`<picture><source srcset="README.md 1x, does/not/exist.png 2x">` 算繪成
+#       `<source srcset="README.md">`，第二候選與 descriptor 都消失）。本檔仍驗全部候選，所以
+#       後續候選指到不存在的路徑時會擋下一個讀者其實看不到的連結——**這是刻意的假陽性**，
+#       方向仍是只會多擋、不會漏放。
+#       renderer 的行為對是否帶 repo `context` 敏感（不帶 context 時 `<source srcset>` 原樣
+#       保留），上述結果都是帶 context 測的。
 #     - `<base href>`：瀏覽器會拿它改寫整份文件的相對連結；本檔一律相對於 md 檔所在目錄解析
 #       （和 markdown 連結同一個規則），不讀 `<base>`。
 #     - 圖片 alt 裡的 HTML（`![<a href="x">](y.png)`）：alt 是純文字屬性，讀者看不到連結，
@@ -449,15 +461,10 @@
 #       `<picture><source srcset>` 被保留，沒有證明 GitHub 在頁面上會把 srcset 的相對路徑改寫成
 #       載入得到的位址。若不改寫，指向存在檔案的相對 srcset 讀者端也可能載不出來——本項驗的只有
 #       「指到 repo 裡存在的路徑」。
-#     - `<img srcset>`：GitHub **會把整個 srcset 屬性剝掉**（orchestrator 於 `1d0e7f5` 打
-#       `gh api markdown --raw-field mode=gfm` 實測：`<img srcset="a.png 1x, b.png 2x" src="c.png">`
-#       算繪成 `<img src="c.png">`，srcset 不見了）。本檔照樣驗它——那是**只會多擋、不會漏放**
-#       的方向，留著可擋住「打算給別處用、路徑就是錯的」的 srcset。
-#     - `<audio>`／`<video>` 裡的 `<source src>`：orchestrator 實測——`<video><source src>` 整個
-#       被移除（算繪成空的 `<p>`）；`<audio><source src>` 的 `<audio>` 被移除、`<source>` 自己
-#       留下（算繪成 `<p><source></p>`），但沒有媒體父元素就不會載入任何東西。兩者都沒有讀者
-#       落差，所以 `<source src>` 放行是刻意的。`<picture>` 裡的 `<source src>`：依 HTML 規格
-#       （`<picture>` 只看 `<source>` 的 srcset，src 不參與選圖）推論，未在 GitHub 上實測。
+#     - `<picture>` 裡的 `<source src>`：同樣是**已實測**——PR #103 第一輪審查確認 renderer 把
+#       `src` 剝掉（`<source>` 留下、`src` 消失），且它本來就不參與選圖（HTML 規格：`<picture>`
+#       只看 `<source>` 的 srcset）。與 `<audio>`／`<video>` 同一個結論，所以 `<source src>`
+#       放行在三種父元素下都成立。本檔沒有為它另立 tests 案例。
 #     - srcset 切法照規格步驟寫、tests 有正反案例；沒有拿真的瀏覽器的選圖結果對照過。
 #     - JS 產生的連結：不在檔案的靜態內容裡，本檔讀的是原始碼，看不到。
 #     - HTMLParser 不是瀏覽器的 HTML5 tokenizer：對畸形標記的錯誤復原可能不一致（例如沒閉合的
