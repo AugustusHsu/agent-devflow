@@ -255,13 +255,30 @@ def mut_table_script(root):
          lambda t: append(t, "\n<script>" + RAW_HTML_TABLE + "</script>\n"))
 
 
+TABLE_INLINE_MULTILINE = "\nprefix <span>\nsecond line\nthird " + RAW_HTML_TABLE + " tail\n"
+# 同上，但 `<table>` 前面的換行藏在多行 code span 裡（parser 把它轉成空格，沒有 token
+# 帶著它）——#92 從兄弟 token 反推行號的做法在這裡少算一行（issue #100 本地實測）。
+TABLE_INLINE_CODESPAN = "\nprefix `多行\ncode span` 之後 " + RAW_HTML_TABLE + " tail\n"
+
+
+def paperclip_table_at(extra):
+    """extra 附加到 paperclip.md 之後，`table` 對那個 `<table>` 的明細應有的樣子。"""
+    return ("devflow/orchestrators/paperclip.md:%d 有 raw HTML 的 <table>"
+            % appended_line("devflow/orchestrators/paperclip.md", extra, "<table>"))
+
+
 def mut_table_inline_multiline(root):
     """多行 inline 裡的 `<table>`——`prefix <span>` 開頭使這段落成 html_inline 而非
-    html_block。換行在 inline 是 softbreak token（content 為空字串），串接時要認
-    token 型別才還原得出行號（審查者 PR #92 第五輪：真實 22 行曾報成 20）。"""
+    html_block。行號要是真實行號（審查者 PR #92 第五輪：真實 22 行曾報成 20）；
+    期望的明細帶行號，鎖住這一點（issue #100 起）。"""
     edit(root, "devflow/orchestrators/paperclip.md",
-         lambda t: append(t, "\nprefix <span>\nsecond line\nthird "
-                             + RAW_HTML_TABLE + " tail\n"))
+         lambda t: append(t, TABLE_INLINE_MULTILINE))
+
+
+def mut_table_inline_codespan(root):
+    """`<table>` 前面的換行藏在 code span 裡（見 TABLE_INLINE_CODESPAN）。"""
+    edit(root, "devflow/orchestrators/paperclip.md",
+         lambda t: append(t, TABLE_INLINE_CODESPAN))
 
 
 def ok_r9_prose(root):
@@ -282,6 +299,114 @@ def mut_link(root):
     """相對連結指向不存在的路徑。"""
     edit(root, "README.md",
          lambda t: append(t, "\n[壞掉的連結](does/not/exist.md)\n"))
+
+
+# ── link：raw HTML 的連結（issue #100）──────────────────────────────────
+# 突變一律以一個空行開頭附加在 README.md 檔尾（同 mut_link），自成一個區塊。5a–5e 的寫法
+# 逐字取自 issue #100 的表；orchestrator 當時附加在 forges/github.md，這裡換成和既有 `link`
+# 案例同一個錨點。
+# 5a 在 issue 裡記成「行首 → html_block」，本地實測不是：`a` 不是 type 6 的區塊標籤，
+# 標籤後面又接了文字、不合 type 7，於是整行是段落、`<a …>` 是 html_inline。html_block
+# 那一路由 5c（`<img>` 單獨一行，type 7）與 html-block 案（`<div>` 包住，type 6）走到。
+#
+# 期望的明細帶**行號**（AC-1／AC-4）。行號由本檔在原文上自己算（檢查器之外的 oracle），
+# 不寫死：README 改了行數，期望跟著變。
+def appended_line(rel, extra, needle):
+    """extra 附加到 rel 檔尾之後，needle 最後一次出現的行號（1-based）。"""
+    text = (REPO / rel).read_text(encoding="utf-8") + extra
+    return text.count("\n", 0, text.rindex(needle)) + 1
+
+
+def readme_link(extra, target, suffix=""):
+    """extra 附加到 README.md 之後，`link` 對 target 那一條明細應有的樣子。"""
+    return "README.md:%d -> %s%s" % (appended_line("README.md", extra, target), target, suffix)
+
+
+LINK_BROKEN = "有相對連結指向不存在或 repo 之外的路徑"
+HTML_LINK_5A = '\n<a href="does/not/exist.md">壞</a>\n'
+HTML_LINK_5B = '\n前綴 <a href="does/not/exist.md">壞</a>\n'
+HTML_LINK_5C = '\n<img src="does/not/exist.png">\n'
+HTML_LINK_5D = '\n<a href=".git/config">壞</a>\n'
+HTML_LINK_5E = '\n看 <a href="../../etc/passwd">這</a>\n'
+HTML_LINK_BLOCK = '\n<div>\n說明\n<a href="does/not/exist.md">壞</a>\n</div>\n'
+# 同一段落裡，壞連結前面有兩個「不在任何 token 裡」的換行：code span 內的換行（parser
+# 轉成空格）、連結目的地前的換行（被 link token 吞掉）。#92 的反推法在這裡少算兩行。
+HTML_LINK_LINE = ('\n前 `多行\ncode span` 與 [連結](\nREADME.md) 之後\n'
+                  '看 <a href="does/not/exist.md">這</a>\n')
+
+
+def mut_link_html_a(root):
+    """5a：`<a href>` 在行首，指向不存在的路徑（段落裡的 html_inline）。"""
+    edit(root, "README.md", lambda t: append(t, HTML_LINK_5A))
+
+
+def mut_link_html_inline(root):
+    """5b：`<a href>` 前面有裸文字（html_inline，被文字切成三個 child）。"""
+    edit(root, "README.md", lambda t: append(t, HTML_LINK_5B))
+
+
+def mut_link_html_img(root):
+    """5c：`<img src>` 單獨一行（html_block，type 7）。"""
+    edit(root, "README.md", lambda t: append(t, HTML_LINK_5C))
+
+
+def mut_link_html_git_config(root):
+    """5d：指向 `.git/config`——runner 上存在、不受版控。缺口 6 的修正（git ls-files 當
+    oracle）在 raw HTML 這一路也要成立，不能另用 os.path.exists 讓它復活。"""
+    edit(root, "README.md", lambda t: append(t, HTML_LINK_5D))
+
+
+def mut_link_html_escape(root):
+    """5e：`../../etc/passwd` 逃出 repo，前面有裸文字（html_inline）。"""
+    edit(root, "README.md", lambda t: append(t, HTML_LINK_5E))
+
+
+def mut_link_html_block(root):
+    """`<a href>` 在多行 html_block 的第三行（type 6，`<div>` 包住）——行號＝區塊起點＋
+    HTMLParser 給的相對行，不是區塊的第一行。"""
+    edit(root, "README.md", lambda t: append(t, HTML_LINK_BLOCK))
+
+
+def mut_link_html_line(root):
+    """AC-4：html_inline 前面有 token 看不到的換行，行號仍要是真實行號
+    （見 HTML_LINK_LINE 的註解；#92 的反推法會少算兩行）。"""
+    edit(root, "README.md", lambda t: append(t, HTML_LINK_LINE))
+
+
+def ok_link_html_in_fence(root):
+    """code fence 裡的 raw HTML 連結是示範（fence token），不進 HTML 判定。"""
+    edit(root, "README.md",
+         lambda t: append(t, "\n```html" + HTML_LINK_5A + HTML_LINK_5C.lstrip() + "```\n"))
+
+
+def ok_link_html_in_code_span(root):
+    """code span 裡的 raw HTML 連結同樣是示範（code_inline token）。"""
+    edit(root, "README.md",
+         lambda t: append(t, '\n寫法：`<a href="does/not/exist.md">壞</a>`、'
+                             '`<img src="does/not/exist.png">`\n'))
+
+
+def ok_link_html_comment(root):
+    """HTML 註解裡的 `<a href>`／`<img src>` 不渲染，HTMLParser 也不把它當 start tag
+    （同 table:html-comment）。區塊與行內各一。"""
+    edit(root, "README.md",
+         lambda t: append(t, '\n<!-- <a href="does/not/exist.md">壞</a> -->\n\n'
+                             '說明 <!-- <img src="does/not/exist.png"> --> 結尾\n'))
+
+
+def ok_link_html_valid(root):
+    """合法的 raw HTML 連結，區塊與行內各一段。它們走的是和 markdown 連結**同一個**判定
+    迴圈，所以 scheme、純 fragment、repo 根相對、query／fragment 的切法都和 markdown 那一路
+    一樣不擋（AC-3：raw HTML 若另寫一套判定，這一案最先誤擋）。另含 raw HTML 才有的兩種：
+    屬性值前後的空白（瀏覽器照 URL 標準剝掉）、沒有 href 的 `<a name>`。"""
+    edit(root, "README.md",
+         lambda t: append(t,
+                          '\n<p><a href="devflow/WORKFLOW.md">規則</a>、'
+                          '<a href="https://example.com/x">外部</a>、<a href="#top">錨點</a>、'
+                          '<a href="/devflow/WORKFLOW.md">根相對</a>、'
+                          '<img src="scripts/devflow_checks.py"></p>\n\n'
+                          '看 <a href="README.md?plain=1#x">帶 query</a>、'
+                          '<a href=" README.md ">前後空白</a>、<a name="x">沒有 href</a>\n'))
 
 
 # ── dupid：規則 ID 唯一定義（issue #96 AC-4）───────────────────────────
@@ -612,8 +737,25 @@ CASES = [
      "的對照表形狀不合 R9"),
     ("table:script", "table", mut_table_script, {}, "的對照表形狀不合 R9"),
     ("table:inline-multiline", "table", mut_table_inline_multiline, {},
-     "的對照表形狀不合 R9"),
-    ("link", "link", mut_link, {}, "有相對連結指向不存在或 repo 之外的路徑"),
+     ("的對照表形狀不合 R9", paperclip_table_at(TABLE_INLINE_MULTILINE))),
+    ("table:inline-codespan", "table", mut_table_inline_codespan, {},
+     ("的對照表形狀不合 R9", paperclip_table_at(TABLE_INLINE_CODESPAN))),
+    ("link", "link", mut_link, {}, LINK_BROKEN),
+    # issue #100：raw HTML 的連結。明細帶行號，判定與 markdown 連結同一個迴圈。
+    ("link:html-a", "link", mut_link_html_a, {},
+     (LINK_BROKEN, readme_link(HTML_LINK_5A, "does/not/exist.md"))),
+    ("link:html-inline", "link", mut_link_html_inline, {},
+     (LINK_BROKEN, readme_link(HTML_LINK_5B, "does/not/exist.md"))),
+    ("link:html-img", "link", mut_link_html_img, {},
+     (LINK_BROKEN, readme_link(HTML_LINK_5C, "does/not/exist.png"))),
+    ("link:html-git-config", "link", mut_link_html_git_config, {},
+     (LINK_BROKEN, readme_link(HTML_LINK_5D, ".git/config"))),
+    ("link:html-escape", "link", mut_link_html_escape, {},
+     (LINK_BROKEN, readme_link(HTML_LINK_5E, "../../etc/passwd", "（逃出 repo 之外）"))),
+    ("link:html-block", "link", mut_link_html_block, {},
+     (LINK_BROKEN, readme_link(HTML_LINK_BLOCK, "does/not/exist.md"))),
+    ("link:html-line", "link", mut_link_html_line, {},
+     (LINK_BROKEN, readme_link(HTML_LINK_LINE, "does/not/exist.md"))),
     ("dupid", "dupid", mut_dupid, {},
      ("規則 ID `D1` 被定義 2 次", "又寫了一次，這是真的重複定義")),
     # issue #98：ID 之前有裝飾性內容的五種寫法，舊判準四種漏認。
@@ -676,6 +818,11 @@ PASSING = [
     ("table:html-attr", "table", ok_table_html_attr),
     ("table:html-comment", "table", ok_table_html_comment),
     ("table:html-attr-name", "table", ok_table_html_attr_name),
+    # issue #100 AC-5：示範不是資料；合法的 raw HTML 連結不誤擋。
+    ("link:html-in-fence", "link", ok_link_html_in_fence),
+    ("link:html-in-code-span", "link", ok_link_html_in_code_span),
+    ("link:html-comment", "link", ok_link_html_comment),
+    ("link:html-valid", "link", ok_link_html_valid),
     ("r9:prose", "r9", ok_r9_prose),
     ("dupid:deep-heading", "dupid", ok_dupid_deep_heading),
     ("r9:separators", "r9", ok_r9_separators),

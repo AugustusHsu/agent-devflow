@@ -26,7 +26,7 @@
 #                 `tables` devflow.yml 指名的對照表檔（`forge`、各職位的 `filler`）都受版控、
 #                 `table` 對照表檔的表形狀合 `R9`（表頭欄位、狀態欄恰一、已分節時表要落在節內、
 #                 資料列的狀態格非空、至少一張合格的表、不得有 raw HTML 表格）、
-#                 `link` 相對連結指向 repo 內存在的路徑、
+#                 `link` 相對連結（含 raw HTML 的 `<a href>`／`<img src>`）指向 repo 內存在的路徑、
 #                 `r9` 對照表的狀態欄取 `R9` 三值之一（`✅ 可用`／`📝 已宣稱`／`⬜ 未測`；
 #                 三值之後可接分隔符與補充，見 R9_SEPS）、
 #                 `dupid` 規則本體沒有把同一個規則 ID 定義兩次（定義＝節前綴判準，
@@ -181,15 +181,21 @@
 #               **不用正規式**：PR #92 三輪證明正規式在這裡不封閉（引號配對範圍、
 #               屬性值含 `>`、畸形標籤），審查者第三輪判定應換 tokenizer。
 #               對照表檔裡要示範 HTML 表格，放進 code fence。
+#       行號：issue #100 起改由 parser 記下的原文位移算，修掉 #92 反推法少算行的四種寫法
+#               （與 `link` 共用同一套取出機制，見「link 的 raw HTML 連結」）。
 #
 #   * `link`（相對連結有效性）
-#       定義域：受版控 .md 裡 AST 看得到的相對連結（行內連結、圖片、reference 定義）。
-#               有 scheme 的、純 fragment 的不驗。
+#       定義域：受版控 .md 裡 AST 看得到的相對連結（行內連結、圖片、reference 定義）；
+#               issue #100 起加上 raw HTML 裡承載連結的屬性（HTML_LINK_ATTRS：`<a href>`、
+#               `<img src>`）。有 scheme 的、純 fragment 的不驗。
 #       假陽性：#22 缺口 9（連結帶 query）已修（切 fragment 也切 query）；另修一個本地
 #               找到的——`..probe.md` 這種合法檔名被 `startswith("..")` 判成逃出 repo，
 #               改成比對路徑段。本地以反例複驗四種 query／fragment 組合皆不報。
-#       仍擋不住：#22 缺口 6（指向 `.git/config` 之類受版控外但 runner 上存在的路徑），
-#               本輪不處理，留在 #22；本輪也沒有讓它變得更糟。
+#       #22 缺口 6（指向 `.git/config` 之類受版控外但 runner 上存在的路徑）：本節寫成時
+#               記為「仍擋不住」，同一單後來由 PR #81 第五輪修掉——存在性的 oracle 換成
+#               `git ls-files`，不再問 runner 的檔案系統（見 link 那一節的註解）。
+#       #22 缺口 5（raw HTML 的連結完全不受檢查）：issue #100 修掉。定義域、取出方式、
+#               仍擋不住什麼，見下面「link 的 raw HTML 連結」。
 #
 # 這四項的正反案例是在本地以**同一份檢查器**逐案跑的（做法：把本檔的 inline python
 # 原樣抽出來，在 `git archive HEAD` 造的臨時 repo 上套探針後執行，DEVFLOW_GATE_<KEY>=1
@@ -360,6 +366,71 @@
 #     會把真定義判掉（又一個繞過）。本項的行首寫法只有一個來源，就是本項的第一行；
 #     三個假陽性案例（附錄、索引、`> - …`）的第一行寫法不變，判定與 #96 相同。
 #
+# ── link 的 raw HTML 連結（issue #100）───────────────────────────────────
+# `link` 原本只認 AST 裡的 `link_open`／`image` token 與 reference 定義。raw HTML 的連結不產生
+# 那兩種 token（parser 給的是 html_block／html_inline），於是**完全不受檢查**——必需關卡上的
+# 繞過（#22 第三輪審查的假陰性 5）。orchestrator 在 `894ab1e` 實測五種寫法全部 exit 0：
+# 行首的 `<a href>`、前面有文字的 `<a href>`、`<img src>`、指向 `.git/config`、
+# `../../etc/passwd`。（issue 把第一種記成 html_block，本地實測不是：`a` 不是 type 6 的區塊
+# 標籤、標籤後又接了文字，整行是段落裡的 html_inline；html_block 那一路是 `<img>` 單獨一行
+# 與 `<div>` 包住的寫法。兩條路徑 tests 都有案例。）
+#   判準：**列舉什麼承載連結，不列舉要擋什麼**（#98 的教訓：繞過清單窮舉不完）。承載連結的
+#     是 HTML_LINK_ATTRS 這一小組 (標籤, 屬性)，目前是 `<a href>`、`<img src>` 兩個；不在這一組
+#     的標籤與屬性一律不看。取出的值交給 markdown 連結用的**同一個**判定迴圈（下面 link 那一節）：
+#     有 scheme 的、純 fragment、`//host` 不驗；先切 fragment 再切 query（#22 缺口 9）；比對
+#     路徑段而非 `startswith("..")`（`..probe.md`）；存在性問 `git ls-files` 而非
+#     `os.path.exists`（#22 缺口 6）。**這四條只有一份實作**——raw HTML 那一路若另寫判定，
+#     四個已修缺陷會在新路徑上全部復活。
+#   取出：與 `table` 的 raw HTML 表格共用同一套（raw_html_chunks → html_start_tags）。只認
+#     parser 判成 HTML 的 token，所以 code fence／縮排 code block／code span 裡的示範天然排除；
+#     只認 HTMLParser 判成 start tag 的東西，所以 HTML 註解、屬性值裡的 `<a href` 不算。
+#     **不解析 HTML 的內容語意**（界線同 raw_html_tables：那會讓檢查器變成第二個 parser）——
+#     對屬性值只做 URL 標準本來就對它做的兩步（去掉前後的控制字元與空白、刪掉 tab／換行），
+#     entity 由 HTMLParser 解開，其餘一概不動。
+#   行號：行內 HTML 的行號改由 parser 記下的原文位移算（HTML_POS）。#92 從兄弟 token 反推換行，
+#     本地實測四種寫法少算一行（多行 code span、連結目的地前換行、連結 title 前換行、跨行的
+#     reference label）——那些換行不在任何 token 裡。`table` 的行號同樣受影響，一併修掉。
+#     包裝有沒有生效，啟動時自檢（不等內容裡剛好有行內 HTML）。本地只在 markdown-it-py 4.0.0
+#     實跑過；CI pin 的 3.0.0 本地沒有，依原始碼判斷規則介面相同、**未實跑**——CI 每次執行
+#     都會跑到那個自檢。
+#     **自檢與 tests 都不完備，兩者合起來也不完備**（PR #101 兩輪審查各以定點突變實測）。
+#     能抓到的，只有這些：
+#       - 規則完全沒註冊、或 HTML_POS 寫成探針值以外的東西 → 自檢 exit 2。
+#       - HTML_POS 固定成探針那個值（4）→ 自檢通過，tests 三個非 4 位移案例抓到。
+#     抓不到的（已知有，不是推測）：把字元位移誤當 UTF-8 byte 位移——自檢通過、67 案
+#     全過，某些 CJK ＋跨行的組合行號會多算一行。要收掉這一類得補對應的 tests 案例；
+#     在那之前，**不要把這段讀成「錯的位移都會被擋下」**。
+#   擴充（新增一種承載連結的屬性）：在 HTML_LINK_ATTRS 加一組 (標籤, 屬性)，並在
+#     tests/smoke_devflow_checks.py 補一個應擋案例。前提是那個屬性的值**就是一個 URL**；
+#     `srcset` 這種「一串 URL ＋描述」的微語法不能直接加進來，要先決定怎麼切——那是新政策，
+#     不是補清單。不論哪種，都**不得**在取出的地方另做判定。
+#   仍擋不住（不宣稱「所有 HTML 連結都擋得住」）。分兩類：
+#     刻意的政策（有意不做；要改，由人裁決）：
+#     - HTML_LINK_ATTRS 以外的屬性：`<img srcset>`／`<source srcset>`、`<img longdesc>`、
+#       `cite`（blockquote／q／del／ins）、`<video src>`／`poster`、`<source src>`、
+#       `<object data>`、`<iframe src>`、`<area href>`、`<link href>`、`<form action>`、
+#       `style` 屬性裡的 `url()`。GitHub 算繪時保留哪些、改不改寫它們的相對路徑，本檔沒有核對。
+#     - `<base href>`：瀏覽器會拿它改寫整份文件的相對連結；本檔一律相對於 md 檔所在目錄解析
+#       （和 markdown 連結同一個規則），不讀 `<base>`。
+#     - 圖片 alt 裡的 HTML（`![<a href="x">](y.png)`）：alt 是純文字屬性，讀者看不到連結，
+#       不看（parser 把它放在 image 自己的 children，以另一個 src 解析）。
+#     - 同一個標籤重複的屬性（`<a href="ok" href="bad">`）：瀏覽器只用第一個，本檔每個都驗——
+#       只會更嚴，代價是可見的誤擋，不會漏放。
+#     推論或未實測（不是有意不做，是判不了或沒驗過）：
+#     - JS 產生的連結：不在檔案的靜態內容裡，本檔讀的是原始碼，看不到。
+#     - HTMLParser 不是瀏覽器的 HTML5 tokenizer：對畸形標記的錯誤復原可能不一致（例如沒閉合的
+#       標籤被後面的算繪結果補齊），兩邊看到的 start tag 就不同。本地實跑過 HTMLParser 對未閉合
+#       引號、`<![CDATA[`、`<?…>`、`<!DOCTYPE` 的結果；瀏覽器那一邊是依 HTML 規格推論，
+#       未在 GitHub 上實測。
+#     - HTMLParser 真的拋例外時（本地沒找到會拋的輸入）：那段 HTML 當成一條判不了的連結擋下
+#       （fail closed），不是放行；這條路徑因此沒有 tests 案例。
+#     - markdown 連結的行號仍是段落的第一行（locate），不像 raw HTML 那樣精確；那一路本單沒動。
+#   假陽性：正文裡直接寫 `<a href="路徑/示範.md">` 當例子、不包 code span 會被擋——要示範就放進
+#     code span 或 code fence（同 `table` 的做法）。現行受版控 md 沒有任何 raw HTML 連結（issue
+#     #100 orchestrator 確認；改動後完整檢查仍 exit 0、相對連結數不變），所以本項不改變現行內容
+#     的判定。tests 的四個 `link:html-*` 正向案例（fence、code span、註解、合法連結）鎖住這一邊。
+#     **不宣稱「不存在假陽性」**。
+#
 # ── 不發明規則：`i1` 的 slug 為什麼不限字元集 ─────────────────────────────
 # `I1` 的原文只有「分支名 `<N>-<slug>`」，沒有規定 slug 的字元集。
 # 收成 `^[0-9]+-[a-z0-9-]+$` 會擋掉 `26-封閉定義域`、`4-v0.0.2.0-bump`、`26-Fix-D2`——
@@ -500,7 +571,8 @@
 #     製造新的假陽性。留在 issue #22，本輪不做半套。
 #   * 從未定義過的規則家族（例如 `Q3`）連建議都不會報：前綴集合＝基線 ∪ 現有定義的
 #     前綴。放寬成「任何 ID 形狀」只會讓上面那個誤擋問題更嚴重。
-#   * 權威檔案清單、raw HTML 內容（對照表檔內的 `<table` 除外，issue #90 起歸 `table`）、
+#   * 權威檔案清單、raw HTML 內容（兩個例外：對照表檔內的 `<table`，issue #90 起歸 `table`；
+#     HTML_LINK_ATTRS 承載的連結，issue #100 起歸 `link`，其餘屬性見「link 的 raw HTML 連結」）、
 #     對照表的分節 schema —— 都在 issue #22，本輪不做。
 #   * frontmatter 的界定（首行 --- 到下一個 --- 或 ...，兩者後面都可以接註解）仍是
 #     字面掃描；那是慣例不是 markdown 語法，沒有 parser 可問。界定出來的內容才交給
@@ -609,6 +681,7 @@ if "--check-pins" in _args:
 try:
     import yaml
     from markdown_it import MarkdownIt
+    from markdown_it.rules_inline import html_inline as _md_html_inline
     import markdown_it
 except ImportError as e:
     print("💥 檢查器無法執行：缺少相依模組 %s" % e.name)
@@ -756,6 +829,8 @@ TEXT_TOKENS = ("text", "text_special")
 # 「parser 看到的是文字還是標記」，parser 認得的語法愈接近 GitHub，兩邊看到的就愈一致。
 # 現行受版控的 md 一個 `~~` 都沒有（`git grep -n '~~' -- '*.md'` 無輸出），所以這個改動
 # 不改變任何一項在現行內容上的判定；升版後仍是 71 條定義、零重複。
+# 另有一層**不改任何判定**的包裝：html_inline 規則多記一個原文位移（issue #100），
+# 見 raw_html_chunks 前面那段。
 MD = MarkdownIt("commonmark").enable(["table", "strikethrough"])
 errors = []
 advisories = []
@@ -1138,7 +1213,13 @@ def tables_of(tokens, lines):
     return out
 
 
-# raw HTML `<table>` 的判定：用標準庫的 HTMLParser，不用正規式。
+# ── raw HTML：`table`（issue #90）與 `link`（issue #100）共用的一套機制 ──────────
+# 兩者問的是同一類問題——「parser 判成 HTML 的那些 token 裡，有沒有某種 start tag」——
+# 只差在要哪種 tag、取它的什麼。所以「從 AST 取出 raw HTML」（raw_html_chunks）與
+# 「在 raw HTML 裡找 start tag」（html_start_tags）各只有一份，兩個關卡各自只寫
+# 自己的那一小段篩選。
+#
+# 找 start tag 用標準庫的 HTMLParser，不用正規式。
 #
 # 正規式做過三輪都不封閉（PR #92）：對整個 token 配對引號會把文字內容裡的引號
 # 當屬性引號、吃掉中間真正的表格；改切標籤後，`[^>]*?` 又在屬性值含 `>` 時提早
@@ -1149,79 +1230,170 @@ def tables_of(tokens, lines):
 # 引號裡的 `<table` 都不會變成 handle_starttag 的呼叫，前三輪的每個反例自然消失。
 # 它也給 (行, 欄)，行號直接可用，不必回頭在原文搜字串（那正是第三輪行號錯置的
 # 根因）。容錯：HTMLParser 對畸形輸入不拋例外，照 HTML5 的錯誤復原規則繼續。
-class _TableTagFinder(HTMLParser):
-    """找出 raw HTML 裡的 `<table>` start tag，回報其相對行號（1-based）。
+# 標籤名、屬性名它會轉成小寫，屬性值裡的 entity（`&amp;`）它會解開——三者都和瀏覽器
+# 看到的一致，本檔不再另做。
+class _StartTagFinder(HTMLParser):
+    """raw HTML 裡每一個 start tag：(相對行號（1-based）, 標籤名, attrs)。
 
     `set_cdata_mode` 是 HTMLParser 的內部開關：碰到 `<script>`／`<style>` 後把後續
     內容當 raw text，裡面的標籤不再回報。但 **markdown 的 `<script>` 在 GitHub 上會
     被清掉、裡面的內容照樣渲染**——審查者 PR #92 第四輪實測 `<script>` 內的 table
-    最終有渲染出來。對照表檔不該有 script/style，一律當成普通標籤繼續解析。"""
+    最終有渲染出來。受版控的 md 不該有 script/style，一律當成普通標籤繼續解析
+    （連結同理：`<script>` 裡的 `<a href>` 也照樣會被找出來）。"""
 
     def __init__(self):
         super().__init__(convert_charrefs=False)
-        self.hits = []
+        self.tags = []
 
     def set_cdata_mode(self, *args, **kwargs):   # noqa: N802（覆寫內部方法）
         pass
 
     def handle_starttag(self, tag, attrs):
-        if tag == "table":
-            self.hits.append(self.getpos()[0])
+        self.tags.append((self.getpos()[0], tag, attrs))
 
     handle_startendtag = handle_starttag
 
 
-def html_table_lines(text):
-    """text 裡 `<table>` start tag 的相對行號（1-based，相對於 text 的第一行）。"""
-    p = _TableTagFinder()
+def html_start_tags(text):
+    """text 裡的 start tag（見 _StartTagFinder）。解析拋例外就回 None——HTMLParser
+    幾乎不拋，真拋了表示看不完這段 HTML，由呼叫端各自 fail closed。"""
+    p = _StartTagFinder()
     try:
         p.feed(text)
         p.close()
-    except Exception:            # HTMLParser 幾乎不拋，真拋了就當作有問題
+    except Exception:
+        return None
+    return p.tags
+
+
+def html_table_lines(text):
+    """text 裡 `<table>` start tag 的相對行號（1-based，相對於 text 的第一行）。"""
+    tags = html_start_tags(text)
+    if tags is None:             # 看不完就當作有問題
         return [1]
-    return p.hits
+    return [ln for ln, tag, _ in tags if tag == "table"]
 
 
-def raw_html_tables(tokens, lines):
-    """AST 裡的 raw HTML `<table>` 所在行號（issue #90 缺口 2）。
+# raw HTML 裡**承載連結**的東西（issue #100）：(標籤名, 屬性名)，兩者都是 HTMLParser
+# 轉過的小寫。判準是**列舉承載連結的屬性**，不是「遇到某些標籤就特別處理」——
+# 不在這一組裡的 tag／屬性一律不看，在這一組裡的就取出它的值、交給 `link` 那一節的
+# **同一個**判定迴圈（scheme／fragment、query、路徑段、git ls-files 都只有那一份）。
+#
+# 這一組是**刻意的政策**，不是「所有 URL 型屬性」的推論結果：只收「值就是一個 URL」、
+# 而且讀者點得到或看得到的那兩個。其餘的（`srcset`、`longdesc`、`cite`、`poster`、
+# `<source src>`、`<object data>`、`style` 裡的 `url()`……）都不在，理由與擴充方式
+# 見檔頭「link 的 raw HTML 連結」那一節。
+HTML_LINK_ATTRS = frozenset({("a", "href"), ("img", "src")})
+# URL 的前處理，照 WHATWG URL 標準對屬性值做的那兩步：去掉前後的 C0 控制字元與空白、
+# 刪掉所有 tab／換行。瀏覽器對 `href=" README.md "` 解析出的就是 `README.md`；不做的話
+# 會把合法連結判成壞的（方向只有誤擋，不會漏放）。除此之外不動值——percent-decode、
+# 切 query／fragment 都是那個共用迴圈的事，不在這裡做第二次。
+_URL_EDGE = "".join(chr(c) for c in range(0x21))
+_URL_TAB_NL = re.compile("[\t\n\r]")
+
+
+def html_link_urls(text):
+    """text 裡承載連結的屬性值：[(url, 相對行號)]。解析拋例外回 [(None, 1)]——
+    看不完就不知道裡面有沒有壞連結，交給呼叫端當成一條判不了的連結擋下。"""
+    tags = html_start_tags(text)
+    if tags is None:
+        return [(None, 1)]
+    out = []
+    for ln, tag, attrs in tags:
+        for name, value in attrs:
+            if (tag, name) not in HTML_LINK_ATTRS or value is None:
+                continue
+            url = _URL_TAB_NL.sub("", value.strip(_URL_EDGE))
+            if url:
+                out.append((url, ln))
+    return out
+
+
+# html_inline 的原文位移（issue #100）。inline 的 children 沒有 map，要知道一段行內
+# HTML 落在第幾行，#92 的做法是把它前面兄弟 token 裡的換行加起來（softbreak／hardbreak
+# 認型別、其餘數 content 裡的 `\n`）。但**有些換行不在任何 token 裡**，本地實測四種
+# 寫法都少算一行：多行 code span（`code_inline` 的 content 已被 parser 把換行轉成空格）、
+# 連結目的地前換行（`[a](⏎README.md)`）、連結 title 前換行、跨行的 reference label——
+# 後三者的換行被 link token 吞掉，沒有任何 child 帶著它。`table` 的行號也因此錯過。
+# 反推不回來，就問 parser 自己：html_inline 規則被呼叫時 `state.pos` 正指著那個 `<`，
+# 而 state.src 就是這個 inline token 的 content（連結文字裡的 HTML 也在同一個 src 上
+# 解析；圖片的 alt 另起一個 src，但 alt 是純文字屬性，不是 HTML，本來就不看）。
+# 包一層把它記進 token.meta，規則本身的判定一字不改。
+HTML_POS = "devflow_src_pos"
+
+
+def _html_inline_with_pos(state, silent):
+    pos = state.pos
+    n = len(state.tokens)
+    found = _md_html_inline(state, silent)
+    if found and not silent:
+        for tok in state.tokens[n:]:     # push 前可能先 flush 一個 pending 的 text
+            if tok.type == "html_inline":
+                tok.meta[HTML_POS] = pos
+    return found
+
+
+MD.inline.ruler.at("html_inline", _html_inline_with_pos)
+# 包裝有沒有生效，啟動時就驗，不等內容裡剛好有行內 HTML：CI 跑的是 PINS 的
+# markdown-it-py，本機常是別的版本，規則**完全沒註冊**（或 HTML_POS 寫成探針值以外的
+# 東西）要在這裡以 exit 2 現形（壞掉的是檢查器自己），而不是讓行號悄悄錯掉。
+#
+# 這個探針**不是**完整的語意驗證，tests 也不是（PR #101 兩輪審查各以定點突變實測）：
+# 固定寫成 4 → 探針通過、tests 抓到；把字元位移誤當 UTF-8 byte 位移 → **兩邊都沒抓到**，
+# 行號在某些 CJK ＋跨行的組合上多算一行。已知的漏洞範圍寫在檔頭 issue #100 那一節，
+# 不要把這裡讀成「錯的位移都會被擋下」。
+_probe = [c for t in MD.parse("x\ny <b>") if t.type == "inline" for c in t.children]
+if not any(c.type == "html_inline" and c.meta.get(HTML_POS) == 4 for c in _probe):
+    die("markdown-it %s 的 html_inline 規則包裝沒有生效，raw HTML 的行號算不出來"
+        % markdown_it.__version__)
+
+
+def raw_html_chunks(tokens):
+    """AST 裡 parser 判成 HTML 的每一段：(html, base)。html 的第 k 行（1-based）是原檔的
+    第 base + k 行；token 沒帶 map 時 base 是 None。
 
     只認 parser 判成 HTML 的 token：區塊層的 html_block、行內的 html_inline（在 inline 的
-    children 裡，容器內、表格格內都算）。code fence／縮排 code block／code span 的內容是
-    fence／code_block／code_inline token，天然排除——那是示範，不是資料。
-    不解析 HTML 表的內容（表頭、欄位、狀態格都不看）：那會讓檢查器變成第二個 parser。"""
-    out = []
+    children 裡，容器內、表格格內、連結文字裡都算）。code fence／縮排 code block／code span
+    的內容是 fence／code_block／code_inline token，天然排除——那是示範，不是資料。
+    不解析 HTML 的內容語意：取出來交給 html_start_tags，其餘由呼叫端各自篩選。"""
     for t in tokens:
         if t.type == "html_block":
-            for rel in html_table_lines(t.content):
-                out.append((t.map[0] + rel) if t.map else None)
+            yield t.content, (t.map[0] if t.map else None)
         elif t.type == "inline":
             # 同一個 inline token 的 html_inline children 是**同一段 HTML 被文字切開**
             # （`<div>` 文字 `</div>`），要串起來才解析得出跨 child 的標籤。
             #
-            # 但**不能只串 HTML、丟掉中間的文字**：那些位置的換行也佔行數，丟掉後
-            # parser 的相對行號就少算（審查者 PR #92 第五輪：真實第 22 行報成 20）。
-            # 換行在 inline 裡是 `softbreak`／`hardbreak` token，**`content` 是空字串**
-            # ——不能數 `content` 裡的 `\n`，要認 token 型別。
-            kids = t.children or []
-            if not any(c.type == "html_inline" for c in kids):
+            # 但**不能只串 HTML、把中間的換行丟掉**：丟掉後 parser 的相對行號就少算
+            # （審查者 PR #92 第五輪：真實第 22 行報成 20）。每個 html_inline 之前補足
+            # 換行，補到它在原文裡的那一行——行數由 parser 記下的位移（HTML_POS）算，
+            # 不從兄弟 token 反推（反推漏掉的四種寫法見 HTML_POS 前面的註解）。
+            kids = [c for c in t.children or [] if c.type == "html_inline"]
+            if not kids:
                 continue
             parts = []
+            at = 0                        # parts 目前寫到第幾行（0-based）
             for c in kids:
-                if c.type == "html_inline":
-                    parts.append(c.content)
-                elif c.type in ("softbreak", "hardbreak"):
-                    parts.append("\n")
-                else:
-                    parts.append("\n" * c.content.count("\n"))
-            base = t.map[0] if t.map else None
-            for rel in html_table_lines("".join(parts)):
-                out.append((base + rel) if base is not None else None)
+                row = t.content.count("\n", 0, c.meta[HTML_POS])
+                parts.append("\n" * (row - at))
+                parts.append(c.content)
+                at = row + c.content.count("\n")
+            yield "".join(parts), (t.map[0] if t.map else None)
+
+
+def raw_html_tables(tokens, lines):
+    """AST 裡的 raw HTML `<table>` 所在行號（issue #90 缺口 2）。
+    不解析 HTML 表的內容（表頭、欄位、狀態格都不看）：那會讓檢查器變成第二個 parser。"""
+    out = []
+    for html, base in raw_html_chunks(tokens):
+        for rel in html_table_lines(html):
+            out.append((base + rel) if base is not None else None)
     return out
 
 
 def link_targets(tokens, env, lines):
-    """行內連結、圖片、以及未被使用的 reference 定義。跨行、成對括號、
-    角括號形式都由 parser 處理，不是我在猜。"""
+    """行內連結、圖片、未被使用的 reference 定義，以及 raw HTML 裡承載連結的屬性
+    （HTML_LINK_ATTRS，issue #100）。跨行、成對括號、角括號形式都由 parser 處理，
+    不是我在猜。raw HTML 那一路的 target 可能是 None：那段 HTML 解析不完。"""
     out = []
     for t in tokens:
         if t.type != "inline":
@@ -1246,6 +1418,11 @@ def link_targets(tokens, env, lines):
                 ln = n + 1
                 break
         out.append((href, ln))
+    # raw HTML 的連結 AST 看不到（沒有 link_open／image token，issue #100 缺口 5）。
+    # 這裡只負責**取出** URL，判定交給呼叫端那一個迴圈，不另寫一套。
+    for html, base in raw_html_chunks(tokens):
+        for url, rel in html_link_urls(html):
+            out.append((url, (base + rel) if base is not None else None))
     return out
 
 
@@ -2032,6 +2209,10 @@ for f in md_files:
     d = docs[f]
     base = os.path.dirname(f)
     for target, line in link_targets(d["tokens"], d["env"], d["lines"]):
+        # raw HTML 解析不完（html_link_urls 的 None）：裡面有沒有壞連結無從判定，fail closed。
+        if target is None:
+            broken.append("%s:%s 的 raw HTML 解析不完，其中的連結無從判定" % (f, line))
+            continue
         # fragment 與有 scheme 的 URL 不是 repo 路徑；`//host/path` 是
         # network-path URL（無 scheme 但指向外部主機），也不是。
         # 但單一 `/` 開頭的 target 在 GitHub 上是 **repo-root 相對連結**
@@ -2068,7 +2249,8 @@ for f in md_files:
 if broken:
     report("link", "有相對連結指向不存在或 repo 之外的路徑", broken)
 else:
-    ok("%d 條相對連結（含 reference 定義、圖片）都指得到" % nlink)
+    ok("%d 條相對連結（含 reference 定義、圖片、raw HTML 的 %s）都指得到"
+       % (nlink, "／".join("<%s %s>" % p for p in sorted(HTML_LINK_ATTRS))))
 
 print()
 print("── R9：對照表狀態欄取三值之一（%s）" % tag("r9"))
