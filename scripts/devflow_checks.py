@@ -392,7 +392,10 @@
 #     reference label）——那些換行不在任何 token 裡。`table` 的行號同樣受影響，一併修掉。
 #     包裝有沒有生效，啟動時自檢（不等內容裡剛好有行內 HTML）。本地只在 markdown-it-py 4.0.0
 #     實跑過；CI pin 的 3.0.0 本地沒有，依原始碼判斷規則介面相同、**未實跑**——CI 每次執行
-#     都會跑到那個自檢，介面若不同會以 exit 2 現形。
+#     都會跑到那個自檢。**自檢的範圍有限**（PR #101 第一輪審查實測）：它驗的是「規則有註冊
+#     且基本位移寫得對」，不是「所有位置語意都正確」——把 HTML_POS 固定寫成探針那個值，
+#     自檢照樣通過（要靠 tests 的非 4 位移案例才抓得到）。所以這裡只能說：**註冊完全失效、
+#     或基本位移不符，會以 exit 2 現形**；更細的語意差異由 tests 守。
 #   擴充（新增一種承載連結的屬性）：在 HTML_LINK_ATTRS 加一組 (標籤, 屬性)，並在
 #     tests/smoke_devflow_checks.py 補一個應擋案例。前提是那個屬性的值**就是一個 URL**；
 #     `srcset` 這種「一串 URL ＋描述」的微語法不能直接加進來，要先決定怎麼切——那是新政策，
@@ -1328,8 +1331,12 @@ def _html_inline_with_pos(state, silent):
 
 MD.inline.ruler.at("html_inline", _html_inline_with_pos)
 # 包裝有沒有生效，啟動時就驗，不等內容裡剛好有行內 HTML：CI 跑的是 PINS 的
-# markdown-it-py，本機常是別的版本，規則介面若不同要在這裡以 exit 2 現形（壞掉的是
-# 檢查器自己），而不是讓行號悄悄錯掉。
+# markdown-it-py，本機常是別的版本，規則**完全沒註冊**（或基本位移就不符）要在這裡以
+# exit 2 現形（壞掉的是檢查器自己），而不是讓行號悄悄錯掉。
+#
+# 這個探針**不是**完整的語意驗證（PR #101 第一輪審查實測）：把 HTML_POS 固定寫成 4，
+# 探針照樣通過，錯誤的行號要靠 tests 裡非 4 位移的案例才抓得到。兩層各守一段，
+# 不要把這裡讀成「介面有任何差異都會 exit 2」。
 _probe = [c for t in MD.parse("x\ny <b>") if t.type == "inline" for c in t.children]
 if not any(c.type == "html_inline" and c.meta.get(HTML_POS) == 4 for c in _probe):
     die("markdown-it %s 的 html_inline 規則包裝沒有生效，raw HTML 的行號算不出來"
