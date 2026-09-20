@@ -688,7 +688,12 @@ def atomic_write(path, data, display):
 
 def write_mirror(dst, plan):
     """AC-16 的前三個階段：created／updated → deleted → 空目錄移除（深者先）。
-    **同一階段內依路徑字串 sorted() 逐一寫入**——這個全序與 AC-11 報表的全域 sorted() 不同。"""
+    **同一階段內依路徑字串 sorted() 逐一寫入**——這個全序與 AC-11 報表的全域 sorted() 不同。
+
+    三個階段都先 assert_no_link_ancestor()，prune 也不例外：`os.path.isdir` 與 `os.listdir`
+    都會跟隨連結，祖先在決策之後變成 symlink 的話，`os.rmdir` 會刪掉目標外的目錄
+    （PR #138 第一輪阻擋 3）。`islink(path)` 只擋住「這一層自己是連結」，擋不住祖先。
+    """
     for rel in sorted(set(plan.created) | set(plan.updated)):
         display = DEVFLOW_DIR + "/" + rel
         assert_no_link_ancestor(dst, rel, display)
@@ -701,12 +706,14 @@ def write_mirror(dst, plan):
         except OSError as e:
             raise InstallError(3, "%s: %s" % (display, e.strerror or e))
     for rel in plan.prune:                        # 已依深者先排序；devflow/ 本身不在其中
+        display = DEVFLOW_DIR + "/" + rel
+        assert_no_link_ancestor(dst, rel, display)
         path = dst / rel
         try:
             if os.path.isdir(path) and not os.path.islink(path) and not os.listdir(str(path)):
                 os.rmdir(str(path))
         except OSError as e:
-            raise InstallError(3, "%s/%s: %s" % (DEVFLOW_DIR, rel, e.strerror or e))
+            raise InstallError(3, "%s: %s" % (display, e.strerror or e))
 
 
 def write_local(root, local_data):

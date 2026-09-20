@@ -1921,11 +1921,15 @@ def _():
         eq(r.stderr, b"", "有 devflow.yml → 不印")
 
 
-@case("kit-AC-9-advisory-order-entry-spec-first")
+@case("kit-AC-9-entry-advisory-alone-when-yml-present")
 def _():
-    # 優先序：入口規格 AC-7 的 advisory 先、本條後。兩者的條件互斥——AC-7 要 devflow.yml
-    # 讀得到且有 seats: 頂層行，本條要它不存在——所以實際 stderr 永遠至多一行 advisory。
-    # 這裡驗有 AC-7 advisory 時本條不出現，且順序規則下 stderr 仍逐字如入口規格所期望。
+    # AC-9 的優先序條款（AC-7 先、本條後）在**一致的檔案系統下不可達**：AC-7 的 advisory
+    # 要 devflow.yml 讀得到且有 seats: 頂層行，本條的要 devflow.yml 不存在——兩者互斥，
+    # 實際 stderr 永遠至多一行 advisory。要讓兩行同時出現，只能在安裝器的兩次存在性判斷
+    # 之間讓檔案消失，那是在測一個人為競態，不是規格的行為，本 harness 不做
+    #（PR #138 第一輪阻擋 1 的處置）。實作的順序（choose_targets() 的 AC-7 advisory 先
+    # append、AC-9 的後 append）以 devflow/install.py run() 的程式碼為準。
+    # 本案驗的是：有 AC-7 advisory 時本條不出現，且 stderr 逐字如入口規格所期望。
     with project({"devflow.yml": NESTED_CLAUDE}) as p:
         r = p.run()
         eq(r.returncode, 0, "exit 0")
@@ -2089,6 +2093,19 @@ def _():
         expect(r.stderr.startswith(b"devflow/VERSION: "), "stderr 指 devflow/VERSION", r.stderr)
         eq(r.stderr.count(b"\n"), 1, "stderr 恰一行")
         eq(snapshot(p.root), before, "不寫任何檔")
+
+
+@case("kit-AC-12-source-version-checked-before-target")
+def _():
+    # AC-12 的「不讀目標、不做任何決策」：來源 VERSION 無效 ＋ **目標路徑根本不存在** →
+    # 仍須報 VERSION 那一行。先讀目標的實作會報入口規格 AC-11 的「目標路徑不存在」
+    with kit_copy(version=b"not a version\n") as inst, project() as p:
+        missing = str(p.root / "nope")
+        r = p.run(target=missing, install=inst)
+        err_run(r, 2)
+        eq(r.stderr, b"devflow/VERSION: malformed; expected exactly one line a.b.c.d\n",
+           "報 VERSION 的錯，證明版本檢查排在讀目標之前")
+        expect(missing.encode() not in r.stderr, "沒有報目標路徑", r.stderr)
 
 
 @case("kit-AC-12-source-version-malformed")
@@ -2273,6 +2290,51 @@ def _():
         expect(FAIL_SHIM not in p.read("devflow/install.py"), "失敗路徑之後的動作未動")
         eq(p.read("AGENTS.md"), entry_before, "入口檔在最後一階段，未動")
         eq(outside_snapshot(p.root), outside, "AC-18：exit 3 的情境下其他路徑仍不動")
+
+
+def prune_swap_shim(outside):
+    """同型的 shim，但注入的是**動作**不是失敗：deleted 階段移除 devflow/zz/deep/x.md 之後、
+    prune 之前，把 devflow/zz 換成指向 outside 的 symlink（決策之後才出現的 TOCTOU）。
+
+    與 FAIL_SHIM 一樣只寫進 /tmp 副本的 install.py，repo 的 install.py 不含任何測試鉤子。
+    """
+    return ("import os as _os\n"
+            "_real_remove = _os.remove\n"
+            "def _remove(path, **kw):\n"
+            "    _real_remove(path, **kw)\n"
+            "    if str(path).endswith('/devflow/zz/deep/x.md'):\n"
+            "        zz = _os.path.dirname(_os.path.dirname(str(path)))\n"
+            "        _os.rmdir(_os.path.join(zz, 'deep'))\n"
+            "        _os.rmdir(zz)\n"
+            "        _os.symlink(%r, zz)\n"
+            "_os.remove = _remove\n" % str(outside)).encode()
+
+
+@case("kit-AC-16-prune-refuses-link-ancestor")
+def _():
+    # 第二道 symlink 祖先檢查在 prune 也要有：os.path.isdir 與 os.listdir 都會跟隨連結，
+    # 祖先在決策之後變成 symlink 的話，os.rmdir 會刪掉目標外的目錄（PR #138 阻擋 3）。
+    # prune 深者先，devflow/zz/deep 排在 devflow/zz 之前——正是會沿著新連結出去的那一步。
+    with project() as outside, project() as p:
+        (outside.root / "deep").mkdir()
+        outside.write("keep.md", b"keep\n")
+        outside_before = snapshot(outside.root)
+
+        def swap(src):
+            path = src / "install.py"
+            path.write_bytes(prune_swap_shim(outside.root) + path.read_bytes())
+
+        with kit_copy(mutate=swap) as inst:
+            ok_run(p.run(install=inst))           # 第一次安裝：沒有 deleted，shim 不觸發
+            (p.root / "devflow" / "zz" / "deep").mkdir(parents=True)
+            p.write("devflow/zz/deep/x.md", b"x\n")
+            r = p.run(install=inst)
+            err_run(r, 3)
+            eq(r.stderr,
+               b"devflow/zz/deep: symlink appeared under devflow/ during the write phase\n",
+               "stderr 恰一行，走與其他寫入失敗相同的 exit 3 路徑")
+        expect(p.path("devflow/zz").is_symlink(), "前提：shim 真的把 zz 換成 symlink 了")
+        eq(snapshot(outside.root), outside_before, "連結指向的外部目錄一個 byte 都沒動")
 
 
 # kit-AC-17：對執行中的 kit 本身的四項檢查
