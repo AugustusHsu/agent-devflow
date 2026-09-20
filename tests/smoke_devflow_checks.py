@@ -29,6 +29,7 @@
 只能由目標項造成」（README「Phase 1 第三出口的判定方式」條件三）。
 """
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -171,10 +172,16 @@ def mut_i5(root):
                                  "implementer_filler: codex"))
 
 
+# 不硬編當下版號（issue #125）：寫死 `version: <a.b.c.d>` 的話，規則本體一 bump
+# 這個突變就打不到，`version` 的應擋案例會變成沒突變到。抓 frontmatter 那一行的
+# 四碼、砍掉最後一碼——版號怎麼變都命中，真的沒命中時 `edit()` 會中止整份測試。
+VERSION_4 = re.compile(r"^(version: \d+\.\d+\.\d+)\.\d+$", re.MULTILINE)
+
+
 def mut_version(root):
     """規則本體的 frontmatter version 從四碼變三碼。"""
     edit(root, "devflow/WORKFLOW.md",
-         lambda t: replace_first(t, "version: 1.3.2.0", "version: 1.3.2"))
+         lambda t: VERSION_4.sub(r"\1", t, count=1))
 
 
 def mut_fence(root):
