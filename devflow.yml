@@ -3,7 +3,7 @@
 # 都是衍生值，由 devflow/ 下的對照表產生，不在這裡寫（唯一例外：implementer_filler 投影，見下）。
 # 規則本體：devflow/WORKFLOW.md。
 
-forge: github          # github | gitlab
+forge: github          # github | gitlab | gitea（gitea 全表 ⬜，無實例前不可選）
 
 # 職位綁定。職位名以 devflow/seats/ 的四個檔為準，不新增。每個職位一個 filler（填充者）：
 # 工具名（對照表在 devflow/coders/、orchestrators/）或 human（由人填）。
