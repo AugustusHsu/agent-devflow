@@ -570,6 +570,23 @@ def _():
         eq(p.read("CLAUDE.md"), T + b"\n" + orig, "AC-2 insert: template + \\n + original")
 
 
+@case("AC-5c-bom-begin-then-begin-then-end-installs")
+def _():
+    # PR #105 第二輪審查的反例二。檔頭與規格一度寫成「BOM ＋首行 begin ＋檔內有 end
+    # 那一類照樣裝不起來」——錯的：第二行的可見 begin 先於 end，first_group 取
+    # 第 2–3 行為第一組，走 AC-3／4、exit 0、照常寫檔。
+    # 散文把這格寫錯了三次，所以它現在是一個案例而不是一句話。
+    orig = BOM + BEGIN_LINE + BEGIN_LINE + b"body\n" + END_LINE
+    with project({"CLAUDE.md": orig}) as p:
+        r = p.run()
+        ok_run(r)
+        after = p.read("CLAUDE.md")
+        expect(after != orig, "AC-3/4: file was rewritten, not rejected",
+               short(after), "anything != original")
+        eq(after.count(BEGIN_LINE.strip()), 2,
+           "first group replaced; the BOM-hidden begin line is untouched")
+
+
 @case("AC-5c-bom-begin-then-second-begin-without-end-stays-ac5")
 def _():
     # 界線二：BOM ＋首行 begin，其後另有一個真的 begin 而全檔無 end → AC-5，訊息與行號
