@@ -483,6 +483,123 @@ def _():
         expect(not p.rewritten("CLAUDE.md"), "CLAUDE.md must not be rewritten")
 
 
+# AC-5c：命中 AC-5b、且「檔首 UTF-8 BOM ＋ 去掉 BOM 後的首行是 begin」→ exit 1、不寫檔
+# （與 AC-5b 同），但 stderr 改指 BOM、行號固定 1。落單 end 是後果，BOM 才是原因（#104）。
+# 條件的兩個「且」各有界線案：沒有 BOM、或首行不是 begin，都走回 AC-5b 的原訊息。
+
+BOM = b"\xef\xbb\xbf"
+BOM_LINE = b":1: UTF-8 BOM before devflow:begin; remove the BOM (see issue #104)\n"
+
+
+def bom_run(r, p, name, data):
+    """AC-5c 的共同斷言：exit 1、訊息指 BOM 且行號為 1、bytes 不變、未重寫。"""
+    err_run(r, 1)
+    eq(r.stderr, p.display(name) + BOM_LINE, "stderr")
+    eq(p.read(name), data, "bytes")
+    expect(not p.rewritten(name), "file must not be rewritten")
+
+
+@case("AC-5c-bom-begin-then-end-reports-bom")
+def _():
+    # 主案：BOM ＋首行 begin ＋其後有 end。安裝器不剝 BOM，首行不是標記行，模板自己的
+    # end 成了落單 end——訊息指第 1 行的 BOM，不是那個 end 的行號
+    data = BOM + T
+    with project({"CLAUDE.md": data}) as dry, project({"CLAUDE.md": data}) as real:
+        rd = dry.run("--dry-run")
+        rr = real.run()
+        bom_run(rd, dry, "CLAUDE.md", data)
+        bom_run(rr, real, "CLAUDE.md", data)
+        expect(not dry.exists("AGENTS.md"), "AGENTS.md must not be created")
+
+
+@case("AC-5c-bom-begin-with-surrounding-spaces")
+def _():
+    # 「去掉 BOM 後的首行」照 is_marker 的 strip 語意判：前後空白不影響
+    data = BOM + b"  " + BEGIN + b"  \n" + b"body\n" + END_LINE + SUFFIX
+    with project({"AGENTS.md": data}) as p:
+        bom_run(p.run(), p, "AGENTS.md", data)
+
+
+@case("AC-5c-no-bom-stray-end-keeps-old-message")
+def _():
+    # 迴歸保護（條件的「有 BOM」那半）：沒有 BOM 的真正落單 end 仍是 AC-5b 的訊息與行號
+    data = b"intro\n" + END_LINE + T
+    with project({"CLAUDE.md": data}) as p:
+        stray_run(p.run(), p, "CLAUDE.md", 2, data)
+
+
+@case("AC-5c-bom-first-line-not-begin-keeps-old-message")
+def _():
+    # 迴歸保護（條件的「首行是 begin」那半）：BOM 在、首行卻是普通文字 → 不走新分支。
+    # 這個檔的落單 end 是真的落單，報它的行號
+    data = BOM + b"intro\n" + END_LINE + T
+    with project({"CLAUDE.md": data}) as p:
+        stray_run(p.run(), p, "CLAUDE.md", 2, data)
+
+
+@case("AC-5c-bom-plain-text-still-inserts")
+def _():
+    # 迴歸保護：BOM ＋首行是普通文字、全檔無標記行 → 照原邏輯走 AC-2 檔首插入、exit 0
+    orig = BOM + PREFIX + SUFFIX
+    with project({"AGENTS.md": orig}) as p:
+        r = p.run()
+        ok_run(r)
+        eq(p.read("AGENTS.md"), T + b"\n" + orig, "AC-2 insert: BOM is project content")
+
+
+@case("AC-5c-no-bom-same-content-installs")
+def _():
+    # 對照組：同樣的 bytes 少了 BOM 就是一組完整區塊 → AC-3 unchanged、exit 0。
+    # 兩案並排指出唯一的差別就是那 3 個 byte
+    with project({"CLAUDE.md": T}) as p:
+        r = p.run()
+        ok_run(r)
+        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "stdout")
+        expect(not p.rewritten("CLAUDE.md"), "file must not be rewritten")
+
+
+@case("AC-5c-bom-begin-without-end-still-inserts")
+def _():
+    # 界線一（issue #104 AC-2 要求判定的組合）：BOM ＋首行 begin ＋全檔無 end。
+    # 首行不是標記行、也沒有 end → **無任何標記行** ＝ AC-2 檔首插入，exit 0、照常寫檔。
+    # 不是 AC-5、也不是 AC-5b；新分支掛在 AC-5b 的路徑上，碰不到這裡
+    orig = BOM + BEGIN_LINE + b"body\n"
+    with project({"CLAUDE.md": orig}) as p:
+        r = p.run()
+        ok_run(r)
+        eq(p.read("CLAUDE.md"), T + b"\n" + orig, "AC-2 insert: template + \\n + original")
+
+
+@case("AC-5c-bom-begin-then-begin-then-end-installs")
+def _():
+    # PR #105 第二輪審查的反例二。檔頭與規格一度寫成「BOM ＋首行 begin ＋檔內有 end
+    # 那一類照樣裝不起來」——錯的：第二行的可見 begin 先於 end，first_group 取
+    # 第 2–4 行為第一組（第 2 行 begin、第 3 行 body、第 4 行 end），走 AC-3／4、exit 0、照常寫檔。
+    # 散文把這格寫錯了三次，所以它現在是一個案例而不是一句話。
+    orig = BOM + BEGIN_LINE + BEGIN_LINE + b"body\n" + END_LINE
+    with project({"CLAUDE.md": orig}) as p:
+        r = p.run()
+        ok_run(r)
+        after = p.read("CLAUDE.md")
+        expect(after != orig, "AC-3/4: file was rewritten, not rejected",
+               short(after), "anything != original")
+        eq(after.count(BEGIN_LINE.strip()), 2,
+           "first group replaced; the BOM-hidden begin line is untouched")
+
+
+@case("AC-5c-bom-begin-then-second-begin-without-end-stays-ac5")
+def _():
+    # 界線二：BOM ＋首行 begin，其後另有一個真的 begin 而全檔無 end → AC-5，訊息與行號
+    # 都不變。去掉 BOM 仍是 AC-5（只差行號），BOM 不是停下來的原因，改訊息反而誤導
+    data = BOM + BEGIN_LINE + b"body\n" + BEGIN_LINE + b"tail\n"
+    with project({"AGENTS.md": data}) as p:
+        r = p.run()
+        err_run(r, 1)
+        eq(r.stderr, p.display("AGENTS.md") + b":3: devflow:begin without end\n", "stderr")
+        eq(p.read("AGENTS.md"), data, "bytes")
+        expect(not p.rewritten("AGENTS.md"), "file must not be rewritten")
+
+
 # AC-6：第一組之後的任何標記行 → 忽略（不計數、不報錯、不改動）
 
 @case("AC-6-later-markers-ignored-unchanged")
