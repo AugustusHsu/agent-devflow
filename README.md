@@ -42,9 +42,16 @@ devflow/
 CLAUDE.md AGENTS.md       只含 devflow:begin/end 區塊（由 templates/entry-block.md 產生）
 docs/spec/                本 repo 自己的規格（dogfood）
 docs/guide/               人類專用
+.hermes/skills/devflow-orchestrator → devflow/orchestrators/hermes（symlink，Hermes project-local skill）
 .github/workflows/        devflow-checks.yml：CI 入口（check 列入 branch protection），呼叫 scripts/devflow_checks.py
 scripts/                  devflow_checks.py：CI 檢查器本體。每項檢查各有關卡開關（`GATES`）：關卡失敗擋合併，其餘建議只寫進 log；哪幾項是關卡見該檔檔頭
 ```
+
+用 Hermes 當 orchestrator 的採用者，clone 之後要在 repo 內跑一次 `hermes skills trust`：`.hermes/skills/`
+是 Hermes 的 project-local skill 發現路徑，未 trust 的專案不載入其中的 skill。trust 是 host 端設定（寫進
+`~/.hermes/config.yaml`，不隨 repo 走），每台機器、每個 clone 各做一次；流程指令本體仍是
+`devflow/orchestrators/hermes/SKILL.md`，symlink 只是把它接到發現路徑上。trust 前 Hermes 依其文件會顯示
+「N project skill(s) found … not loaded」banner——那是未 trust 的預期行為，不是裝壞了。
 
 ## 執行順序
 
