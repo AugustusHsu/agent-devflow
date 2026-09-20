@@ -172,7 +172,7 @@ def mut_i5(root):
                                  "implementer_filler: codex"))
 
 
-# 不硬編當下版號（issue #125）：寫死 `version: 1.3.2.0` 的話，規則本體一 bump
+# 不硬編當下版號（issue #125）：寫死 `version: <a.b.c.d>` 的話，規則本體一 bump
 # 這個突變就打不到，`version` 的應擋案例會變成沒突變到。抓 frontmatter 那一行的
 # 四碼、砍掉最後一碼——版號怎麼變都命中，真的沒命中時 `edit()` 會中止整份測試。
 VERSION_4 = re.compile(r"^(version: \d+\.\d+\.\d+)\.\d+$", re.MULTILINE)
