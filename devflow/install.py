@@ -805,9 +805,12 @@ def run(target, dry_run):
         except InstallError as e:
             errors.append(e)
     if errors:
-        for e in errors:
-            print(e.message, file=sys.stderr)
-        return max(e.code for e in errors)
+        # exit 非 0 時 stderr 恰一行（kit-install「驗收標準」對入口規格的收窄）。exit code 仍取
+        # 最重的那一個——入口規格的原子性是「集合內任一檔出錯就都不寫」，這點沒變；只是訊息
+        # 報決定它的第一個錯，不再把集合內每個錯都印出來
+        code = max(e.code for e in errors)
+        print(next(e.message for e in errors if e.code == code), file=sys.stderr)
+        return code
     check_writable(dst, plan, local_data, root)                           # AC-15
     # ── 報表：先寫進記憶體。exit 3 也要抑制 stdout，所以寫入階段全部成功才落到終端 ──
     buf = io.BytesIO()

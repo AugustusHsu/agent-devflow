@@ -1986,6 +1986,22 @@ def _():
                "入口檔在最後一階段，沒走到")
 
 
+@case("kit-stderr-exactly-one-line-both-entry-files-fail")
+def _():
+    # kit-install「驗收標準」開頭：exit 非 0 時 stderr **恰一行**。入口規格的原子性會把集合內
+    # 每個檔的錯都收集起來，兩個入口檔同時壞掉時原本會印兩行——收窄為只報決定 exit code 的
+    # 那一個；exit code 仍取最重的（這裡兩個都是 1）
+    bad = PREFIX + BEGIN_LINE + b"open\n"
+    with project({"CLAUDE.md": bad, "AGENTS.md": bad}) as p:
+        r = p.run()
+        err_run(r, 1)
+        eq(r.stderr, p.display("CLAUDE.md") + b":5: devflow:begin without end\n",
+           "stderr 恰一行，報集合內第一個錯")
+        for name in ("CLAUDE.md", "AGENTS.md"):
+            eq(p.read(name), bad, name + " 不寫")
+        expect(not os.path.lexists(str(p.path("devflow"))), "鏡像也不寫")
+
+
 # kit-AC-10：--dry-run 走完整決策、不寫；決策階段的結果與實跑逐字相同
 
 @case("kit-AC-10-dry-run-no-write-matches-real")
