@@ -1,25 +1,46 @@
 #!/usr/bin/env python3
-"""devflow/install.py — 把入口區塊安全插入目標專案的 CLAUDE.md／AGENTS.md。
+"""devflow/install.py — 把 agent-devflow 安裝到目標專案：鏡像 devflow/、建 devflow.local/、插入口區塊。
 
 用法：
-    python3 devflow/install.py <目標 repo 路徑> [--dry-run]
+    python3 <kit>/devflow/install.py <目標 repo 路徑> [--dry-run]
     python3 devflow/install.py --help
 
-    exit 0：成功（含 unchanged）；exit 1：內容碰撞（有 begin 無 end，AC-5；begin 之前有
-    落單 end、或只有 end 沒有 begin，AC-5b）；
-    exit 2：無法執行（目標路徑不對、模板不合規、入口檔不是一般檔案或 dangling symlink、
-    不可寫、讀取失敗）。exit 1／2 時不寫任何檔、stdout 全部抑制——可寫性在決策階段用
-    os.access 前置檢查（dry-run 與實跑皆做，AC-10）；檢查後仍發生的 OSError（檢查與寫入
-    之間的競態）不在此承諾內。
+    來源＝執行中的本檔所在的 devflow/ 目錄（以 __file__ 定位，不是 cwd），其上層為 kit 根；
+    不依賴 git、不驗 git 狀態、不驗來源是否 tag checkout。目標＝命令列給的路徑。兩者可為
+    同一 repo（kit 自檢，或消費者跑自己那份副本），此時鏡像全部 unchanged。
+    升級與回復不是新功能：換一個 kit checkout（另一個 tag）重跑同一支安裝。
 
-規格：docs/spec/install/spec.md（AC-1～AC-12；名詞定義是法，本檔照字面實作）。
-測試：python3 tests/install/harness.py（每條 AC 每個分支一案，在 /tmp 建假專案；
-可寫性案例以非 root 執行，root 下標 SKIP）。
+    執行分兩階段。**決策階段**讀來源與目標、算出全部動作、檢查可寫性，**不寫任何東西，
+    連 mkdir 都不做**；`--dry-run` 走完整個決策階段才停。**寫入階段**依 kit-install AC-16
+    的全序落盤（階段順序 × 階段內 sorted()）。
+    exit 0 成功；1 入口區塊碰撞（AC-5／5b／5c）；2 決策階段的環境或用法錯誤；
+    3 寫入階段的 I/O 失敗——唯一「已寫部分檔」的結果，不回滾，重跑即為恢復。
+    **exit 非 0 時 stdout 全部抑制**（含 exit 3：stdout 先寫進記憶體，寫入階段全部成功才落到
+    終端），stderr 恰一行 `<路徑或項目>: <原因>`；advisory 只在 exit 0 時印，順序為
+    入口規格 AC-7 先、kit-install AC-9 後。
 
-只做入口區塊：不複製 devflow/、不建 devflow.yml、不碰 .gitignore、不 commit。
-Python ≥ 3.8、stdlib only；讀寫一律 bytes，區塊外逐 byte 不變（D2）。
-「存在」以 os.path.lexists 判：symlink 一律視為存在；dangling symlink、目錄、指向目錄的
-symlink 都是 exit 2，安裝器不替使用者決定該建到哪裡。
+擁有權（kit-install 規格「擁有權」表，每個行為由此推導）：
+    devflow/**            kit 的——鏡像：與來源不同即覆寫、來源沒有即刪除（排除路徑除外）
+    devflow.yml           消費者的——不建、不改；只讀入口規格 AC-7 的投影與 AC-9 的存在性
+    devflow.local/**      消費者的——lexists 假才建，且只放 README.md；存在則整棵不碰
+    CLAUDE.md／AGENTS.md  消費者的（區塊除外）——依入口規格 AC-1～AC-12
+    其他一切              不寫
+
+規格：docs/spec/kit-install/spec.md（AC-1～AC-20，含 AC-14b）；入口區塊部分由
+docs/spec/install/spec.md（AC-1～AC-12）定義，本檔兩份都照字面實作，名詞定義是法。
+測試：python3 tests/install/harness.py            # 全部案例
+      python3 tests/install/harness.py kit        # 只跑 kit-install 案例
+      python3 tests/install/harness.py AC-7       # 只跑名稱含 AC-7 的案例
+（每條 AC 每個分支一案，在 /tmp 建假專案；可寫性案例以非 root 執行，root 下標 SKIP。）
+
+不做：不建、不改 devflow.yml（附 devflow/templates/devflow.yml 供複製，缺檔時只提示）；
+無 --uninstall；不裝 CI 檢查器與 docs（不在 devflow/ 下）；不建 orchestrator 的 skill
+symlink；不合併內容；不碰 .gitignore、不 commit。
+Python ≥ 3.8、stdlib only；讀寫一律 bytes，入口區塊外逐 byte 不變（D2）。
+「存在」以 os.path.lexists 判：symlink 一律視為存在；入口檔是 dangling symlink、目錄、指向
+目錄的 symlink 都是 exit 2，安裝器不替使用者決定該建到哪裡。
+
+以下到檔尾為**入口區塊**部分的實作細節（入口規格）；鏡像部分的細節寫在「kit 鏡像」那一節。
 
 與 `d2` 判準 B 的關係（scripts/devflow_checks.py 的 entry_block()）：
 - 標記行＝檔案 bytes 以 \\n 切行、每行 UTF-8 decode（errors="replace"）後
@@ -57,17 +78,21 @@ symlink 都是 exit 2，安裝器不替使用者決定該建到哪裡。
 """
 import argparse
 import difflib
+import io
 import os
 import re
+import stat
 import sys
+import tempfile
 from pathlib import Path
 
+SRC = Path(__file__).resolve().parent   # 來源的 devflow/：以 __file__ 定位，不是 cwd
 BEGIN = "<!-- devflow:begin -->"
 END = "<!-- devflow:end -->"
 BOM = b"\xef\xbb\xbf"   # 檔首 UTF-8 BOM。不剝除（見 is_marker），只在 AC-5c 用來診斷錯誤原因
 ENTRY_FILES = ("CLAUDE.md", "AGENTS.md")
 D2_MAX_LINES = 30
-TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "entry-block.md"
+TEMPLATE_PATH = SRC / "templates" / "entry-block.md"
 # AC-7：不做 YAML 解析。只讀頂層投影鍵 implementer_filler（seats.implementer.filler 的衍生投影，
 # 一致性由 CI 的 i5 保證，AC-13）。以下正規式對應 spec 的名詞；行已去掉 CRLF 的 \r。
 # 頂層鍵行：裸鍵 ＋ `:` ＋（行尾、或一個以上空格／tab 再接任意內容）
@@ -94,9 +119,26 @@ FORBIDDEN_BREAKS = ("\x85", "\u2028", "\u2029")
 ADVISORY = ("devflow.yml: seats: present but implementer_filler unreadable (missing, malformed, "
             "duplicated, or file is not a plain top-level mapping); defaulting to AGENTS.md")
 
+# ── kit 鏡像的常數（kit-install 規格）────────────────────────────────
+DEVFLOW_DIR = "devflow"             # 目標內的鏡像目錄（也是來源目錄名）
+LOCAL_DIR = "devflow.local"         # 消費者自有目錄（AC-7）
+LOCAL_README = "README.md"
+CONFIG_FILE = "devflow.yml"
+VERSION_PATH = SRC / "VERSION"
+LOCAL_TEMPLATE_PATH = SRC / "templates" / "local-README.md"
+CONFIG_TEMPLATE = "devflow/templates/devflow.yml"
+YML_ADVISORY = "devflow.yml: absent; copy %s and edit (advisory)" % CONFIG_TEMPLATE
+# 版本（kit-install「名詞定義」）：內容恰為一行 a.b.c.d 加恰一個 \n，四碼十進位非負整數、
+# 除單獨的 0 外無前導零，無 BOM。以 bytes 比對，整檔 fullmatch——多一行、多一個 \n 都不合。
+VERSION_RE = re.compile(rb"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\n")
+# 排除路徑（封閉列舉，對來源與目標雙邊生效）：名為 __pycache__ 的目錄連同其下全部、副檔名 .pyc 的檔。
+# .DS_Store／.gitkeep 等刻意不在列——devflow/** 是 kit 的，消費者不該在其下放東西。
+EXCLUDED_DIR = "__pycache__"
+EXCLUDED_SUFFIX = ".pyc"
+
 
 class InstallError(Exception):
-    """帶 exit code 的錯誤；訊息印到 stderr。1＝內容碰撞，2＝無法執行。"""
+    """帶 exit code 的錯誤；訊息印到 stderr。1＝內容碰撞，2＝決策階段，3＝寫入階段。"""
 
     def __init__(self, code, message):
         super().__init__(message)
@@ -294,15 +336,21 @@ def read_implementer(root):
 
 
 def choose_targets(root):
+    """回傳 (目標檔集合, advisory 訊息序列)。
+
+    advisory **不在這裡印**：kit-install AC-9 收窄為「只在 exit 0 時印」，而決策還沒走完，
+    這裡不知道最終 exit code。緩衝給 run()，由它在決策全部成功後依序印（AC-7 先、AC-9 後）。
+    """
     # 「存在」＝ os.path.lexists：symlink（含 dangling）一律視為存在，由 decide() 再判形狀
     present = [name for name in ENTRY_FILES if os.path.lexists(root / name)]
     if present:
-        return present
+        return present, []
     text = load_devflow_yml(root)
     value = None if text is None else implementer_filler(text)
+    advisories = []
     if value is None and text is not None and has_seats_line(text):
-        print(ADVISORY, file=sys.stderr)          # AC-7 advisory：有 seats: 卻讀不到合規投影
-    return ["CLAUDE.md"] if value == "claude-code" else ["AGENTS.md"]
+        advisories.append(ADVISORY)               # AC-7 advisory：有 seats: 卻讀不到合規投影
+    return (["CLAUDE.md"] if value == "claude-code" else ["AGENTS.md"]), advisories
 
 
 # ── 決策（AC-1～AC-6、可寫性）───────────────────────────────────────
@@ -355,7 +403,338 @@ def decide(root, name, template):
     return decision
 
 
+# ── kit 鏡像：決策（kit-install AC-1～AC-15、AC-19）──────────────────
+
+
+def posix_rel(root, path):
+    """path 相對於 root 的 POSIX 路徑（鏡像集合與動作行的識別字）。"""
+    return os.path.relpath(str(path), str(root)).replace(os.sep, "/")
+
+
+def parse_version(data):
+    """合「版本」定義的 bytes → 四碼 tuple；否則 None。比較依四碼數值元組。"""
+    m = VERSION_RE.fullmatch(data or b"")
+    return tuple(int(g) for g in m.groups()) if m else None
+
+
+def version_text(quad):
+    return ".".join(str(n) for n in quad)
+
+
+def read_source_version():
+    """AC-12：來源 devflow/VERSION。讀不到或不合定義 → exit 2，且不讀目標、不做任何決策。"""
+    try:
+        data = VERSION_PATH.read_bytes()
+    except OSError as e:
+        raise InstallError(2, "devflow/VERSION: %s" % (e.strerror or e))
+    quad = parse_version(data)
+    if quad is None:
+        raise InstallError(2, "devflow/VERSION: malformed; expected exactly one line a.b.c.d")
+    return quad
+
+
+def walk_tree(root, prefix):
+    """root 下、排除路徑以外的 (dirs, files, links, others)，各自為 sorted 的 POSIX 相對路徑。
+
+    **永不跟隨 symlink**：os.walk(followlinks=False) ＋ os.lstat。symlink 指向目錄者落在
+    links 且不進入其指向；dangling 與指向檔者同。排除路徑在這裡就剪掉，來源與目標共用
+    同一份判斷。others＝既非一般檔也非 symlink 者（fifo／socket／裝置），由呼叫端處置：
+    來源的不進鏡像集合，目標的不算 deleted（「動作」只定義一般檔與 symlink）。
+    任何一層讀不到 → exit 2（決策階段的環境錯誤），prefix 用來組出 `devflow/<rel>` 的顯示名。
+    """
+    dirs, files, links, others = [], [], [], []
+
+    def where(path):
+        rel = posix_rel(root, path) if path else "."
+        return prefix.rstrip("/") if rel in (".", "") else prefix + rel
+
+    def failed(e):
+        raise InstallError(2, "%s: %s" % (where(getattr(e, "filename", None)), e.strerror or e))
+
+    for dirpath, dirnames, filenames in os.walk(str(root), onerror=failed, followlinks=False):
+        keep = []
+        for name in dirnames:
+            if name == EXCLUDED_DIR:
+                continue                          # 排除路徑：連同其下全部都不看
+            full = os.path.join(dirpath, name)
+            rel = posix_rel(root, full)
+            if os.path.islink(full):
+                links.append(rel)                 # symlink 指向目錄：記錄、不進入
+            else:
+                dirs.append(rel)
+                keep.append(name)
+        dirnames[:] = keep
+        for name in filenames:
+            if name.endswith(EXCLUDED_SUFFIX):
+                continue
+            full = os.path.join(dirpath, name)
+            rel = posix_rel(root, full)
+            try:
+                mode = os.lstat(full).st_mode
+            except OSError as e:
+                raise InstallError(2, "%s%s: %s" % (prefix, rel, e.strerror or e))
+            (links if stat.S_ISLNK(mode) else files if stat.S_ISREG(mode) else others).append(rel)
+    return sorted(dirs), sorted(files), sorted(links), sorted(others)
+
+
+def source_files():
+    """鏡像集合：來源 devflow/ 下、排除路徑以外的一般檔 rel -> bytes（AC-13 在此拒絕 symlink）。"""
+    _, files, links, _ = walk_tree(SRC, DEVFLOW_DIR + "/")
+    if links:
+        # 不論指向檔、目錄或 dangling；報字典序最早的那個（stderr 恰一行）
+        raise InstallError(2, "devflow/%s: symlink in source not supported" % links[0])
+    data = {}
+    for rel in files:
+        try:
+            data[rel] = (SRC / rel).read_bytes()
+        except OSError as e:
+            raise InstallError(2, "devflow/%s: %s" % (rel, e.strerror or e))
+    return data
+
+
+def check_target_devflow(dst):
+    """AC-14：目標 devflow 以 lexists 存在但不是目錄 → exit 2。指向目錄的 symlink 也算。"""
+    if not os.path.lexists(dst):
+        return
+    if os.path.islink(dst):
+        raise InstallError(2, "devflow: symlink, not a directory")
+    if not os.path.isdir(dst):
+        raise InstallError(2, "devflow: not a directory")
+
+
+def read_target_version(dst):
+    """目標**安裝前**的 devflow/VERSION（AC-11 的模式）。
+
+    None＝無 devflow/ 或無該檔（fresh）；False＝存在但不合「版本」定義、或不是一般檔、
+    或讀不到（replace，舊版印 invalid）；否則四碼 tuple。純報表用，不改變行為。
+    """
+    path = dst / "VERSION"
+    if not os.path.lexists(path):
+        return None
+    try:
+        if not stat.S_ISREG(os.lstat(str(path)).st_mode):
+            return False
+        return parse_version(path.read_bytes()) or False
+    except OSError:
+        return False
+
+
+def mode_of(old, new):
+    """(舊版顯示字串, 模式)。模式取 fresh|upgrade|downgrade|same|replace 之一。"""
+    if old is None:
+        return "none", "fresh"
+    if old is False:
+        return "invalid", "replace"
+    if old < new:
+        return version_text(old), "upgrade"
+    if old > new:
+        return version_text(old), "downgrade"
+    return version_text(old), "same"
+
+
+class Mirror:
+    """鏡像的決策結果。四個 list 都是 POSIX 相對路徑、各自 sorted。"""
+
+    def __init__(self):
+        self.created = []
+        self.updated = []
+        self.deleted = []
+        self.unchanged = []
+        self.data = {}        # created／updated 要寫入的 bytes
+        self.prune = []       # 安裝前既有的子目錄，深者先；寫入階段清掉變空的
+
+    def actions(self):
+        """(路徑, 動作) 序列；unchanged 不印任何行（AC-4）。"""
+        return ([(DEVFLOW_DIR + "/" + r, "created") for r in self.created]
+                + [(DEVFLOW_DIR + "/" + r, "updated") for r in self.updated]
+                + [(DEVFLOW_DIR + "/" + r, "deleted") for r in self.deleted])
+
+    def touched(self):
+        return sorted(set(self.created) | set(self.updated) | set(self.deleted))
+
+
+def plan_mirror(src_files, dst):
+    """決策階段：算出 created／updated／deleted／unchanged。不寫任何東西，連 mkdir 都不做。"""
+    plan = Mirror()
+    if not os.path.lexists(dst):
+        plan.created = sorted(src_files)
+        plan.data = dict(src_files)
+        return plan
+    dirs, files, links, others = walk_tree(dst, DEVFLOW_DIR + "/")
+    # AC-14b：目標內某 symlink 的相對路徑若是鏡像集合任一路徑的**祖先**（來源在此為目錄）→ 拒絕。
+    # 祖先關係以 POSIX 路徑段判、不 resolve（devflow/su 不是 devflow/sub/a 的祖先）；
+    # 否則寫入會沿連結越出目標。非祖先的 symlink 依「動作」定義為 updated 或 deleted。
+    ancestors = set()
+    for rel in src_files:
+        parts = rel.split("/")
+        for i in range(1, len(parts)):
+            ancestors.add("/".join(parts[:i]))
+    for rel in links:
+        if rel in ancestors:
+            raise InstallError(2, "devflow/%s: symlink where source has directory" % rel)
+    # 規格未定義「來源是檔、目標同路徑是目錄或 fifo」：那不是「無」、也沒有可比的 bytes。
+    # 依 AC-14／AC-14b 的同一精神當決策階段的環境錯誤擋下，不替使用者決定要不要刪掉它。
+    clash = sorted(set(dirs) & set(src_files))
+    if clash:
+        raise InstallError(2, "devflow/%s: directory where source has a file" % clash[0])
+    clash = sorted(set(others) & set(src_files))
+    if clash:
+        raise InstallError(2, "devflow/%s: not a regular file" % clash[0])
+    present_files, present_links = set(files), set(links)
+    for rel in sorted(src_files):
+        if rel in present_links:
+            plan.updated.append(rel)              # symlink 由一般檔取代（AC-2）
+        elif rel in present_files:
+            try:
+                old = (dst / rel).read_bytes()
+            except OSError as e:
+                raise InstallError(2, "devflow/%s: %s" % (rel, e.strerror or e))
+            if old == src_files[rel]:
+                plan.unchanged.append(rel)        # 不印任何行（AC-4）
+                continue
+            plan.updated.append(rel)
+        else:
+            plan.created.append(rel)
+        plan.data[rel] = src_files[rel]
+    # 目標下、排除路徑以外、不在鏡像集合的一般檔或 symlink → deleted（symlink 只移除連結本身）
+    plan.deleted = sorted((present_files | present_links) - set(src_files))
+    plan.prune = sorted(dirs, key=lambda d: (-d.count("/"), d))   # 深者先
+    return plan
+
+
+def plan_local(root):
+    """AC-7：目標無 devflow.local（lexists 假）→ 回傳 README.md 的 bytes；真（目錄、空目錄、
+    缺 README、檔案、symlink 皆算）→ 回 None，整棵不碰、不印。"""
+    if os.path.lexists(root / LOCAL_DIR):
+        return None
+    try:
+        return LOCAL_TEMPLATE_PATH.read_bytes()
+    except OSError as e:
+        raise InstallError(2, "devflow/templates/local-README.md: %s" % (e.strerror or e))
+
+
+def nearest_existing_dir(path):
+    """path 的最近一層已存在祖先目錄——建檔前要在它底下 mkdir 出中間層。"""
+    d = path.parent
+    while not os.path.isdir(d) and d != d.parent:
+        d = d.parent
+    return d
+
+
+def need_writable_dir(path, display):
+    """建檔需 write＋search 兩權限（0222 目錄 W_OK 真但建檔失敗）。"""
+    if not os.access(nearest_existing_dir(path), os.W_OK | os.X_OK):
+        raise InstallError(2, "%s: directory not writable" % display)
+
+
+def check_writable(dst, plan, local_data, root):
+    """AC-15：每個將被 created／updated／deleted 的路徑檢查所在目錄 W_OK | X_OK、
+    將被 updated／deleted 的既有**一般檔**另檢查本身 W_OK；任一不可寫 → exit 2、不寫任何檔。
+    dry-run 亦檢查（與入口規格「可寫性」同理，AC-10）。以路徑字串序檢查，第一個不可寫即報。
+
+    symlink 不查本身的 W_OK：os.access 會跟隨連結，dangling symlink 恆假，會把「刪得掉的
+    連結」誤判成不可寫；移除連結本身只需所在目錄的權限。
+    """
+    for rel in plan.touched():
+        path = dst / rel
+        display = DEVFLOW_DIR + "/" + rel
+        need_writable_dir(path, display)
+        if rel not in plan.created and not os.path.islink(path) and not os.access(path, os.W_OK):
+            raise InstallError(2, "%s: not writable" % display)
+    if local_data is not None:
+        need_writable_dir(root / LOCAL_DIR / LOCAL_README, LOCAL_DIR + "/" + LOCAL_README)
+
+
+# ── kit 鏡像：寫入（kit-install AC-16）───────────────────────────────
+
+
+def assert_no_link_ancestor(dst, rel, display):
+    """寫入前對每一層祖先再 lstat 一次確認非 symlink。
+
+    決策階段已依 AC-14b 拒絕過，這是第二道：決策與寫入之間有人換了目錄的話，寫入會沿連結
+    越出目標。屬寫入階段的失敗 → exit 3。
+    """
+    cur = dst
+    for name in rel.split("/")[:-1]:
+        cur = cur / name
+        if os.path.islink(cur):
+            raise InstallError(3, "%s: symlink appeared under devflow/ during the write phase"
+                               % display)
+
+
+def atomic_write(path, data, display):
+    """單檔原子寫入：同目錄寫暫存檔後 os.replace。不保證多檔整體原子（AC-16）。
+
+    os.replace 取代的是 path 這個名字本身——原本若是 symlink，換成一般檔（AC-2），不寫進
+    它的指向。中間層目錄在這裡一併 mkdir（寫入階段，決策階段不做）。
+    """
+    tmp = None
+    try:
+        os.makedirs(str(path.parent), exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".devflow-install-")
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, str(path))
+        tmp = None
+    except OSError as e:
+        raise InstallError(3, "%s: %s" % (display, e.strerror or e))
+    finally:
+        if tmp is not None:
+            try:
+                os.unlink(tmp)                    # 失敗時不留暫存檔；目標路徑本身未動
+            except OSError:
+                pass
+
+
+def write_mirror(dst, plan):
+    """AC-16 的前三個階段：created／updated → deleted → 空目錄移除（深者先）。
+    **同一階段內依路徑字串 sorted() 逐一寫入**——這個全序與 AC-11 報表的全域 sorted() 不同。"""
+    for rel in sorted(set(plan.created) | set(plan.updated)):
+        display = DEVFLOW_DIR + "/" + rel
+        assert_no_link_ancestor(dst, rel, display)
+        atomic_write(dst / rel, plan.data[rel], display)
+    for rel in sorted(plan.deleted):
+        display = DEVFLOW_DIR + "/" + rel
+        assert_no_link_ancestor(dst, rel, display)
+        try:
+            os.remove(str(dst / rel))             # symlink 只移除連結本身，不進入其指向
+        except OSError as e:
+            raise InstallError(3, "%s: %s" % (display, e.strerror or e))
+    for rel in plan.prune:                        # 已依深者先排序；devflow/ 本身不在其中
+        path = dst / rel
+        try:
+            if os.path.isdir(path) and not os.path.islink(path) and not os.listdir(str(path)):
+                os.rmdir(str(path))
+        except OSError as e:
+            raise InstallError(3, "%s/%s: %s" % (DEVFLOW_DIR, rel, e.strerror or e))
+
+
+def write_local(root, local_data):
+    """AC-16 第四階段：devflow.local/ 只在整棵不存在時建，且只放 README.md。"""
+    display = LOCAL_DIR + "/" + LOCAL_README
+    try:
+        os.mkdir(str(root / LOCAL_DIR))
+    except OSError as e:
+        raise InstallError(3, "%s: %s" % (LOCAL_DIR, e.strerror or e))
+    atomic_write(root / LOCAL_DIR / LOCAL_README, local_data, display)
+
+
 # ── 輸出 ─────────────────────────────────────────────────────────────
+
+
+def kit_report(out, old, new, plan, local_data):
+    """AC-11：stdout 第一行恰為摘要行，其後為動作行，以**路徑字串** sorted() 排序。
+
+    排序的鍵是路徑不是整行：`devflow/a` 與 `devflow/a.b` 的先後在兩種排法下不同。
+    `devflow.local/README.md` 排在 `devflow/...` 之前（`.` < `/`）。
+    """
+    old_text, mode = mode_of(old, new)
+    lines = ["kit-install: %s -> %s (%s)" % (old_text, version_text(new), mode)]
+    actions = plan.actions()
+    if local_data is not None:
+        actions.append((LOCAL_DIR + "/" + LOCAL_README, "created"))
+    lines += ["%s: %s" % (path, action) for path, action in sorted(actions)]
+    out.write("".join(line + "\n" for line in lines).encode("utf-8", "surrogateescape"))
 
 
 def write_diff(out, d):
@@ -384,15 +763,41 @@ def report(out, d, dry_run):
 # ── 主流程 ───────────────────────────────────────────────────────────
 
 
+def write_entry(root, decisions):
+    """AC-16 最後一個階段：入口檔（原子性依入口規格——全部檔案的決策都成功才寫）。
+
+    直接開檔覆寫（不走 temp+rename）：CLAUDE.md 常是 AGENTS.md 的 symlink，換 inode 會把
+    symlink 換成普通檔。可寫性已在決策階段前置檢查；走到這裡的 OSError 是檢查與寫入之間的
+    競態——屬寫入階段的失敗 → exit 3。
+    """
+    for d in decisions:
+        if d.kind != "unchanged":
+            try:
+                (root / d.name).write_bytes(d.new)
+            except OSError as e:
+                raise InstallError(3, "%s: %s" % (d.display, e.strerror or e))
+
+
 def run(target, dry_run):
+    # ── 決策階段：不寫任何東西（連 mkdir 都不做）；--dry-run 走完這一整段就停 ──
+    version = read_source_version()                                       # AC-12
+    src_files = source_files()                                            # AC-13 ＋鏡像集合
     root = Path(target)
     if not root.exists():
-        raise InstallError(2, "%s: 目標路徑不存在" % target)             # AC-11
+        raise InstallError(2, "%s: 目標路徑不存在" % target)             # 入口規格 AC-11
     if not root.is_dir():
-        raise InstallError(2, "%s: 目標路徑不是目錄" % target)           # AC-11
-    template = load_template()                                            # AC-8
-    targets = choose_targets(root)                                        # AC-7
-    # 原子性：先對集合內全部檔案做決策（含可寫性），任一檔出錯則皆不寫、stdout 全抑制
+        raise InstallError(2, "%s: 目標路徑不是目錄" % target)           # 入口規格 AC-11
+    dst = root / DEVFLOW_DIR
+    check_target_devflow(dst)                                             # AC-14
+    old = read_target_version(dst)                                        # AC-11 的模式
+    plan = plan_mirror(src_files, dst)                                    # AC-1～AC-4、AC-14b
+    local_data = plan_local(root)                                         # AC-7
+    template = load_template()                                            # 入口規格 AC-8
+    targets, advisories = choose_targets(root)                            # 入口規格 AC-7
+    if not os.path.lexists(root / CONFIG_FILE):
+        advisories.append(YML_ADVISORY)           # AC-9；順序在入口規格 AC-7 的 advisory 之後
+    # 入口規格的原子性：先對集合內全部檔案做決策（含可寫性），任一檔出錯則皆不寫、stdout 全抑制。
+    # 入口檔的決策排在鏡像可寫性之前：兩者都是 exit 2，stderr 恰一行，先報使用者自己那幾個檔。
     decisions, errors = [], []
     for name in targets:
         try:
@@ -403,32 +808,38 @@ def run(target, dry_run):
         for e in errors:
             print(e.message, file=sys.stderr)
         return max(e.code for e in errors)
-    if not dry_run:
-        for d in decisions:
-            if d.kind != "unchanged":
-                try:
-                    # 直接開檔覆寫（不走 temp+rename）：CLAUDE.md 常是 AGENTS.md 的 symlink，
-                    # 換 inode 會把 symlink 換成普通檔
-                    (root / d.name).write_bytes(d.new)
-                except OSError as e:
-                    # 可寫性已前置檢查過；走到這裡是檢查與寫入之間的競態，不在原子性承諾內
-                    raise InstallError(2, "%s: 寫入失敗：%s" % (d.display, e))
-    out = sys.stdout.buffer
+    check_writable(dst, plan, local_data, root)                           # AC-15
+    # ── 報表：先寫進記憶體。exit 3 也要抑制 stdout，所以寫入階段全部成功才落到終端 ──
+    buf = io.BytesIO()
+    kit_report(buf, old, version, plan, local_data)                       # AC-11
     for d in decisions:
-        report(out, d, dry_run)
+        report(buf, d, dry_run)                                           # 入口規格 AC-3／AC-10
+    # ── 寫入階段：AC-16 的全序；OSError → exit 3，已完成的步驟不回滾 ──
+    if not dry_run:
+        write_mirror(dst, plan)
+        if local_data is not None:
+            write_local(root, local_data)
+        write_entry(root, decisions)
+    out = sys.stdout.buffer
+    out.write(buf.getvalue())
     out.flush()
+    for message in advisories:                    # AC-9：只在 exit 0 時印
+        print(message, file=sys.stderr)
     return 0
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="把 agent-devflow 入口區塊插入目標專案的 CLAUDE.md／AGENTS.md。"
-                    "區塊外逐 byte 不變、重跑冪等、碰撞時報錯且不寫任何檔。",
-        epilog="模板：%s。exit 0 成功、1 內容碰撞（begin 無 end、begin 前有落單 end）、"
-               "2 無法執行（目標路徑、模板、非一般檔案／dangling symlink、不可寫）。" % TEMPLATE_PATH)
+        description="把 agent-devflow 安裝到目標專案：鏡像 devflow/、建 devflow.local/、"
+                    "插入口區塊到 CLAUDE.md／AGENTS.md。升級與回復＝換一個 kit checkout 重跑。"
+                    "入口區塊外逐 byte 不變、重跑冪等、碰撞時報錯且不寫任何檔。",
+        epilog="來源：%s（版本 %s）。exit 0 成功、1 入口區塊碰撞、2 決策階段的環境或用法錯誤、"
+               "3 寫入階段的 I/O 失敗（不回滾，重跑即恢復）。"
+               % (SRC, VERSION_PATH))
     parser.add_argument("target", help="目標 repo 根目錄")
     parser.add_argument("--dry-run", action="store_true",
-                        help="不寫檔；exit code 與 stderr 同實際執行，成功時 stdout 印 unified diff")
+                        help="不寫檔；走完整個決策階段，exit code、stderr 與 stdout 的摘要行／"
+                             "動作行同實際執行，入口檔部分印 unified diff")
     args = parser.parse_args(argv)
     try:
         return run(args.target, args.dry_run)

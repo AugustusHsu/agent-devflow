@@ -1,0 +1,43 @@
+# <專案名> 的 agent-devflow 設定。複製到 repo 根目錄後編輯這一份，不要改 devflow/ 下的任何檔
+# ——`devflow/**` 是 kit 的，下一次安裝或升級會把你的修改覆寫或刪除。
+# 只有 forge 與 seats（各職位的綁定）是自變數；其餘（PR/MR、CLI、入口檔、skills 目錄、派工方式）
+# 都是衍生值，由 devflow/ 下的對照表產生，不在這裡寫（唯一例外：implementer_filler 投影，見下）。
+# 規則本體：devflow/WORKFLOW.md。
+
+forge: github          # github | gitlab | gitea（gitea 全表 ⬜，無實例前不可選）
+
+# 職位綁定。職位名以 devflow/seats/ 的四個檔為準，不新增。每個職位一個 filler（填充者）：
+# 工具名（對照表在 devflow/coders/、orchestrators/）或 human（由人填）。
+# model／reasoning 選填，未填＝用該工具的預設；旗標怎麼寫住對照表，這裡只記意圖。
+# model 是 R10 受測環境的一部分：換模型後，舊模型下驗證的格子依 R9 降為 📝。
+seats:
+  implementer:               # 實作位
+    filler: human            # claude-code | codex | human
+  reviewer:                  # 審查位；建議與 implementer 異廠（R2）
+    filler: human            # codex | claude-code | human
+    # model: <工具的模型 ID>
+    # reasoning: high        # 思考程度；值的寫法依工具
+  coordinator:               # 協調位；human＝無工具，各步由人執行（對照表 orchestrators/none.md）
+    filler: human            # hermes | paperclip | human
+  approver:                  # 裁決位；人（seats/approver.md），無 model／reasoning
+    filler: human
+
+# seats.implementer.filler 的衍生投影（不是第二個自變數）：install.py 不解析 YAML，只讀這個頂層鍵
+# 決定新專案建 CLAUDE.md 還是 AGENTS.md（docs/spec/install/spec.md AC-7）。與上面的值必須逐字相同；
+# 改 filler 時一併改這裡。只有 claude-code 會得到 CLAUDE.md，其餘一律 AGENTS.md。
+implementer_filler: human
+
+# 本專案套用到哪一層流程（不是版本號；定義見 WORKFLOW.md 第 11 節）：
+#   0 bootstrap（無流程，直推 main）
+#   1 單線（issue → worktree → PR → 審查 → merge）
+#   2 規格建版（規格先合入 main，任務從 diff 推導）
+#   3 平行（多 worktree、多 coder）
+stage: 0
+
+# 誰按合併（WORKFLOW.md M2）：human | orchestrator（後者需有機械 guard 驗 M1，否則視同 human）
+merge: human
+
+# 人類文檔投影（WORKFLOW.md D3）。
+docs:
+  site: none           # none | mkdocs
+  versioning: none     # none | mike

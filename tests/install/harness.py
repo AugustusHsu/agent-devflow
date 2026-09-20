@@ -1,27 +1,40 @@
 #!/usr/bin/env python3
-"""tests/install/harness.py — devflow/install.py 的驗收測試（spec AC-1～AC-12；AC-13 由 CI 執行，不在此）。
+"""tests/install/harness.py — devflow/install.py 的驗收測試。
+
+涵蓋兩份規格：
+- docs/spec/install/spec.md（入口區塊，AC-1～AC-12；AC-13 由 CI 執行，不在此）——案例名
+  以 `AC-n-` 開頭。
+- docs/spec/kit-install/spec.md（完整安裝，AC-1～AC-20 含 AC-14b）——案例名以 `kit-AC-n-`
+  開頭，每條 AC 每個分支至少一案（kit-install AC-20）。
 
 執行：
     python3 tests/install/harness.py            # 全部案例
+    python3 tests/install/harness.py kit        # 只跑 kit-install 案例
     python3 tests/install/harness.py AC-7       # 只跑名稱含 AC-7 的案例
-
-規格：docs/spec/install/spec.md。每條 AC 的每個分支至少一案（AC-12）。
 
 作法：
 - 每案在 /tmp（tempfile 預設目錄）建獨立假專案，跑完清理，可獨立重跑。
 - 假專案內容以 bytes 字面量寫在案例裡，不用 fixture 檔——spec 的 AC 全以 bytes 定義
   （CRLF、無尾端換行、BOM、非 UTF-8），fixture 檔會被編輯器與 git 正規化掉。
 - 斷言一律 bytes 比對；「不寫檔」另以 mtime 驗證（同 bytes 重寫也算寫）。
-- 需要別的模板時（AC-8 >30 行、模板正規化），把 install.py 複製到暫存目錄並放
-  自己的 templates/entry-block.md——install.py 以 __file__ 定位模板，不是 cwd。
+- 需要別的模板時（AC-8 >30 行、模板正規化），用 sandboxed_install() 把 install.py 複製到
+  暫存目錄並放自己的 templates/entry-block.md——install.py 以 __file__ 定位模板，不是 cwd。
+- 需要變造**來源 kit**時（kit-install AC-6／AC-12／AC-13／AC-16）用 kit_copy()：整個
+  devflow/ 複製到 /tmp 再變造，repo 的 kit 一個 byte 都不動。
 - 可寫性案例（chmod 0444 檔、0555 目錄）以非 root 為前提：root 對它們 os.access(W_OK)
   恆真，構造不出反例；偵測到 os.geteuid() == 0 時該類案例標 SKIP（不算 FAIL）。
 - 輸出每案一行 `PASS|FAIL|SKIP <AC-n>-<分支名>`，失敗細節印到 stderr，最後一行總計
   （含 skip 數）；無 FAIL 即 exit 0。
+
+入口規格案例與 kit-install 的介面（AC-20）：安裝器現在的 stdout 前面多了 kit-install 的
+摘要行與動作行、stderr 在沒有 devflow.yml 的假專案裡多了 AC-9 的 advisory。入口規格既有
+案例的期望值**逐字不變**，只是套在剝掉這兩個前／後綴之後的部分——見 entry_out() 與
+entry_stderr()。exit code 的期望一個字都沒動。
 """
 import difflib
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -34,6 +47,8 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 INSTALL = REPO / "devflow" / "install.py"
 TEMPLATE_PATH = REPO / "devflow" / "templates" / "entry-block.md"
+LOCAL_TEMPLATE = REPO / "devflow" / "templates" / "local-README.md"
+KIT_VERSION = (REPO / "devflow" / "VERSION").read_bytes()
 
 # 直接載入 install.py 以驗 read_implementer 的回傳值（AC-7 的 L；CI 的 i5 也是這樣取）。
 # 子程序執行仍是判定 exit／stdout／stderr／建檔的來源，這裡只多驗讀取器本身。
@@ -199,29 +214,129 @@ def project(files=None):
 
 @contextmanager
 def sandboxed_install(template=None):
-    """把 install.py 複製到暫存目錄，配上自訂模板（None＝不放模板檔）。"""
+    """把 install.py 複製到暫存目錄，配上自訂模板（None＝不放 entry-block.md）。
+
+    這個暫存目錄是安裝器眼中的「來源 devflow/」，所以得是合規的 kit：VERSION 要合
+    kit-install 的「版本」定義（AC-12，否則一律 exit 2），local-README.md 要在（AC-7 的
+    bytes 來源）。兩者都照抄 repo 的 kit，本函式只換 entry-block.md。
+    """
     d = Path(tempfile.mkdtemp(prefix="devflow-install-sandbox-"))
     try:
         shutil.copy(INSTALL, d / "install.py")
+        shutil.copy(REPO / "devflow" / "VERSION", d / "VERSION")
+        (d / "templates").mkdir()
+        shutil.copy(LOCAL_TEMPLATE, d / "templates" / "local-README.md")
         if template is not None:
-            (d / "templates").mkdir()
             (d / "templates" / "entry-block.md").write_bytes(template)
         yield d / "install.py"
     finally:
         remove_tree(d)
 
 
+@contextmanager
+def kit_copy(version=None, mutate=None):
+    """整個 kit 的 devflow/ 複製到 /tmp，改 VERSION、套 mutate，回傳副本的 install.py 路徑。
+
+    kit-install AC-20：需變造**來源**的案例一律在副本上變造（AC-6 的 A／B 即兩份副本），
+    repo 的 kit 一個 byte 都不動。version 是 VERSION 的完整 bytes（None＝照抄）；
+    mutate 收到副本的 devflow/ 路徑（Path），可任意增刪改。
+    排除路徑（__pycache__／*.pyc）不複製：它們在兩邊都不算數，帶進副本只會讓斷言難讀。
+    """
+    d = Path(tempfile.mkdtemp(prefix="devflow-kit-"))
+    try:
+        src = d / "devflow"
+        shutil.copytree(str(REPO / "devflow"), str(src), symlinks=True,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        if version is not None:
+            (src / "VERSION").write_bytes(version)
+        if mutate is not None:
+            mutate(src)
+        yield src / "install.py"
+    finally:
+        remove_tree(d)
+
+
 def ok_run(r):
-    """exit 0、stderr 空。"""
+    """exit 0、stderr 除 kit-install AC-9 的 advisory 外為空。"""
     eq(r.returncode, 0, "exit code（stderr=%s）" % short(r.stderr))
-    eq(r.stderr, b"", "stderr")
+    eq(entry_stderr(r), b"", "stderr")
 
 
 def err_run(r, code):
-    """exit 1／2：stdout 全部抑制（AC-10）。"""
+    """exit 非 0：stdout 全部抑制（入口規格 AC-10、kit-install「驗收標準」開頭）。"""
     eq(r.returncode, code, "exit code（stderr=%s）" % short(r.stderr))
     eq(r.stdout, b"", "stdout must be suppressed on exit %d" % code)
     expect(r.stderr != b"", "stderr must explain")
+
+
+# ── kit-install 的前綴／後綴（AC-11、AC-9、AC-20）─────────────────────
+
+KIT_SUMMARY_RE = re.compile(
+    rb"kit-install: (?:none|invalid|[0-9]+(?:\.[0-9]+){3}) -> [0-9]+(?:\.[0-9]+){3}"
+    rb" \((?:fresh|upgrade|downgrade|same|replace)\)\n")
+KIT_ACTION_RE = re.compile(rb"devflow(?:\.local)?/[^\n]*: (?:created|updated|deleted)\n")
+# AC-9 的 advisory。入口檔的路徑一律是絕對路徑，不會與動作行的 devflow… 前綴相混
+KIT_YML_ADVISORY = b"devflow.yml: absent; copy devflow/templates/devflow.yml and edit (advisory)\n"
+
+
+def split_stdout(stdout):
+    """(摘要行, 動作行 list, 入口檔那一段)；前兩項已去掉行尾 \\n。
+
+    AC-11：第一行恰為摘要行，其後為動作行，再接入口檔輸出。入口規格的既有斷言套在第三項上。
+    """
+    lines = split_lf(stdout)
+    expect(bool(lines) and KIT_SUMMARY_RE.fullmatch(lines[0]),
+           "stdout 第一行須為 kit-install 摘要行（AC-11）", short(stdout))
+    i = 1
+    while i < len(lines) and KIT_ACTION_RE.fullmatch(lines[i]):
+        i += 1
+    return lines[0][:-1], [line[:-1] for line in lines[1:i]], b"".join(lines[i:])
+
+
+def entry_out(r):
+    """stdout 去掉 kit-install 前綴後，入口檔那一段（AC-20）。"""
+    return split_stdout(r.stdout)[2]
+
+
+def summary_of(r):
+    return split_stdout(r.stdout)[0]
+
+
+def actions_of(r):
+    return split_stdout(r.stdout)[1]
+
+
+def entry_stderr(r):
+    """stderr 去掉 AC-9 的 advisory（依 AC-9 的優先序固定在最後）後的部分。
+
+    假專案多數沒有 devflow.yml，AC-9 要求 exit 0 時必印這一行。入口規格既有案例的 stderr
+    期望逐字不變，只是套在這上面——與 stdout 的前綴同理（AC-20）。exit 非 0 時 stderr 只有
+    錯誤那一行，本函式等同恆等式。
+    """
+    if r.stderr.endswith(KIT_YML_ADVISORY):
+        return r.stderr[:-len(KIT_YML_ADVISORY)]
+    return r.stderr
+
+
+def snapshot(root):
+    """整棵樹的 bytes 與存在性（AC-18／AC-5：比 bytes 與 lexists，不比 stat）。
+
+    symlink 記其指向、不跟隨；os.walk(followlinks=False) 不進入 symlink 指向的目錄。
+    """
+    out = {}
+    for dirpath, dirnames, filenames in os.walk(str(root), followlinks=False):
+        for name in dirnames + filenames:
+            full = Path(dirpath) / name
+            rel = str(full.relative_to(root))
+            if full.is_symlink():
+                out[rel] = ("link", os.readlink(str(full)))
+            elif full.is_dir():
+                out[rel] = ("dir", None)
+            elif full.is_file():
+                out[rel] = ("file", full.read_bytes())
+            else:
+                out[rel] = ("other", None)
+    return out
 
 
 # ── 案例 ─────────────────────────────────────────────────────────────
@@ -314,7 +429,7 @@ def _():
     with project({"CLAUDE.md": data}) as p:
         r = p.run()
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "stdout")
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n", "stdout")
         eq(p.read("CLAUDE.md"), data, "bytes")
         expect(not p.rewritten("CLAUDE.md"), "file must not be rewritten")
 
@@ -325,7 +440,7 @@ def _():
     with project({"CLAUDE.md": data}) as p:
         r = p.run()
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "stdout")
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n", "stdout")
         eq(p.read("CLAUDE.md"), data, "CRLF block left as is")
         expect(not p.rewritten("CLAUDE.md"), "file must not be rewritten")
 
@@ -457,7 +572,7 @@ def _():
     with project({"CLAUDE.md": data}) as p:
         r = p.run()
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "stdout")
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n", "stdout")
         expect(not p.rewritten("CLAUDE.md"), "file must not be rewritten")
 
 
@@ -554,7 +669,7 @@ def _():
     with project({"CLAUDE.md": T}) as p:
         r = p.run()
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "stdout")
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n", "stdout")
         expect(not p.rewritten("CLAUDE.md"), "file must not be rewritten")
 
 
@@ -608,7 +723,7 @@ def _():
     with project({"CLAUDE.md": data}) as p:
         r = p.run()
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "later lone begin must not raise AC-5")
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n", "later lone begin must not raise AC-5")
         eq(p.read("CLAUDE.md"), data, "bytes")
         expect(not p.rewritten("CLAUDE.md"), "file must not be rewritten")
 
@@ -1281,7 +1396,7 @@ def _():
         snap = {n: p.read(n) for n in ("CLAUDE.md", "AGENTS.md")}
         r = p.run()
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n"
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n"
            + p.display("AGENTS.md") + b": unchanged\n", "stdout")
         eq({n: p.read(n) for n in snap}, snap, "bytes == snapshot")
 
@@ -1293,7 +1408,7 @@ def _():
         snap = p.read("AGENTS.md")
         r = p.run()
         ok_run(r)
-        eq(r.stdout, p.display("AGENTS.md") + b": unchanged\n", "stdout")
+        eq(entry_out(r), p.display("AGENTS.md") + b": unchanged\n", "stdout")
         eq(p.read("AGENTS.md"), snap, "bytes == snapshot")
         expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
 
@@ -1306,7 +1421,7 @@ def _():
     with project({"CLAUDE.md": orig}) as p:
         r = p.run("--dry-run")
         ok_run(r)
-        eq(r.stdout, unified(orig, T + b"\n" + orig, b"CLAUDE.md"), "stdout == unified diff")
+        eq(entry_out(r), unified(orig, T + b"\n" + orig, b"CLAUDE.md"), "stdout == unified diff")
         eq(p.read("CLAUDE.md"), orig, "bytes")
         expect(not p.rewritten("CLAUDE.md"), "file must not be rewritten")
 
@@ -1316,7 +1431,7 @@ def _():
     with project() as p:
         r = p.run("--dry-run")
         ok_run(r)
-        eq(r.stdout, unified(b"", T, b"AGENTS.md"), "stdout == diff from empty")
+        eq(entry_out(r), unified(b"", T, b"AGENTS.md"), "stdout == diff from empty")
         expect(not p.exists("AGENTS.md") and not p.exists("CLAUDE.md"), "nothing created")
 
 
@@ -1326,7 +1441,7 @@ def _():
     with project({"CLAUDE.md": data}) as p:
         r = p.run("--dry-run")
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "stdout")
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n", "stdout")
         eq(p.read("CLAUDE.md"), data, "bytes")
 
 
@@ -1336,7 +1451,7 @@ def _():
     with project({"CLAUDE.md": PREFIX + T, "AGENTS.md": a}) as p:
         r = p.run("--dry-run")
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n"
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n"
            + unified(a, T + b"\n" + a, b"AGENTS.md"), "stdout: CLAUDE.md then AGENTS.md")
         eq(p.read("AGENTS.md"), a, "AGENTS.md bytes")
         expect(not p.rewritten("AGENTS.md"), "AGENTS.md must not be rewritten")
@@ -1351,7 +1466,7 @@ def _():
         ok_run(r)
         expected = unified(orig, T + b"\n" + orig, b"CLAUDE.md")
         expect(not expected.endswith(b"\n"), "precondition: difflib output ends without newline")
-        eq(r.stdout, expected, "stdout == difflib output byte for byte")
+        eq(entry_out(r), expected, "stdout == difflib output byte for byte")
         expect(b"No newline" not in r.stdout, "no synthetic marker line", r.stdout)
 
 
@@ -1361,7 +1476,7 @@ def _():
     with project({"CLAUDE.md": orig}) as p:
         r = p.run("--dry-run")
         ok_run(r)
-        eq(r.stdout, unified(orig, PREFIX + T, b"CLAUDE.md"), "stdout == difflib output byte for byte")
+        eq(entry_out(r), unified(orig, PREFIX + T, b"CLAUDE.md"), "stdout == difflib output byte for byte")
         eq(p.read("CLAUDE.md"), orig, "bytes")
 
 
@@ -1476,7 +1591,7 @@ def _():
         p.chmod("CLAUDE.md", 0o444)
         r = p.run()
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "stdout")
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n", "stdout")
 
 
 @case("AC-12-atomic-writable-plus-readonly-nothing-written")
@@ -1540,7 +1655,7 @@ def _():
 def _():
     r = subprocess.run([sys.executable, str(INSTALL), str(REPO), "--dry-run"], capture_output=True)
     ok_run(r)
-    eq(r.stdout, str(REPO / "CLAUDE.md").encode() + b": unchanged\n"
+    eq(entry_out(r), str(REPO / "CLAUDE.md").encode() + b": unchanged\n"
        + str(REPO / "AGENTS.md").encode() + b": unchanged\n", "stdout")
 
 
