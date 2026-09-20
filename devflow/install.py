@@ -27,10 +27,13 @@ symlink 都是 exit 2，安裝器不替使用者決定該建到哪裡。
   不看縮排、不看是否在 code fence 內。第一組的選取與 strip() 語意與判準 B 一致。
 - 與 CI **刻意不同**的一點：檔首 UTF-8 BOM（EF BB BF）不剝除，屬第一行內容，所以
   「BOM＋begin」的首行不是標記行；CI 以 utf-8-sig 讀檔會先剝 BOM。安裝器以 bytes 為準、
-  不解碼整檔。差異只影響「BOM 開頭且首行為 begin」一種輸入，後果是安裝器看不見那行
-  begin、檔內第一個 end 成為落單 end → exit 1 拒絕安裝。#104 的處置是**維持差異、
-  只改訊息**（AC-5c，見 bom_hides_begin()）：BOM 開頭的檔案照樣裝不起來，但使用者看到
-  的是 BOM 而不是一個不存在的落單 end。
+  不解碼整檔。**凡首行是標記行的檔案，加上 BOM 後兩邊判定就會不同**——BOM＋begin
+  （本單處理的那一種，後果是安裝器看不見那行 begin、檔內第一個 end 成為落單 end →
+  exit 1 拒絕安裝）、BOM＋end 亦然（安裝器看到無標記行走 AC-2，CI 看到落單 end）。
+  #104 的處置是**維持差異、只改訊息**（AC-5c，見 bom_hides_begin()）：這一類輸入照樣
+  裝不起來，但使用者看到的是 BOM 而不是一個不存在的落單 end。
+  **不是所有 BOM 開頭的檔案都裝不起來**——BOM＋普通文字、BOM＋begin 而全檔無 end
+  都走 AC-2、exit 0、照常寫檔。
 - AC-5c 的分支只在「命中 AC-5b（有落單 end）且 bom_hides_begin() 為真」時觸發。它**不**
   涵蓋（列舉，非概括）：BOM＋begin 但全檔無 end（無任何標記行 → AC-2 檔首插入、exit 0，
   根本不經過錯誤路徑）；BOM＋begin 之後另有 begin 而無 end（AC-5——拿掉 BOM 仍是 AC-5，
