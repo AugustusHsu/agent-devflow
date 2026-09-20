@@ -574,7 +574,7 @@ def _():
 def _():
     # PR #105 第二輪審查的反例二。檔頭與規格一度寫成「BOM ＋首行 begin ＋檔內有 end
     # 那一類照樣裝不起來」——錯的：第二行的可見 begin 先於 end，first_group 取
-    # 第 2–3 行為第一組，走 AC-3／4、exit 0、照常寫檔。
+    # 第 2–4 行為第一組（第 2 行 begin、第 3 行 body、第 4 行 end），走 AC-3／4、exit 0、照常寫檔。
     # 散文把這格寫錯了三次，所以它現在是一個案例而不是一句話。
     orig = BOM + BEGIN_LINE + BEGIN_LINE + b"body\n" + END_LINE
     with project({"CLAUDE.md": orig}) as p:
