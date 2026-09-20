@@ -1,6 +1,6 @@
 # coder: codex
 
-衍生值對照表。分節與狀態欄依 `R9`：**通用**節的值欄宣稱可重用的工具能力或程序（repo 與環境只是可替換的參數），**本機**節的值欄宣稱具名的環境 instance（本機安裝的工具、帳號或組織、本 repo 的設定與資源）；狀態取 `✅`／`📝`／`⬜` 三值之一，兩節的 `✅` 判準各依 `R9` 定義，非 `✅` 不得在流程中當作可用。「職位」欄記該格是哪個職位的用法（詞彙見 `seats/`），`—` 表示是工具或資源本身的性質，不專屬任一職位。
+衍生值對照表，**只有通用節**（值欄宣稱可重用的工具能力或程序，repo 與環境只是可替換的參數）。本機節——具名的環境 instance——住 `devflow.local/<同路徑>`，不隨 kit 安裝。分節與狀態欄依 `R9`。
 
 ## 通用
 
@@ -14,9 +14,3 @@
 | 審查用法（`R1`） | reviewer | 於乾淨 checkout 執行 `codex exec -m <model> -c model_reasoning_effort=<level> --sandbox workspace-write -o <verdict.md> - < <prompt.txt>`；末尾的 `-` 表 prompt 由 **stdin** 餵入。checkout 以 `git clone --shared` 到 `/tmp` 後 `git checkout <head sha>`。`--shared` clone 的 origin 是本機路徑，`gh` 無法自動推導 repo（錯誤：`none of the git remotes … point to a known GitHub host`）——須 `git remote set-url origin` 成 GitHub remote（HTTPS 或 SSH），或以 `gh --repo <owner/repo>`／`GH_REPO` 明示。`--skip-git-repo-check` 在此**非必要**：它只放行「非 git 目錄」（在非 git 目錄不加它會擋：`Not inside a trusted directory and --skip-git-repo-check was not specified`），而 `/tmp` checkout 本身是 git repo | 📝 已宣稱（有可執行的驗證方式：本 repo #80→#105 的 Codex 審查全以此形式實跑，verdict 貼於各 PR；來源 orchestrator（Hermes）。`R9` 子類「驗證未達 `✅`」——受測環境記載與第三者重跑證據待 #106 第二輪補齊後再判能否升 `✅`。原值欄並列的 `codex exec review` 依 `R7` 拆成下一列） |
 | 審查用法：`review` 子命令（`R1`） | reviewer | `codex exec review`——Codex 內建的 code review 子命令 | ⬜ 未測（子命令存在已驗：`codex exec --help` 於 `codex-cli 0.149.1` 列出 `review  Run a code review against the current repository`。但**未驗證**它能否讀自訂 review prompt、能否輸出到指定檔；本 repo 至 `332ab9d` 止從未用過。依 `R7` 與上一列拆開各自標狀態，不共格，見 #106 AC-1） |
 | 交接 | implementer（context 延續）／coordinator（重派） | `codex exec resume <id>` | 📝 已宣稱（`R9` 子類「驗證未達 `✅`」：本格附有第三者現在能執行的驗證方式，重跑結果與值欄宣稱相符，但不滿足 `✅` 的成立條件，理由見末段。驗證方式：任一 `codex exec --json` 取事件流第一行 `thread.started` 的 `thread_id`；以 `codex exec resume <該 id> --json` 接回，看第二次事件流第一行的 `thread_id` 是否與第一次相同；第二段 prompt 只引用第一段的內容而不重給，看回覆是否逐項對應。實跑：orchestrator 於 PR #107 第一輪審查刻意分兩段，三個獨立來源——第一段事件流第一行、審查者自報的 `SESSION_ID:`、第二段 `resume` 的事件流第一行——同一 id `01a0bdb9-1001-7113-b8d2-348a30e16703`；第二段 prompt 未重給 diff、未重列疑慮內容，產出的 verdict 逐項對應第一段的五項疑慮並各判阻擋／非阻擋，context 確實延續。受測環境：2026-09-20，`codex-cli 0.149.1`、模型 `gpt-5.6-sol`／reasoning high；執行身分為本機使用者以 Codex 訂閱登入；目標 repo `AugustusHsu/agent-devflow`，checkout `/tmp/rv107` 於 `f73b935`。**為何不是 `✅`**：驗證由 orchestrator 執行並回報，尚無第三者獨立重跑。證據：https://github.com/AugustusHsu/agent-devflow/issues/106#issuecomment-5748457773 ；PR #107 第一輪 verdict https://github.com/AugustusHsu/agent-devflow/pull/107#pullrequestreview-5259971160 ，其內文自載 `SESSION:` 行，第三者可與該留言比對） |
-
-## 本機
-
-| 面向 | 職位 | 值 | 狀態 |
-|---|---|---|---|
-| 版本 | — | 本機 0.149.1 | ✅ 可用（實測 2026-09-20，驗證方式：在本機 shell 執行 `codex --version`，stdout 恰一行 `codex-cli 0.149.1`。受測環境：2026-09-20，受測工具即 `codex-cli 0.149.1`（由 implementer 在 worktree `agent-devflow.worktrees/106` 的 shell 執行），執行身分為本機使用者以 Codex 訂閱登入（非 API key），目標 repo `AugustusHsu/agent-devflow`；受測對象是**本機 CLI 環境**，與 repo 內容無關——換機器或 Codex 升版後此格依 `R10` 須重驗。本格原狀態欄寫「記錄」而非 `R9` 三值，#106 前先降為 `⬜ 未測`，今補驗後升 `✅`） |
