@@ -97,3 +97,23 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/devflow_checks.py
+
+      # 兩個獨立於檢查器的煙霧測試（issue #166 AC-12）。刻意跟在「規則檢查」後面、
+      # 而且用跟它一樣的 `set -euo pipefail`：這兩個測試的失敗是**內容問題**
+      # （發版程序被改壞、README 引了不存在的 hash），狀態碼 1、check 變紅。
+      # 不要套「準備檢查器相依」那個 EXIT 守衛——那一步把任何非零一律收成 2，
+      # 意思是「檢查器無法執行」＝環境問題；把內容問題也收成 2，就等於把這兩項
+      # 從關卡降成雜訊，而且和 runner 壞掉撞同一個號碼（見 scripts/devflow_checks.py
+      # 檔頭「exit code 的分類守則」）。
+      #
+      # 第一行的 fetch 不能省：README 的 Phase 1 判定表引了負向取證用的 probe commit
+      # （PR #42 的 11d0fba），那條分支已刪、PR 已關不合併，物件只活在 refs/pull/42/head。
+      # 上面 checkout 的 fetch-depth: 0 取的是 refs/heads/* 與 refs/tags/*，不含
+      # refs/pull/*——不補這一行，smoke_readme_refs.py 會在本機過、在 CI 紅
+      # （issue #166 的 L3 裁決）。--no-tags：tag 已由 checkout 帶進來，這裡只要 PR 的 head。
+      - name: 發版文件與 README 引用
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin '+refs/pull/*/head:refs/remotes/origin/pr/*'
+          python3 tests/smoke_release_doc.py
+          python3 tests/smoke_readme_refs.py
