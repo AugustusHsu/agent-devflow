@@ -7,6 +7,7 @@
 - 治理基準 G：`devflow/WORKFLOW.md @ <sha>`（審查依此版本的規則）
 - 開發目標 T：`docs/spec/<feature>/spec.md @ <sha>`，本 PR 對應 AC：<AC-n, AC-m>
 - 審查對象：`<base sha>..<head sha>`（PR #<N>）
+- 本 PR 對應的 issue（本體＋留言）：<URL>
 - Issue 宣告的 write scope：<…>
 - 驗證指令：<…>
 - 上一輪阻擋項的處置留言（重審時才有；`R11`）：<URL 或「首輪」>
@@ -22,6 +23,7 @@
 7. 找出 diff 中含「一律、只會、必然、全部、恆、never、always」一類的通則句：每句要求一個反例或明確的適用邊界；給不出的，標為「一次觀察寫成通則」。
 8. 重審時：逐條核對上一輪的處置——`FIX` 看修正 commit 是否真的關閉該項、`REJECT` 重跑其反證指令並比對輸出；核對結果寫進對應 BLOCK 的 `Closes when` 之下。
 9. 掃 diff 有無密鑰、token、憑證、私鑰或連線字串（含測試資料）；命中即 BLOCK，處置只能是 `FIX`。
+10. 核對 issue「派工前讀審」行——依 `L7` 條件應觸發而該行為「未觸發」、空白、所填 URL 的 verdict 不是 `READY` 亦非 `L7` 停損後人的書面裁決、或 `READY` 所綁的錨與 issue 當前 T 留言 id／本體 `updatedAt` 不符者，列為 block。
 
 ## 輸出格式
 
