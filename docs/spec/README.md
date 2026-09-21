@@ -5,6 +5,7 @@
 
 - 版本＝規格 PR 的 merge commit；frontmatter `version` 在同一個 PR 內 bump。
 - 任務從 `git diff <上版>..<這版> -- docs/spec/<feature>/` 加影響分析推導（`S3`），不從版本位數推導。
-- `devflow/WORKFLOW.md` 自己也是規格（`G2`）；它的變更走同一條路，規格檔放 `docs/spec/workflow/`。
+- `devflow/WORKFLOW.md` 自己也是規格（`G2`）；它的變更依序走 issue 記錄問題與人的裁決 → 實作經 PR → 依舊版 G 由 fresh-context 審查後合入，直接改該檔，不另立規格檔。
 
-目前為空：`stage: 0` 期間不建版，第一份規格在 Phase 2 建立。
+現有兩份規格：`docs/spec/install/spec.md`（入口區塊安裝器）、`docs/spec/kit-install/spec.md`（kit 完整安裝，升級與回復皆為重裝）。
+各自的版本以該檔 frontmatter 的 `version` 欄為準，本檔不複述（`I5`）。
