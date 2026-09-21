@@ -28,6 +28,9 @@
   5. 另有「一個突變同時觸發多項」的案例（MULTI）：要求 ❌ 的條數恰好等於列出的那幾條，
      且每條期望各自配到**不同**的一條 ❌（unmatched()）。
      用來鎖 fail closed——某一項該報而沒報時，條數會少，本檔就失敗（issue #91 AC-1）。
+  6. 另有「檢查器無法執行」的案例（ENVFAIL）：不突變內容、只給壞掉的環境，要求 exit 2
+     且印出該條 💥。這一類和 3./5. 分開，因為 die() 當場就結束、不會有 ❌ 摘要可數；
+     它鎖的是另一半 fail closed——取不到比較對象時不准靜默放行（issue #150、PR #152）。
 
 正向案例 0 個 ❌ 這件事讓負向案例的 ❌ 有了歸因：乾淨輸入不產生任何 ❌，所以突變後冒出來的
 每一條 ❌ 都是該突變造成的。本檔會把每個案例實際冒出的 ❌ 全部印出來，供人核對「exit 1
@@ -1118,6 +1121,35 @@ MULTI = [
 ]
 
 
+# ── 環境錯誤：檢查器無法執行（exit 2），不是關卡結論（issue #150）────
+# 為什麼要獨立一類：CASES／MULTI 的判準是「exit 1 且摘要區塊有幾條 ❌」，而 die() 在
+# 當下就 sys.exit(2)，根本印不到那份摘要——塞進 CASES 只會變成「exit 2、0 條 ❌」的
+# FAIL。分界本身是檢查器檔頭寫明的：輸入錯＝關卡結論，檢查器／環境錯＝2。
+#
+# 為什麼非測不可：`v7` 在 `pull_request` 卻取不到 base 時 die，是 fail-closed 契約
+# （取不到比較對象時不准放行）。run_checker() 對每個案例寫死 DEVFLOW_V7_BASE=HEAD，
+# 所以既有的 82 組輸入沒有一組走得到那兩行；把 die 改成略過，關卡靜默失效而 exit 仍是 0，
+# 本檔在此之前抓不到（審查者 PR #152 第一輪）。
+#
+# 清空的寫法：值給空字串而不是刪 key——檢查器讀這兩個變數時都接 `.strip()`
+# （見 scripts/devflow_checks.py 的 `v7_base_env`／`v7_base_ref`），空字串等同「沒設」。
+# extra_env 在 run_checker() 最後 update，蓋得掉寫死的 HEAD。
+#
+# 沙箱不突變（直接用 pristine 的複本）：這一類測的是執行環境，不是被檢查的內容。
+#
+# (name, extra_env, expect_out)：expect_out 照檢查器實際印的字串，取到不含 git 版本
+# 相關文字的前綴為止（`fatal: …` 的措辭跟著 git 版本／locale 變）。
+ENVFAIL = [
+    # (1) pull_request 卻兩個 base 來源都沒有 → die。
+    ("v7:no-base", {"DEVFLOW_V7_BASE": "", "GITHUB_BASE_REF": ""},
+     "💥 檢查器無法執行：pull_request 事件卻取不到 base"),
+    # (2) base 指到不存在的 ref：git 跑不動＝環境錯，同樣是 2 而不是 ❌。
+    # 與 (1) 綁的是**不同**一行 die（merge-base 失敗那條），所以兩案各自有守備範圍。
+    ("v7:bad-ref", {"DEVFLOW_V7_BASE": "no-such-ref-xyz", "GITHUB_BASE_REF": ""},
+     "💥 檢查器無法執行：git merge-base no-such-ref-xyz HEAD 失敗"),
+]
+
+
 # ── 執行 ──────────────────────────────────────────────────────────
 def run_checker(cwd, gate=None, extra_env=None):
     env = dict(os.environ)
@@ -1343,14 +1375,38 @@ def main():
             shutil.rmtree(work)
             print()
 
+        # 環境錯誤：檢查器無法執行，必須 exit 2 且印出該條 💥（不是 ❌，不進摘要）。
+        for n, (name, extra_env, expect_out) in enumerate(ENVFAIL):
+            work = Path(tmp) / ("envfail-%02d" % n)
+            shutil.copytree(pristine, work)
+            code, out = run_checker(work, extra_env=extra_env)
+            printed = expect_out in out
+            good = (code == 2 and printed)
+            print("環境  %-22s 應 2    exit %d（期望 2）  %s  %s"
+                  % (name, code, "訊息符合" if printed else "訊息不符",
+                     "PASS" if good else "FAIL"))
+            # 不論成敗都把檢查器印的 💥 列出來，供人核對是**哪一條** die 擋的
+            # （兩案綁不同的 die；只看 exit 2 分不出來）。
+            for l in out.split("\n"):
+                if l.startswith("💥"):
+                    print("        %s %s" % ("←" if expect_out in l else " ", l))
+            if not good:
+                failures.append(
+                    "%s：exit %d（期望 2）%s"
+                    % (name, code,
+                       "" if printed else "，且輸出裡找不到「%s」" % expect_out))
+            shutil.rmtree(work)
+            print()
+
     print("=" * 60)
     if failures:
         print("煙霧測試失敗（%d 項）：" % len(failures))
         for f in failures:
             print("  - %s" % f)
         return 1
-    print("煙霧測試全部通過：%d 個正向 ＋ %d 個應擋案例 ＋ %d 個多項案例（涵蓋 %d 個關卡）"
-          % (1 + len(PASSING), len(CASES), len(MULTI),
+    print("煙霧測試全部通過：%d 個正向 ＋ %d 個應擋案例 ＋ %d 個多項案例 "
+          "＋ %d 個環境錯誤案例（涵蓋 %d 個關卡）"
+          % (1 + len(PASSING), len(CASES), len(MULTI), len(ENVFAIL),
              len({c[1] for c in CASES} | {g for m in MULTI for g in m[1]})))
     return 0
 
