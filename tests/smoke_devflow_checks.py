@@ -36,6 +36,7 @@
 每一條 ❌ 都是該突變造成的。本檔會把每個案例實際冒出的 ❌ 全部印出來，供人核對「exit 1
 只能由目標項造成」（README「Phase 1 第三出口的判定方式」條件三）。
 """
+import importlib.util
 import os
 import re
 import shutil
@@ -854,6 +855,77 @@ def mut_tables_merge_later_bad(root):
 # start tag，見 ok_table_html_comment），也不觸發 `link`（沒有 href／src）。
 V7_PROBE = "\n<!-- v7 探針：動 devflow/** 一行 -->\n"
 
+# 不硬編當下的版號（issue #156；同 mut_version 不硬編規則本體版號的理由，issue #125）：
+# 沙箱由 make_sandbox() 從**工作樹**複製、再做初始 commit 當 base，所以每個 `v7` 案例的
+# base 版本就是工作樹此刻的 devflow/VERSION。把 `0.1.0.0` 寫進突變與期望字串的話，VERSION
+# 一進位（任何一張進位的 PR 都算，不是某一張特有）：ok_v7_bumped 的突變目標值＝現值，
+# edit() 的守門「突變沒有改到任何東西」當場 sys.exit，整份煙霧中止；就算繞過守門，四處
+# `base … → HEAD …` 的期望字串也不再匹配。CI 不跑煙霧，所以這種壞法在 main 上是靜默的。
+V7_VERSION_FILE = "devflow/VERSION"
+V7_INSTALLER = REPO / "devflow" / "install.py"
+
+
+def v7_version_re():
+    """載入安裝器取 `VERSION_RE`。
+
+    **「版本」的定義只有一份**：檢查器的 `v7` 那一節就是直接 `getattr(installer,
+    "VERSION_RE")`（scripts/devflow_checks.py 的 load_installer()／V7_VERSION_RE），
+    本檔照做、不另寫一條四碼 regex——兩份定義一漂移，煙霧會以為自己還在測同一件事。
+    載不進來或沒有 VERSION_RE 都當場中止（fail loud，不猜）。`except BaseException`
+    同檢查器的 foreign()：SystemExit 繼承 BaseException，安裝器 import 期一句
+    sys.exit(0) 若穿透，煙霧就以 0 結束、看起來像全過。"""
+    sys.dont_write_bytecode = True        # 別在 devflow/ 留 __pycache__
+    spec = importlib.util.spec_from_file_location("devflow_install_smoke", V7_INSTALLER)
+    if spec is None or spec.loader is None:
+        sys.exit("載入不了 %s（repo 佈局和本測試的假設不符）" % V7_INSTALLER)
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except BaseException as e:
+        sys.exit("載入 %s 失敗：%s: %s（檔案內容和本測試的假設不符）"
+                 % (V7_INSTALLER, type(e).__name__, e))
+    version_re = getattr(module, "VERSION_RE", None)
+    if version_re is None:
+        sys.exit("%s 沒有 VERSION_RE（檔案內容和本測試的假設不符）" % V7_INSTALLER)
+    return version_re
+
+
+def v7_read_base():
+    """工作樹的 devflow/VERSION → 四碼字串（例：`0.1.0.0`）。
+
+    讀不到或不合「版本」定義就中止整份煙霧：沙箱 base 的版本無從得知，`v7` 七案的
+    突變值與期望字串全部失去依據，猜一個值只會把錯誤推到後面變成看不懂的 FAIL。
+    回傳字串而不是四碼元組：檢查器印的是檔案裡那串字（`raw.decode(...).rstrip("\\n")`），
+    期望字串要跟它逐字相同。"""
+    try:
+        raw = (REPO / V7_VERSION_FILE).read_bytes()
+    except OSError as e:
+        sys.exit("讀不到 %s：%s（repo 內容和本測試的假設不符）" % (V7_VERSION_FILE, e))
+    m = V7_VERSION_RE.fullmatch(raw)
+    if m is None:
+        sys.exit("%s 不合 kit-install 規格的「版本」定義（四碼 a.b.c.d、除單獨的 0 外"
+                 "無前導零、恰一個換行、無 BOM）：%r（檔案內容和本測試的假設不符）"
+                 % (V7_VERSION_FILE, raw))
+    return ".".join(g.decode("ascii") for g in m.groups())
+
+
+def v7_bump(v):
+    """末位 +1（`0.1.0.1` → `0.1.0.2`）。位數（a／b／c／d）依 V1／V2 由人判，
+    `v7` 只判有沒有進位，所以煙霧動哪一位都測得到同一條路徑。"""
+    head, _, last = v.rpartition(".")
+    return "%s.%d" % (head, int(last) + 1)
+
+
+V7_VERSION_RE = v7_version_re()
+V7_BASE = v7_read_base()        # 沙箱初始 commit（＝每個 v7 案例的 base）的版本
+V7_BUMPED = v7_bump(V7_BASE)    # 進位後的值：ok_v7_bumped 用
+# 「改低」用的固定值：合 VERSION_RE，且除了 base 自己恰為它以外，必低於任何 base。
+# 相等時那兩案改不出比 base 低的值（ok_v7_version_only 還會撞 edit() 的守門），同款中止。
+V7_LOW = "0.0.0.0"
+if V7_BASE == V7_LOW:
+    sys.exit("%s 現值就是改低用的 %s，ok_v7_version_only／mut_v7_downgrade 造不出"
+             "比 base 低的版本（檔案內容和本測試的假設不符）" % (V7_VERSION_FILE, V7_LOW))
+
 
 def v7_touch_coder(root):
     edit(root, "devflow/coders/codex.md", lambda t: append(t, V7_PROBE))
@@ -866,19 +938,20 @@ def ok_v7_untouched(root):
 
 
 def ok_v7_bumped(root):
-    """(2) 動 `devflow/coders/codex.md` 一行 ＋ VERSION `0.1.0.0`→`0.1.0.1` → ✅。"""
+    """(2) 動 `devflow/coders/codex.md` 一行 ＋ VERSION 由 `V7_BASE` 進位到
+    `V7_BUMPED`（末位 +1）→ ✅。"""
     v7_touch_coder(root)
-    edit(root, "devflow/VERSION", lambda t: "0.1.0.1\n")
+    edit(root, V7_VERSION_FILE, lambda t: V7_BUMPED + "\n")
     return commit_mutation(root, "v7: 動 devflow/** 並進位")
 
 
 def ok_v7_version_only(root):
     """(3) 只動 `devflow/VERSION` → ✅（`V7` 明文把 VERSION 自己排除在觸發條件外）。
 
-    **刻意改低**（`0.1.0.0`→`0.0.0.1`）：改高的話「有排除」與「沒排除」兩種實作都會 ✅，
+    **刻意改低**（`V7_BASE` → `V7_LOW`）：改高的話「有排除」與「沒排除」兩種實作都會 ✅，
     這一案就證明不了排除。改低之後，VERSION 若沒被排除，changed 非空且 HEAD < base，
     本案會 ❌——排除真的生效，才會是「不觸發」。"""
-    edit(root, "devflow/VERSION", lambda t: "0.0.0.1\n")
+    edit(root, V7_VERSION_FILE, lambda t: V7_LOW + "\n")
     return commit_mutation(root, "v7: 只動 devflow/VERSION")
 
 
@@ -889,9 +962,10 @@ def mut_v7_no_bump(root):
 
 
 def mut_v7_downgrade(root):
-    """(5) 動 `devflow/**` 且 VERSION 改**低**——「有改到」不等於「有進位」。"""
+    """(5) 動 `devflow/**` 且 VERSION 改**低**（`V7_BASE` → `V7_LOW`）——
+    「有改到」不等於「有進位」。"""
     v7_touch_coder(root)
-    edit(root, "devflow/VERSION", lambda t: "0.0.9.9\n")
+    edit(root, V7_VERSION_FILE, lambda t: V7_LOW + "\n")
     return commit_mutation(root, "v7: 動 devflow/** 但 VERSION 改低")
 
 
@@ -899,9 +973,14 @@ def mut_v7_leading_zero(root):
     """(6) VERSION 改為 `0.1.0.01`（前導零），不合 kit-install 規格的「版本」定義。
 
     同時要動一個 `devflow/**` 的檔：changed 為空時檢查器根本不會去讀 VERSION，
-    這一案就測不到格式判定。判定用的是安裝器的 VERSION_RE，不是檢查器自己寫的 regex。"""
+    這一案就測不到格式判定。判定用的是安裝器的 VERSION_RE，不是檢查器自己寫的 regex。
+
+    **只有這一案的值刻意留字面、不由 `V7_BASE` 組**（issue #156）：它測的是「不合定義
+    的內容判不了」，與 base 是多少無關；期望字串要逐字比對被拒絕的那串 bytes（見 CASES），
+    由 base 組出來反而讓期望跟著版號飄。它本來就不合 VERSION_RE 而 `V7_BASE` 必定合，
+    兩者不可能相等，`edit()` 的守門永遠改得到東西。"""
     v7_touch_coder(root)
-    edit(root, "devflow/VERSION", lambda t: "0.1.0.01\n")
+    edit(root, V7_VERSION_FILE, lambda t: "0.1.0.01\n")
     return commit_mutation(root, "v7: VERSION 前導零")
 
 
@@ -1008,11 +1087,12 @@ CASES = [
      ("有 1 列的狀態欄不是 ✅ 可用／📝 已宣稱／⬜ 未測", "狀態欄=「✅ 完成」")),
     # issue #150 AC-2 的四個應擋案例。前三案的摘要只差在兩端的版本值，明細再指出是哪個
     # 檔觸發的——摘要片段帶上 `base … → HEAD …`，才分得出「沒動」「改低」是哪一種。
+    # 版本值由 V7_BASE／V7_LOW 組出，不寫死當下版號（issue #156）。
     ("v7:no-bump", "v7", mut_v7_no_bump, {},
-     ("動到 devflow/ 卻沒有進位 devflow/VERSION：base 0.1.0.0 → HEAD 0.1.0.0",
+     ("動到 devflow/ 卻沒有進位 devflow/VERSION：base %s → HEAD %s" % (V7_BASE, V7_BASE),
       "變更：devflow/coders/codex.md")),
     ("v7:downgrade", "v7", mut_v7_downgrade, {},
-     ("動到 devflow/ 卻沒有進位 devflow/VERSION：base 0.1.0.0 → HEAD 0.0.9.9",
+     ("動到 devflow/ 卻沒有進位 devflow/VERSION：base %s → HEAD %s" % (V7_BASE, V7_LOW),
       "變更：devflow/coders/codex.md")),
     # 明細比對整行（含被拒絕的那串 bytes）：只比「不合……定義」的話，換成別的不合規內容
     # 也會命中，證明不了擋的是前導零。
@@ -1021,7 +1101,7 @@ CASES = [
       "HEAD 的 devflow/VERSION 不合 kit-install 規格的「版本」定義"
       "（四碼 a.b.c.d、除單獨的 0 外無前導零、恰一個換行、無 BOM）：b'0.1.0.01\\n'")),
     ("v7:subdir", "v7", mut_v7_subdir, {},
-     ("動到 devflow/ 卻沒有進位 devflow/VERSION：base 0.1.0.0 → HEAD 0.1.0.0",
+     ("動到 devflow/ 卻沒有進位 devflow/VERSION：base %s → HEAD %s" % (V7_BASE, V7_BASE),
       "變更：devflow/templates/issue.md")),
 ]
 
@@ -1085,7 +1165,7 @@ PASSING = [
     ("v7:untouched", "v7", ok_v7_untouched,
      "沒有動到 devflow/（devflow/VERSION 自己除外），V7 不觸發"),
     ("v7:bumped", "v7", ok_v7_bumped,
-     "devflow/ 動了 1 個檔，devflow/VERSION 已進位 0.1.0.0 → 0.1.0.1"),
+     "devflow/ 動了 1 個檔，devflow/VERSION 已進位 %s → %s" % (V7_BASE, V7_BUMPED)),
     ("v7:version-only", "v7", ok_v7_version_only,
      "沒有動到 devflow/（devflow/VERSION 自己除外），V7 不觸發"),
 ]
