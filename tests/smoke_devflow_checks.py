@@ -18,10 +18,12 @@
      臨時目錄，git init ＋ git add —— 檢查器認的是 `git ls-files`，所以 index 有就夠，
      不必 commit。
   2. 先跑一次**沒有突變**的正向案例，要求 exit 0 且一個 ❌ 都沒有。
-  3. 每個關卡至少注入一個「應擋」的突變，要求 exit 1，且輸出裡出現該關卡的訊息。
+  3. 每個關卡至少注入一個「應擋」的突變，要求 exit 1，且輸出裡出現該關卡的訊息；
+     案例另外指定明細時，那條明細要在**同一條 ❌ 底下**（reports()／candidates()）。
      每個案例都從乾淨的沙箱重造，突變之間不互相污染。
   4. 另有「突變後仍應通過」的正向案例（PASSING）：證明判準不誤擋正當變更，要求 exit 0 且 0 個 ❌。
-  5. 另有「一個突變同時觸發多項」的案例（MULTI）：要求 ❌ 的條數恰好等於列出的那幾條。
+  5. 另有「一個突變同時觸發多項」的案例（MULTI）：要求 ❌ 的條數恰好等於列出的那幾條，
+     且每條期望各自配到**不同**的一條 ❌（unmatched()）。
      用來鎖 fail closed——某一項該報而沒報時，條數會少，本檔就失敗（issue #91 AC-1）。
 
 正向案例 0 個 ❌ 這件事讓負向案例的 ❌ 有了歸因：乾淨輸入不產生任何 ❌，所以突變後冒出來的
@@ -755,8 +757,9 @@ def ok_tables_coordinator_omitted(root):
 #   mutate  = 怎麼把輸入弄壞（None＝不改檔案，只靠環境變數）
 #   env     = 疊在基準環境上的額外變數
 #   expect  = 輸出裡必須出現的訊息片段，用來確認擋下來的是**這一項**而不是別的。
-#             字串＝結尾摘要的 ❌ 要含它；(摘要片段, 明細片段)＝另外要求 ❌ 底下的明細含第二個
-#             片段——同一關卡的多種問題共用一條摘要時（`table`），靠明細分出是哪一種擋的
+#             字串＝要有一條 ❌ 的摘要含它；(摘要片段, 明細片段)＝再要求**同一條 ❌ 底下**
+#             （不是全份輸出）的明細有一行含第二個片段——同一關卡的多種問題共用一條摘要時
+#             （`table`），靠明細分出是哪一種擋的。判定見 candidates()／unmatched()
 def mut_tables_merge_missing(root):
     """merge key 帶進來的 `filler` 指向不存在的工具——展開後仍要擋。
     改 coordinator 不改 implementer：後者會連帶讓 i5 ❌。"""
@@ -954,8 +957,10 @@ PASSING = [
 #   name    = 案例名
 #   gates   = 要打開的關卡（全部以 DEVFLOW_GATE_<KEY>=1 打開）
 #   mutate  = 怎麼把輸入弄壞
-#   expects = 摘要裡必須出現的 ❌ 片段，一條片段對一條 ❌。每條的寫法同 CASES 的 expect：
-#             字串＝摘要片段；(摘要片段, 明細片段)＝另外要求該 ❌ 底下的明細含第二個片段
+#   expects = 一條期望對一條 ❌，而且是**一對一**：不同期望必須配到不同的 ❌，兩條期望
+#             同時命中同一條、再由無關的第三條把數量補齊不算數（unmatched()）。每條的
+#             寫法同 CASES 的 expect：字串＝摘要片段；(摘要片段, 明細片段)＝再要求
+#             **同一條 ❌ 底下**的明細有一行含第二個片段
 MULTI = [
     ("encoding:fail-closed", ("encoding", "fence"), mut_encoding_fail_closed,
      ["README.md 的內容不是合法 UTF-8", "的 fenced code block 沒有關閉"]),
@@ -963,7 +968,8 @@ MULTI = [
     # 那條 2 項（該表自己的問題 ＋「整個檔案沒有一張合格的對照表」）＋ `r9` 的「找不到
     # 可判讀狀態欄的表」。摘要片段帶「（2 項）」：形狀那一節少報一項時（例如「沒有一張
     # 合格的對照表」被跳過）條數對不上，本檔就失敗，這才是 fail closed 的鎖點。
-    # 明細片段仍在，三案共用同一條摘要時靠它分出是哪一種擋的（同 CASES 的 `table` 群）。
+    # 明細片段仍在，三案共用同一條摘要時靠它分出是哪一種擋的（同 CASES 的 `table` 群）；
+    # 而且必須掛在**形狀那一條** ❌ 底下——錯掛到 `r9` 那條就不算命中（PR #151 第一輪）。
     ("table", ("table", "r9"), mut_table,
      [("devflow/forges/github.md 的對照表形狀不合 R9（2 項）", "表頭缺 面向"),
       "devflow/forges/github.md 找不到可判讀狀態欄的表（形狀那一節已報）"]),
@@ -1016,6 +1022,82 @@ def crosses(out):
     return []
 
 
+def reports(out):
+    """取**第一次**輸出（不是結尾摘要）的每一條 ❌ 及其直屬明細：[(摘要, [明細行, …]), …]。
+
+    版面來自檢查器的 `report()`：摘要是 `  ❌ <訊息>`，明細是緊接其後、縮排更深的
+    `      <明細>`，到第一行縮排沒有更深（`✅`／`📝`／節標題／空行）為止。結尾那份
+    「必需關卡失敗」摘要用同樣的 `  ❌ `、但不帶明細，所以掃到 `=====` 就停——**條數**
+    仍只由 crosses() 從那份摘要數，這裡負責的是「哪條明細掛在哪條 ❌ 底下」。
+
+    明細行只去掉左邊的縮排、**保留行尾換行**：期望片段因此能比對到行尾（srcset 幾案的
+    suffix="\\n" 靠這個分出「整串」與「單一候選」，見 readme_link；nbsp 那案的明細還以
+    NBSP 結尾，所以不能 rstrip）。
+    encoding 的 fail closed 提示（`      —— 以上 N 個檔仍以 U+FFFD …`）縮排與明細同深，
+    會被歸到前一條 ❌ 底下——那是多出來的一行，不會讓任何期望少命中。
+    """
+    blocks = []
+    cur = None
+    for line in out.split("\n"):
+        if line.startswith("====="):
+            break
+        body = line.lstrip(" ")
+        indent = len(line) - len(body)
+        if cur is not None and body and indent > cur[0]:
+            cur[2].append(body + "\n")
+            continue
+        cur = None
+        if body.startswith("❌"):
+            cur = (indent, body[1:].strip(), [])
+            blocks.append(cur)
+    return [(summary, details) for _, summary, details in blocks]
+
+
+def as_pair(expect):
+    """期望的兩種寫法正規化成 (摘要片段, 明細片段)：字串＝只比摘要。"""
+    return (expect, None) if isinstance(expect, str) else expect
+
+
+def describe(expect):
+    """FAIL 訊息裡怎麼稱呼一條期望。"""
+    s, d = as_pair(expect)
+    return "「%s」%s" % (s, "" if d is None else "＋明細「%s」" % d)
+
+
+def candidates(blocks, expect):
+    """一條期望能配到哪幾條 ❌：摘要含片段，且明細片段是 None 或**同一條 ❌ 底下**
+    的明細有一行含它。
+
+    明細只認直屬的那幾行，不搜全份輸出：正確字串出現在錯誤的位置不算命中（審查者
+    PR #151 第一輪的反例——把形狀那條的明細清空、同一串字錯掛到 `r9` 底下，全份搜尋
+    下三案仍 PASS）。"""
+    s, d = as_pair(expect)
+    return [i for i, (summary, details) in enumerate(blocks)
+            if s in summary and (d is None or any(d in x for x in details))]
+
+
+def unmatched(blocks, expects):
+    """把每條期望配到**不同**的一條 ❌，回傳配不到的那幾條期望（原 list 的索引）。
+
+    一對一是必要的：兩條期望同時命中同一條 ❌、再由另一條無關的 ❌ 把條數補齊，
+    等於少驗了一項。用增廣路（最大二分配對）而不是貪婪，是因為貪婪會依順序誤判——
+    A 能配 ①②、B 只能配 ①，先讓 A 佔走 ① 就會報 B 配不到。"""
+    cand = [candidates(blocks, e) for e in expects]
+    taken = {}                       # ❌ 的索引 -> 佔走它的那條期望
+
+    def augment(e, seen):
+        for b in cand[e]:
+            if b in seen:
+                continue
+            seen.add(b)
+            if b not in taken or augment(taken[b], seen):
+                taken[b] = e
+                return True
+        return False
+
+    return [e for e in range(len(expects)) if not augment(e, set())]
+
+
 def main():
     if not CHECKER.is_file():
         sys.exit("找不到檢查器：%s" % CHECKER)
@@ -1066,8 +1148,10 @@ def main():
                 mutate(work)
             code, out = run_checker(work, gate=gate, extra_env=extra_env)
             marks = crosses(out)
-            expect, detail = (expect, None) if isinstance(expect, str) else expect
-            hit = any(expect in m for m in marks) and (detail is None or detail in out)
+            # 命中＝存在一條 ❌，其摘要含 expect 且（沒指定明細，或**它自己的**明細
+            # 有一行含 detail）。和 MULTI 共用 unmatched()／candidates()。
+            hit = not unmatched(reports(out), [expect])
+            expect, detail = as_pair(expect)
             # exit 1 **只能由目標項造成**（PR #81「Phase 1 第三出口」的條件三）：
             # 只檢查「有沒有命中目標」會讓「目標錯誤 ＋ 別的錯誤」一起通過，
             # 那時 exit 1 證明不了是哪一項擋的（審查者 PR #83 第一輪以故障
@@ -1080,8 +1164,8 @@ def main():
             if not good:
                 failures.append(
                     "%s：exit %d（期望 1）%s"
-                    % (name, code, "" if hit else "，且輸出裡找不到「%s」%s"
-                       % (expect, "" if detail is None else "＋明細「%s」" % detail)))
+                    % (name, code, "" if hit else "，且輸出裡找不到%s"
+                       % describe((expect, detail))))
             shutil.rmtree(work)
             print()
 
@@ -1093,11 +1177,9 @@ def main():
             code, out = run_checker(
                 work, extra_env={"DEVFLOW_GATE_" + g.upper(): "1" for g in gates})
             marks = crosses(out)
-            # 一條期望＝(摘要片段, 明細片段)，明細為 None 就只比摘要（同 CASES 的 expect）。
-            pairs = [(e, None) if isinstance(e, str) else e for e in expects]
-            missing = ["%s%s" % (s, "" if d is None else "＋明細「%s」" % d)
-                       for s, d in pairs
-                       if not any(s in m for m in marks) or (d is not None and d not in out)]
+            # 每條期望要配到**不同**的一條 ❌（摘要＋它自己的明細），同 CASES 的判定。
+            pairs = [as_pair(e) for e in expects]
+            missing = [describe(expects[i]) for i in unmatched(reports(out), expects)]
             good = (code == 1 and not missing and len(marks) == len(pairs))
             print("多項  %-22s 應擋    exit %d（期望 1）  ❌ %d 條（期望 %d）  %s"
                   % (name, code, len(marks), len(pairs), "PASS" if good else "FAIL"))
