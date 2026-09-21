@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh_TW" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        <link rel="canonical" href="https://augustushsu.github.io/agent-devflow/v0.0.0.1/docs/spec/kit-install/spec/">
+        <link rel="shortcut icon" href="../../../../img/favicon.ico">
+        <title>kit-install：把 agent-devflow 完整安裝到消費者專案；升級與回復皆為重裝 - agent-devflow</title>
+        <link href="../../../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../../../css/brands.min.css" rel="stylesheet">
+        <link href="../../../../css/solid.min.css" rel="stylesheet">
+        <link href="../../../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <link href="../../../../css/version-select.css" rel="stylesheet">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../../../..">agent-devflow</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../../.." class="nav-link">agent-devflow</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Devflow</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../../../devflow/WORKFLOW/" class="dropdown-item">agent-devflow WORKFLOW</a>
+</li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Coders</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../../devflow/coders/claude-code/" class="dropdown-item">coder: claude-code</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/coders/codex/" class="dropdown-item">coder: codex</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Forges</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../../devflow/forges/gitea/" class="dropdown-item">forge: gitea</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/forges/github/" class="dropdown-item">forge: github</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/forges/gitlab/" class="dropdown-item">forge: gitlab</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Orchestrators</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../../devflow/orchestrators/hermes/" class="dropdown-item">orchestrator: hermes</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/orchestrators/none/" class="dropdown-item">orchestrator: none</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/orchestrators/paperclip/" class="dropdown-item">orchestrator: paperclip</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Hermes</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../../devflow/orchestrators/hermes/SKILL/" class="dropdown-item">devflow orchestrator（Hermes）</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Seats</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../../devflow/seats/" class="dropdown-item">devflow/seats — 職位定義</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/seats/approver/" class="dropdown-item">seat: approver（裁決位）</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/seats/coordinator/" class="dropdown-item">seat: coordinator（協調位）</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/seats/implementer/" class="dropdown-item">seat: implementer（實作位）</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/seats/reviewer/" class="dropdown-item">seat: reviewer（審查位）</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Templates</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../../devflow/templates/entry-block/" class="dropdown-item">Entry block</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/templates/issue/" class="dropdown-item">Issue</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/templates/local-README/" class="dropdown-item">devflow.local/</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/templates/pr/" class="dropdown-item">Pr</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/templates/review-prompt/" class="dropdown-item">Review prompt</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/templates/spec/" class="dropdown-item">&lt;功能名稱&gt;</a>
+</li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle active" aria-current="page" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Docs</a>
+                                <ul class="dropdown-menu">
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Guide</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../guide/" class="dropdown-item">docs/guide — 人類專用</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Spec</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../" class="dropdown-item">docs/spec — 本 repo 的規格集</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../install/spec/" class="dropdown-item">install：把入口區塊安全插入其他專案的 CLAUDE.md／AGENTS.md</a>
+</li>
+    </ul>
+  </li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Kit install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="./" class="dropdown-item active" aria-current="page">kit-install：把 agent-devflow 完整安裝到消費者專案；升級與回復皆為重裝</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                            <li class="nav-item">
+                                <a rel="prev" href="../../install/spec/" class="nav-link">
+                                    <i class="fa fa-arrow-left"></i> Previous
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a rel="next" class="nav-link disabled">
+                                    Next <i class="fa fa-arrow-right"></i>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="https://github.com/AugustusHsu/agent-devflow" class="nav-link"><i class="fa-brands fa-github"></i> GitHub</a>
+                            </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#kit-install-agent-devflow" class="nav-link">kit-install：把 agent-devflow 完整安裝到消費者專案；升級與回復皆為重裝</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#_1" class="nav-link">目標與範圍</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#_2" class="nav-link">驗收標準</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#_3" class="nav-link">未決事項</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="kit-install-agent-devflow">kit-install：把 agent-devflow 完整安裝到消費者專案；升級與回復皆為重裝<a class="headerlink" href="#kit-install-agent-devflow" title="Permanent link">&para;</a></h1>
+<!-- 依 WORKFLOW.md S1。stage 1 下第 2 節不生效；本檔為 Phase 4 首單（#131）的 T 基準。
+     入口區塊行為由 docs/spec/install/spec.md（下稱「入口規格」）定義，本檔只引用不重述（I5）。-->
+
+<h2 id="_1">目標與範圍<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p><strong>要解決什麼</strong>：入口規格的安裝器只插入入口區塊；裝到消費者專案後，區塊指向的 <code>devflow/WORKFLOW.md</code> 並不存在。本檔把同一支安裝器擴充為<strong>完整安裝</strong>：把 kit 的 <code>devflow/</code> 鏡像到消費者專案、建立消費者自有的 <code>devflow.local/</code>、再依入口規格處理入口區塊。<strong>升級與回復不是新功能</strong>：換一個 kit checkout（另一個 tag）重跑同一支安裝。Phase 4 出口「有可安全安裝的固定版本」＝本檔＋<code>devflow/VERSION</code>＋tag（<code>V4</code>、<code>V5</code>）。</p>
+<p><strong>形式</strong>：<code>python3 &lt;kit&gt;/devflow/install.py &lt;目標 repo 路徑&gt; [--dry-run]</code>。Python 3 stdlib only，POSIX。<strong>來源</strong>＝執行中的 <code>install.py</code> 所在的 <code>devflow/</code> 目錄（<code>os.path.dirname(os.path.abspath(__file__))</code>），其上層為 kit 根；不依賴 git、不驗 git 狀態。<strong>目標</strong>＝命令列給的路徑。來源與目標可為同一 repo（kit 自檢，或消費者跑自己那份副本），此時鏡像為 no-op（AC-19）。</p>
+<p><strong>擁有權</strong>（全文核心，每條 AC 由此推導）：</p>
+<table>
+<thead>
+<tr>
+<th>目標內路徑</th>
+<th>擁有者</th>
+<th>安裝器行為</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>devflow/**</code></td>
+<td>kit</td>
+<td>鏡像：與來源不同即覆寫、來源沒有即刪除；排除路徑除外</td>
+</tr>
+<tr>
+<td><code>devflow.yml</code></td>
+<td>消費者</td>
+<td>不建、不改；唯讀兩件事：入口規格 AC-7 的投影、AC-9 的存在性</td>
+</tr>
+<tr>
+<td><code>devflow.local/**</code></td>
+<td>消費者</td>
+<td>不存在才建，且只放 <code>README.md</code>；存在（任何形態）則整棵不碰</td>
+</tr>
+<tr>
+<td><code>CLAUDE.md</code>／<code>AGENTS.md</code></td>
+<td>消費者（區塊除外）</td>
+<td>依入口規格 AC-1～AC-13</td>
+</tr>
+<tr>
+<td>其他一切</td>
+<td>消費者</td>
+<td>不寫（AC-18）。「不讀」是實作紀律，黑箱 harness 不驗、不列 AC</td>
+</tr>
+</tbody>
+</table>
+<p><strong>名詞定義</strong>（全文適用）：
+- <strong>版本</strong>：<code>devflow/VERSION</code> 檔，內容恰為一行 <code>a.b.c.d</code>（<code>V1</code> 四碼，每碼十進位非負整數、除單獨的 <code>0</code> 外無前導零）加恰一個 <code>\n</code>，無 BOM。比較依四碼數值元組。
+- <strong>排除路徑</strong>：任何名為 <code>__pycache__</code> 的目錄（連同其下全部）、副檔名 <code>.pyc</code> 的檔。對來源與目標<strong>雙邊</strong>生效：來源的不複製、目標的不刪除、不列入報表。<strong>封閉列舉是刻意的</strong>：<code>.DS_Store</code>、<code>.gitkeep</code> 等不在列，出現在來源即鏡像、只在目標即刪除——<code>devflow/**</code> 是 kit 的，消費者不該在其下放東西。
+- <strong>鏡像集合</strong>：來源 <code>devflow/</code> 下、排除路徑以外的所有一般檔案，以相對於 <code>devflow/</code> 的 POSIX 路徑識別。
+- <strong>動作</strong>：對鏡像集合每個路徑 p——目標無 p → <code>created</code>；目標 p 存在但 bytes 不同、或 p 是 symlink（任何指向）→ <code>updated</code>（symlink 由一般檔取代）；bytes 相同 → <code>unchanged</code>。目標 <code>devflow/</code> 下、排除路徑以外、不在鏡像集合的一般檔或 symlink → <code>deleted</code>（symlink 只移除連結本身，不進入其指向）。刪除後留下的空目錄一併移除，<code>devflow/</code> 本身除外。<strong>遍歷目標永不跟隨 symlink</strong>（<code>os.walk(followlinks=False)</code>、<code>os.lstat</code>）；目標內某 symlink 的相對路徑若是鏡像集合任一路徑的<strong>祖先</strong>（來源在此為目錄），不歸入任何動作，依 AC-14b 拒絕——否則寫入會沿連結越出目標。
+- <strong>模式</strong>：以目標<strong>安裝前</strong>的 <code>devflow/VERSION</code> 為舊版、來源的為新版——目標無 <code>devflow/</code> 或無該檔 → <code>fresh</code>；舊版可解析且新版＞舊版 → <code>upgrade</code>；新版＜舊版 → <code>downgrade</code>；相等 → <code>same</code>；舊版存在但不合「版本」定義 → <code>replace</code>。模式只用於報表，不改變行為。
+- <strong>單檔原子寫入</strong>：寫 p ＝ 同目錄寫暫存檔後 <code>os.replace</code>。不保證多檔整體原子（AC-16）。</p>
+<p><strong>不做</strong>（決定，非未決）：
+- 不建、不改 <code>devflow.yml</code>。<code>forge</code>／<code>seats</code> 是消費者的選擇，安裝器不替人選；kit 附 <code>devflow/templates/devflow.yml</code>（頂層鍵集合與 kit 根 <code>devflow.yml</code> 相同，值為註解過的預設）供複製，缺檔時只提示（AC-9）。
+- 不加 <code>--uninstall</code>。README Phase 4 只列安裝／升級／回復；移除留後版。
+- 不安裝 CI 檢查器（<code>scripts/devflow_checks.py</code>、<code>.github/workflows/</code>）與 <code>docs/</code>：它們不在 <code>devflow/</code> 下。v0.0.0.1 的消費者沒有 CI，另立 issue。
+- 不建 <code>.hermes/skills/</code> symlink 等 orchestrator 接入；接入方式住 <code>devflow/orchestrators/&lt;name&gt;.md</code>。
+- 不驗來源是否為 tag checkout。<code>V5</code> 保證已發 tag 不移動，故從 tag checkout 安裝時 VERSION 與內容一一對應；從其他 commit 安裝是使用者的選擇，安裝器只報 VERSION。
+- 不合併內容。<code>devflow/**</code> 是 kit 的，消費者在其下的修改會被下一次鏡像覆寫或刪除——<code>--dry-run</code> 先列出（AC-10）。</p>
+<p><strong>與入口規格的關係</strong>：入口規格「目標與範圍」寫「不複製 <code>devflow/</code> 目錄」，本檔使該句不再成立——依 <code>V6</code> 標為<strong>不相容</strong>：受影響契約＝「<code>install.py</code> 只動入口檔」；遷移＝無（尚無消費者）；入口規格該句已改為引用本檔（入口規格 0.0.1.1，editorial）。入口規格 AC-1～AC-12 全部保留，由本安裝器在鏡像之後執行（AC-13 是本 repo CI 的 <code>i5</code>，不由安裝器執行）；其 harness 案例保留、斷言前綴依 AC-20 調整。</p>
+<p><strong>kit 內容前提</strong>（本檔不實作、v0.0.0.1 前完成、另單）：kit 的 <code>devflow/{coders,forges,orchestrators}/*.md</code> 只保留「通用」節；「本機」節（含 kit 自身的）移到各消費者的 <code>devflow.local/</code>。AC-17 以此為 kit 義務，<code>R9</code> 措辭與 SKILL.md 路徑同步屬該單。</p>
+<h2 id="_2">驗收標準<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>「集合」「原子性」「可寫性」「<code>--dry-run</code>」的既有語意依入口規格。執行分兩階段：<strong>決策階段</strong>（讀來源與目標、算出全部動作、檢查可寫性；不寫任何檔）與<strong>寫入階段</strong>（依 AC-16 順序落盤）。exit code：0 成功；1 入口區塊碰撞（入口規格 AC-5／5b／5c）；2 決策階段的環境或用法錯誤；3 寫入階段的 I/O 失敗。<strong>exit 1／2 由決策階段判定，此時不寫任何檔</strong>；exit 3 是唯一「已寫部分檔」的結果（AC-16）。exit 非 0 時 <strong>stdout 全部抑制</strong>，stderr 恰一行 <code>&lt;路徑或項目&gt;: &lt;原因&gt;</code>（入口規格 AC-7 的 advisory 只在 exit 0 時印，見 AC-9）。</p>
+<ul>
+<li>AC-1: 目標無 <code>devflow/</code> → 建立；鏡像集合每檔 bytes 等於來源；<code>devflow.local/README.md</code> 依 AC-7；入口區塊依入口規格；stdout 第一行模式 <code>fresh</code>；exit 0</li>
+<li>AC-2: 目標 <code>devflow/x</code> 存在但 bytes 與來源不同、或為 symlink → 覆寫為來源 bytes（symlink 由一般檔取代），stdout 一行 <code>devflow/x: updated</code></li>
+<li>AC-3: 目標 <code>devflow/y</code> 為一般檔或 symlink、不在鏡像集合、不屬排除路徑 → 刪除（symlink 只移除連結），stdout 一行 <code>devflow/y: deleted</code>；刪後空目錄移除（<code>devflow/</code> 本身保留）</li>
+<li>AC-4: 動作為 <code>unchanged</code> 的路徑不印任何行；排除路徑雙邊不複製、不刪除、不印</li>
+<li>AC-5: 連續執行兩次 → 第二次 stdout 恰為摘要行（模式 <code>same</code>）＋入口規格 AC-3 的 <code>unchanged</code> 行；第二次執行後目標整棵樹的 bytes 與存在性等於第一次執行後的快照</li>
+<li>AC-6: 以 kit 副本 A（VERSION <code>0.0.0.1</code>）安裝，再以副本 B（VERSION <code>0.0.0.2</code>；相對 A 恰一檔改、一檔增、一檔刪）安裝 → 摘要模式 <code>upgrade</code>，動作行恰為 <code>updated</code>／<code>created</code>／<code>deleted</code> 各一；再以 A 安裝 → 摘要模式 <code>downgrade</code>，目標 <code>devflow/</code> 整棵樹 bytes 與第一次安裝後逐 byte 相同</li>
+<li>AC-7: 目標無 <code>devflow.local</code>（<code>os.path.lexists</code> 假）→ 建目錄與 <code>devflow.local/README.md</code>（bytes 等於 <code>devflow/templates/local-README.md</code>），stdout 一行 <code>devflow.local/README.md: created</code>；<code>lexists</code> 真（目錄、空目錄、缺 README、檔案、symlink 皆算）→ 不建、不改、不印</li>
+<li>AC-8: 目標有 <code>devflow.yml</code> → 安裝前後 bytes 相同；目標無 → 不建</li>
+<li>AC-9: exit 0 且目標無 <code>devflow.yml</code> → stderr 含恰一行 <code>devflow.yml: absent; copy devflow/templates/devflow.yml and edit (advisory)</code>，exit 不受影響；<code>--dry-run</code> 同樣印。<strong>advisory 優先序</strong>（本檔對入口規格的唯一收窄）：所有 advisory（本條與入口規格 AC-7 的）只在 exit 0 時印，<strong>兩條 advisory 互斥</strong>（AC-7 的要 <code>devflow.yml</code> 存在且可讀，本條要它以 <code>lexists</code> 不存在），同一個一致的檔案系統狀態不會同時觸發，故無順序問題；實作若同時累積兩者，AC-7 在前（實作 #138 已如此）；exit 非 0 時 stderr 只有錯誤那一行。入口規格 AC-7 現行實作在決策中途即印 advisory，改為緩衝到決策成功後再印；既有 harness 案例的 advisory 皆為 exit 0 情境，斷言不變</li>
+<li>AC-10: <code>--dry-run</code> → 執行完整決策階段、不進入寫入階段（目標整棵樹 bytes 與存在性前後相同）；<strong>決策階段的結果</strong>——exit 0／1／2 的判定、stderr、stdout 的摘要行與動作行——與實際執行對同一安裝前狀態<strong>逐字相同</strong>；入口檔部分依入口規格 AC-10（unified diff 或 <code>unchanged</code>）。exit 3 只存在於寫入階段，dry-run 不可能產生，不在本條的一致性範圍內（同一狀態下實跑 exit 3 而 dry-run exit 0 不是本條的反例）</li>
+<li>AC-11: exit 0 時 stdout 第一行恰為 <code>kit-install: &lt;舊版或 none&gt; -&gt; &lt;新版&gt; (&lt;模式&gt;)</code>，模式取 <code>fresh|upgrade|downgrade|same|replace</code> 之一，<code>replace</code> 時舊版印 <code>invalid</code>；其後為動作行（<code>devflow/...</code> 與 <code>devflow.local/README.md</code>），以路徑字串 <code>sorted()</code> 排序；再接入口檔輸出（入口規格 AC-3／AC-10 格式）</li>
+<li>AC-12: 來源無 <code>devflow/VERSION</code>、或內容不合「版本」定義 → exit 2，stderr <code>devflow/VERSION: &lt;原因&gt;</code>；不讀目標、不做任何決策</li>
+<li>AC-13: 來源 <code>devflow/</code> 下（排除路徑以外）任何 symlink，不論指向檔、目錄或 dangling → exit 2，stderr <code>&lt;相對路徑&gt;: symlink in source not supported</code></li>
+<li>AC-14: 目標 <code>devflow</code> 以 <code>lexists</code> 存在但不是目錄（一般檔、任何 symlink 含指向目錄者、dangling）→ exit 2，stderr <code>devflow: &lt;原因&gt;</code></li>
+<li>AC-14b: 目標 <code>devflow/</code> 下任一 symlink（不論指向何處、是否 dangling）的相對路徑是鏡像集合某路徑的祖先（例：來源有 <code>devflow/sub/a</code>，目標 <code>devflow/sub</code> 是 symlink）→ 決策階段 exit 2，stderr <code>devflow/sub: symlink where source has directory</code>；不寫任何檔。祖先關係以 POSIX 路徑段判（<code>devflow/su</code> 不是 <code>devflow/sub/a</code> 的祖先），不 resolve；非祖先的 symlink 依「動作」定義為 <code>updated</code>（來源同路徑是檔）或 <code>deleted</code>（來源無）</li>
+<li>AC-15: 決策階段對每個將被 created／updated／deleted 的路徑檢查所在目錄 <code>W_OK | X_OK</code>、將被 updated／deleted 的既有檔另檢查本身 <code>W_OK</code>；任一不可寫 → exit 2、不寫任何檔；<code>--dry-run</code> 亦檢查（與入口規格「可寫性」同理）</li>
+<li>AC-16: 寫入順序＝鏡像 created／updated（每檔單檔原子）→ 鏡像 deleted → 空目錄移除（深者先）→ <code>devflow.local/</code> → 入口檔（入口規格原子性）；<strong>同一階段內依路徑字串 <code>sorted()</code> 順序逐一寫入</strong>（寫入全序＝階段順序 × 階段內 <code>sorted()</code>；AC-11 的報表是另一個順序——全域 <code>sorted()</code>——兩者不相同，報表不代表寫入序）。寫入階段 I/O 失敗 → <strong>exit 3</strong>，stderr 恰一行 <code>&lt;失敗路徑&gt;: &lt;OSError strerror&gt;</code>；已完成的步驟不回滾——可觀察判準：依上述全序，失敗路徑之前的每個動作已落盤、失敗路徑及其後的每個動作未動；重跑即為恢復（AC-5 保證收斂）。harness 以 <code>updated</code> 兩檔 <code>devflow/a</code>、<code>devflow/b</code>、對 <code>b</code> 的 <code>os.replace</code> 注入 OSError 構造：期望 <code>a</code> 已更新、<code>b</code> 未動、exit 3、stderr <code>devflow/b: &lt;strerror&gt;</code></li>
+<li>AC-17: harness 對<strong>執行中的 kit 本身</strong>檢：<code>devflow/VERSION</code> 合「版本」定義；<code>devflow/templates/devflow.yml</code> 與 <code>devflow/templates/local-README.md</code> 存在；<code>devflow/</code> 下（排除路徑以外）無 symlink；<code>devflow/{coders,forges,orchestrators}/*.md</code> 無 <code>## 本機</code> 標題行。任一不成立即該案失敗</li>
+<li>AC-18: 目標中 <code>devflow/</code>、<code>devflow.local/</code>、入口檔集合以外的任何路徑，安裝前後 bytes 與存在性相同（含 exit 3 的情境）；harness 以整棵樹快照比對（比 bytes 與 lexists，不比 stat）</li>
+<li>AC-19: 目標路徑即 kit 根（來源＝目標）→ 鏡像全部 <code>unchanged</code>、無 <code>deleted</code>；<code>devflow.local/</code> 依 AC-7；入口檔依入口規格；摘要模式 <code>same</code>；exit 0</li>
+<li>AC-20: <code>tests/install/harness.py</code> 擴充：本檔每條 AC 每個分支至少一案；需變造來源的案例把 kit 複製到 <code>/tmp</code> 後變造、執行該副本的 <code>install.py</code>（AC-6 的 A／B 即兩份副本）；入口規格既有案例全部保留，其 stdout 斷言改為「摘要行＋動作行」前綴之後的部分逐字不變；其 stderr 斷言改為剝除<strong>結尾恰一行</strong>本條 AC-9 advisory（若存在）之後逐字不變——既有案例的假專案多無 <code>devflow.yml</code>，AC-9 必然多印該行；exit code 斷言不變</li>
+</ul>
+<h2 id="_3">未決事項<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../../../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../../../js/base.js"></script>
+        <script src="../../../../search/main.js"></script>
+        <script src="../../../../js/version-select.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

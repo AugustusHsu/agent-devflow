@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh_TW" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        <link rel="canonical" href="https://augustushsu.github.io/agent-devflow/v0.0.0.1/devflow/forges/github/">
+        <link rel="shortcut icon" href="../../../img/favicon.ico">
+        <title>forge: github - agent-devflow</title>
+        <link href="../../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../../css/brands.min.css" rel="stylesheet">
+        <link href="../../../css/solid.min.css" rel="stylesheet">
+        <link href="../../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <link href="../../../css/version-select.css" rel="stylesheet">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../../..">agent-devflow</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../.." class="nav-link">agent-devflow</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle active" aria-current="page" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Devflow</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../WORKFLOW/" class="dropdown-item">agent-devflow WORKFLOW</a>
+</li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Coders</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../coders/claude-code/" class="dropdown-item">coder: claude-code</a>
+</li>
+            
+<li>
+    <a href="../../coders/codex/" class="dropdown-item">coder: codex</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Forges</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../gitea/" class="dropdown-item">forge: gitea</a>
+</li>
+            
+<li>
+    <a href="./" class="dropdown-item active" aria-current="page">forge: github</a>
+</li>
+            
+<li>
+    <a href="../gitlab/" class="dropdown-item">forge: gitlab</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Orchestrators</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../orchestrators/hermes/" class="dropdown-item">orchestrator: hermes</a>
+</li>
+            
+<li>
+    <a href="../../orchestrators/none/" class="dropdown-item">orchestrator: none</a>
+</li>
+            
+<li>
+    <a href="../../orchestrators/paperclip/" class="dropdown-item">orchestrator: paperclip</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Hermes</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../orchestrators/hermes/SKILL/" class="dropdown-item">devflow orchestrator（Hermes）</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Seats</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../seats/" class="dropdown-item">devflow/seats — 職位定義</a>
+</li>
+            
+<li>
+    <a href="../../seats/approver/" class="dropdown-item">seat: approver（裁決位）</a>
+</li>
+            
+<li>
+    <a href="../../seats/coordinator/" class="dropdown-item">seat: coordinator（協調位）</a>
+</li>
+            
+<li>
+    <a href="../../seats/implementer/" class="dropdown-item">seat: implementer（實作位）</a>
+</li>
+            
+<li>
+    <a href="../../seats/reviewer/" class="dropdown-item">seat: reviewer（審查位）</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Templates</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../templates/entry-block/" class="dropdown-item">Entry block</a>
+</li>
+            
+<li>
+    <a href="../../templates/issue/" class="dropdown-item">Issue</a>
+</li>
+            
+<li>
+    <a href="../../templates/local-README/" class="dropdown-item">devflow.local/</a>
+</li>
+            
+<li>
+    <a href="../../templates/pr/" class="dropdown-item">Pr</a>
+</li>
+            
+<li>
+    <a href="../../templates/review-prompt/" class="dropdown-item">Review prompt</a>
+</li>
+            
+<li>
+    <a href="../../templates/spec/" class="dropdown-item">&lt;功能名稱&gt;</a>
+</li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Docs</a>
+                                <ul class="dropdown-menu">
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Guide</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/guide/" class="dropdown-item">docs/guide — 人類專用</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Spec</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/spec/" class="dropdown-item">docs/spec — 本 repo 的規格集</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/spec/install/spec/" class="dropdown-item">install：把入口區塊安全插入其他專案的 CLAUDE.md／AGENTS.md</a>
+</li>
+    </ul>
+  </li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Kit install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/spec/kit-install/spec/" class="dropdown-item">kit-install：把 agent-devflow 完整安裝到消費者專案；升級與回復皆為重裝</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                            <li class="nav-item">
+                                <a rel="prev" href="../gitea/" class="nav-link">
+                                    <i class="fa fa-arrow-left"></i> Previous
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a rel="next" href="../gitlab/" class="nav-link">
+                                    Next <i class="fa fa-arrow-right"></i>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="https://github.com/AugustusHsu/agent-devflow" class="nav-link"><i class="fa-brands fa-github"></i> GitHub</a>
+                            </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#forge-github" class="nav-link">forge: github</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#_1" class="nav-link">通用</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#_2" class="nav-link">已知限制（文件推導，待實測）</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="forge-github">forge: github<a class="headerlink" href="#forge-github" title="Permanent link">&para;</a></h1>
+<p>衍生值對照表，<strong>只有通用節</strong>（值欄宣稱可重用的工具能力或程序，repo 與環境只是可替換的參數）。本機節——具名的環境 instance——住 <code>devflow.local/&lt;同路徑&gt;</code>，不隨 kit 安裝。分節與狀態欄依 <code>R9</code>。</p>
+<h2 id="_1">通用<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>面向</th>
+<th>職位</th>
+<th>值</th>
+<th>狀態</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>審查載體</td>
+<td>—</td>
+<td>Pull Request</td>
+<td>✅ 可用（實測 2026-09-11，驗證方式兩項全驗：(1) <code>gh api repos/AugustusHsu/agent-devflow --jq .has_issues</code> 期望 <code>true</code>，實際 <code>true</code>——issue 與 PR 是兩條並存的通道，審查載體不是靠關掉 issue 才落在 PR 上；(2) 審查結論確實落在 PR 上——<code>gh pr view 34 --json comments --jq '.comments[] | select(.body | test("^## 第[一二三四五六七八九十]+輪審查：</code>(APPROVE|REQUEST_CHANGES)<code>@</code>[0-9a-f]{7}<code>")) | .url'</code> 期望至少一則，實際輸出五則（第一～第五輪，最後一則 <code>https://github.com/AugustusHsu/agent-devflow/pull/34#issuecomment-5624993819</code>，body 首行 <code>## 第五輪審查：</code>APPROVE<code>@</code>51dce7d<code>`，該 sha 等於</code>gh pr view 34 --json headRefOid<code>前 7 碼）——判定點是 comment **body** 含 verdict 與 head sha，只數 comments 數量會被純 CI／狀態留言誤判為通過；</code>reviews<code>物件在本 repo 不承載結論（見「審查證據（</code>R3<code>／</code>R5<code>）」列）。第三者現在可照做。受測環境：2026-09-11；gh 2.97.0（</code>gh --version<code>讀回</code>gh version 2.97.0 (2026-07-31)<code>）；執行身分為對</code>AugustusHsu/agent-devflow<code>具 admin 的</code>gh<code>登入（</code>gh api repos/AugustusHsu/agent-devflow --jq .permissions<code>輸出</code>{"admin":true,"maintain":true,"pull":true,"push":true,"triage":true}<code>），本格兩條指令實際只需 pull；目標 repo</code>AugustusHsu/agent-devflow`（公開、單人）；證據：上述兩條指令輸出）</td>
+</tr>
+<tr>
+<td>CLI</td>
+<td>—</td>
+<td><code>gh</code></td>
+<td>✅ 可用（實測 2026-09-11，依 <code>R9</code> 自原「CLI」一格拆出：本格只宣稱「GitHub 的 CLI 是 <code>gh</code>」，本機安裝的版本與登入狀態是 instance 事實，見本機節「CLI（本機 instance）」格。驗證方式：<code>gh --version</code>，首行為 <code>gh version &lt;版本&gt; (&lt;日期&gt;)</code>、次行為 <code>https://github.com/cli/cli/releases/tag/v&lt;版本&gt;</code>——次行指向 GitHub 官方 <code>cli/cli</code> 的 release，即 <code>gh</code> 就是 GitHub CLI；本次實際輸出 <code>gh version 2.97.0 (2026-07-31)</code> 與 <code>https://github.com/cli/cli/releases/tag/v2.97.0</code>（該次執行同時是本機節該格的第 (1) 項）。第三者在任何裝有 <code>gh</code> 的環境現在可照做；讀到的版本號是環境參數，不是本格的宣稱。受測環境：2026-09-11；gh 2.97.0；執行身分為本機安裝 <code>gh</code> 的 OS 使用者（<code>gh --version</code> 不需任何 repo 權限）；目標 repo：不適用；證據：上述指令輸出）</td>
+</tr>
+<tr>
+<td>留言／label</td>
+<td>implementer／coordinator／approver</td>
+<td><code>gh issue comment</code> ／ <code>gh issue edit --add-label</code>（增量，已有該 label 時不報錯）</td>
+<td>✅ 可用（實測 2026-09-11，依 <code>R7</code> 自原「建 issue／留言／label」一格拆出；<code>gh issue create</code> 本單未實測，見下一列。驗證方式兩項全驗，第三者可對任一自己有 write 權限的 issue 照做：(1) 留言——<code>gh issue comment 35 --body "R8 通道驗證 $(date -Iseconds)"</code> 期望 stdout 為新留言 URL，實際輸出 <code>https://github.com/AugustusHsu/agent-devflow/issues/35#issuecomment-5625048753</code>；再以該 URL 的 comment ID 讀回——<code>gh api repos/AugustusHsu/agent-devflow/issues/comments/5625048753 --jq '{url: .html_url, body}'</code>，實際 <code>{"body":"R8 通道驗證 2026-09-11T04:32:32+08:00","url":"https://github.com/AugustusHsu/agent-devflow/issues/35#issuecomment-5625048753"}</code>——URL 落在 issue #35 底下、body 與送出值逐字相符，排除「留言成功但落到別的 issue」。<strong>不要用 <code>.comments[-1]</code></strong>：後續留言會使「最後一則」變動，那是 <code>R8</code> 禁止的一次性條件；重跑時以自己剛送出的 comment ID 讀回。(2) label 增量——issue #35 執行前已帶 <code>process</code>，<code>gh issue edit 35 --add-label process</code> 期望 exit 0 且不報錯（冪等），實際 stdout <code>https://github.com/AugustusHsu/agent-devflow/issues/35</code>、無錯誤；<code>gh issue view 35 --json labels --jq '.labels[].name'</code> 期望仍只列 <code>process</code>（不重複、不新增），實際輸出 <code>process</code>。受測環境：2026-09-11；gh 2.97.0；<code>date</code> 為 GNU coreutils 9.4；執行身分為對 <code>AugustusHsu/agent-devflow</code> 具 admin 的 <code>gh</code> 登入（<code>gh api repos/AugustusHsu/agent-devflow --jq .permissions</code> 輸出 <code>{"admin":true,"maintain":true,"pull":true,"push":true,"triage":true}</code>），兩項實際只需 push／write；目標 repo <code>AugustusHsu/agent-devflow</code>；證據：issue #35 留言 https://github.com/AugustusHsu/agent-devflow/issues/35#issuecomment-5625048753）</td>
+</tr>
+<tr>
+<td>建 issue</td>
+<td>coordinator</td>
+<td><code>gh issue create</code></td>
+<td>✅ 可用（實測 2026-09-21，在可丟棄的消費者 repo 上現場跑，原格所列的升級條件兩項全驗。驗證方式，第三者對任一自己有 write 權限的 repo 照做：(1) 把 issue 本文寫成檔案 <code>&lt;body.md&gt;</code>（依 <code>templates/issue.md</code> 填好），執行 <code>gh issue create --title "&lt;title&gt;" --body-file &lt;body.md&gt;</code>，記下 stdout 的 issue URL 與號碼 <code>&lt;N&gt;</code>；(2) 讀回——<code>gh issue view &lt;N&gt; --json title --jq .title</code> 期望與送出的 <code>&lt;title&gt;</code> 逐字相同；<code>gh issue view &lt;N&gt; --json body --jq .body</code> 與 <code>&lt;body.md&gt;</code> 比對（兩邊都把 <code>\r\n</code> 正規化為 <code>\n</code> 並去尾端換行後）期望逐 byte 相同。實跑：消費者 repo <code>AugustusHsu/devflow-e2e</code> issue #5——送出指令、讀回指令與結果（title 逐字相同；body 正規化後 1295 bytes 逐 byte 相同）全文記在該 issue 的「派工紀錄（<code>L1</code>）」留言首段 https://github.com/AugustusHsu/devflow-e2e/issues/5#issuecomment-5754725217 ，第三者可對著留言重跑同兩條讀回指令。受測環境：2026-09-21，<code>gh version 2.97.0 (2026-07-31)</code>，執行身分為本機使用者以 <code>gh auth login</code> 的 token（scope 含 <code>repo</code>），目標 repo 為私有 <code>AugustusHsu/devflow-e2e</code>。證據：https://github.com/AugustusHsu/devflow-e2e/issues/5（本文＋ <code>L1</code> 留言）、https://github.com/AugustusHsu/agent-devflow/issues/142（E7 段））</td>
+</tr>
+<tr>
+<td>從 issue 開分支</td>
+<td>coordinator</td>
+<td><code>gh issue develop &lt;N&gt; --base main</code>，分支名 <code>&lt;N&gt;-&lt;slug&gt;</code></td>
+<td>⬜ 未測（值欄的 <code>gh issue develop</code> 至 2026-09-21 仍未有人跑過；本 repo 與消費者 repo 的分支都由 orchestrator 在本機開（程序見 <code>orchestrators/hermes.md</code>「建 worktree」格），不構成本格證據。要升 <code>✅</code> 須實跑 <code>gh issue develop &lt;N&gt; --base main --name &lt;N&gt;-&lt;slug&gt;</code> 並以 <code>gh issue develop &lt;N&gt; --list</code> 讀回）</td>
+</tr>
+<tr>
+<td>tag 保護</td>
+<td>—</td>
+<td>rulesets；無法依角色限制建立者</td>
+<td>⬜ 未測</td>
+</tr>
+<tr>
+<td>開 PR</td>
+<td>implementer／coordinator（代行）</td>
+<td><code>gh pr create --base main --body-file &lt;templates/pr.md 填好&gt;</code></td>
+<td>✅ 可用（實測 2026-09-11，驗證方式兩項全驗，第三者可對任一自己有 write 權限的 repo 照做：在 worktree 內執行 <code>gh pr create --base main --title "&lt;title&gt;" --body-file &lt;由 templates/pr.md 填好的檔案&gt;</code>，記下 stdout 的 PR URL 與號碼 <code>&lt;N&gt;</code>；再 <code>gh pr view &lt;N&gt; --json baseRefName --jq .baseRefName</code> 期望 <code>main</code>——證明 <code>--base main</code> 生效，而非落到 repo 預設 base；<code>gh pr view &lt;N&gt; --json body,headRefOid --jq '. as $r | {secs: [$r.body | scan("## (基準|對應 AC|驗證|Write scope 自查)") | .[0]], head_ok: ($r.body | test("head：</code>" + $r.headRefOid[0:7] + "<code>"))}'</code> 期望 <code>secs</code> 含 <code>templates/pr.md</code> 的四個必要節、<code>head_ok</code> 為 <code>true</code>——證明 body 來自填好的模板且 head sha 與實際 head 一致（<code>L4</code>），而非被 commit 訊息或 <code>--fill</code> 取代。受測環境：2026-09-11；gh 2.97.0；執行身分為對 <code>AugustusHsu/agent-devflow</code> 具 admin 的 <code>gh</code> 登入（<code>gh api repos/AugustusHsu/agent-devflow --jq .permissions</code> 輸出 <code>{"admin":true,"maintain":true,"pull":true,"push":true,"triage":true}</code>），開 PR 實際只需 push／write；目標 repo <code>AugustusHsu/agent-devflow</code>；另以 <code>gh api graphql -f query='{ repository(owner:"&lt;o&gt;", name:"&lt;r&gt;") { pullRequest(number:&lt;N&gt;) { lastEditedAt } } }' --jq .data.repository.pullRequest.lastEditedAt</code> 期望 <code>null</code>——證明 body 是 create 當下所給、從未 edit（<strong>不要用 <code>createdAt</code> = <code>updatedAt</code></strong>：close、刪分支等事件都會更新 <code>updatedAt</code>，關閉後即不成立）；<code>diff &lt;(gh pr view &lt;N&gt; --json body --jq .body) &lt;body-file&gt;</code> 期望僅檔尾換行差（body-file 須保留供比對）。證據：<code>https://github.com/AugustusHsu/agent-devflow/pull/37</code>（驗證專用 draft PR，空 commit <code>ff4428f</code>，驗完即關不合併）——orchestrator 以填好的模板檔 <code>gh pr create --draft --base main --body-file</code> 建立後<strong>未經任何 edit</strong> 即讀回：<code>baseRefName</code> = <code>main</code>，<code>secs</code> = <code>["基準","對應 AC","驗證","Write scope 自查"]</code>，<code>head_ok</code> = <code>true</code>，<code>lastEditedAt</code> = <code>null</code>（PR 關閉後讀回仍為 <code>null</code>；對照 PR #36 曾 edit，讀回 <code>2026-09-10T21:06:45Z</code>），body diff 僅第 25 行檔尾空行；比對用的 body-file 未保留在 repo，第三者重跑時自備填好的模板檔並保留至比對完成。取證用 PR 會永久留在 <code>gh pr list --state all</code>，不影響 <code>--state merged</code> 與 main；日後同類取證改在可丟棄 repo 進行）</td>
+</tr>
+<tr>
+<td>審查證據（<code>R3</code>／<code>R5</code>）</td>
+<td>reviewer</td>
+<td><code>gh pr comment &lt;N&gt; --body "&lt;審查結論；body 內寫明 head sha&gt;"</code>；<code>gh pr review --approve|--request-changes</code> 在單人 repo 不可用（本檔「已知限制」第一條）</td>
+<td>✅ 可用（實測 2026-09-11，值欄依 <code>R7</code> 改寫：原列 <code>gh pr review &lt;N&gt; --approve\|--request-changes --body</code> 與「review 原生綁 commit」，但同一帳號不能核可自己的 PR，單人 repo 走不到該指令；實際生效的機制是 <code>gh pr comment</code> 寫審查結論、body 寫明 head sha 以補回 review 原生的 commit 綁定（接 <code>R3</code>）。驗證方式（與「合併」列同口徑：讀回第三者現在仍可查的持久成品）：<code>gh pr view 34 --json comments,headRefOid --jq '{head: .headRefOid[0:7], last: (.comments | map(select(.body | test("^## 第.+輪審查："))) | last | {url, first: (.body | split("\n")[0])})}'</code> 期望 <code>last.first</code> 含 <code>APPROVE</code> 或 <code>REQUEST_CHANGES</code> 且含 <code>head</code> 的 7 碼，實際輸出 <code>{"head":"51dce7d","last":{"url":"https://github.com/AugustusHsu/agent-devflow/pull/34#issuecomment-5624993819","first":"## 第五輪審查：</code>APPROVE<code>@</code>51dce7d<code>"}}</code>。寫入動作本身：對任一有 write 權限的 PR 執行 <code>gh pr comment &lt;PR-N&gt; --body "&lt;結論&gt; @ &lt;head sha&gt;"</code>，記下 stdout 的 comment URL，以固定 ID 讀回 <code>gh api repos/&lt;o&gt;/&lt;r&gt;/issues/comments/&lt;ID&gt; --jq '{url: .html_url, first: (.body | split("\n")[0])}'</code> 期望 <code>first</code> 含結論與 <code>gh pr view &lt;PR-N&gt; --json headRefOid</code> 前 7 碼。orchestrator 實跑於 PR #37：stdout <code>https://github.com/AugustusHsu/agent-devflow/pull/37#issuecomment-5625433360</code>，讀回 <code>first</code> = <code>REQUEST_CHANGES @</code>ff4428f<code>（R8 通道驗證…）</code>，<code>headRefOid[0:7]</code> = <code>ff4428f</code>。受測環境：2026-09-11；gh 2.97.0；執行身分為對 <code>AugustusHsu/agent-devflow</code> 具 admin 的 <code>gh</code> 登入，讀回只需 pull、寫入需 write；目標 repo <code>AugustusHsu/agent-devflow</code>（公開、單人）；證據：寫入 <code>https://github.com/AugustusHsu/agent-devflow/pull/37#issuecomment-5625433360</code>（驗證用，PR #37 已關）；真實審查留言例 PR #34 <code>https://github.com/AugustusHsu/agent-devflow/pull/34#issuecomment-5624993819</code>）</td>
+</tr>
+<tr>
+<td>合併（<code>I3</code>）</td>
+<td>approver／coordinator（<code>M2</code>）</td>
+<td><code>gh pr merge &lt;PR-N&gt; --merge --subject "&lt;gitmoji&gt; merge(#&lt;issue-N&gt;): …" --body "PR #&lt;PR-N&gt;; reviewer …; head &lt;sha&gt;"</code></td>
+<td>✅ 可用（實測 2026-09-11，依 <code>R9</code> 自原「合併（<code>I3</code>）」一格拆出：本格只宣稱合併指令與其三個選項的效果，原值欄的「repo 層：<code>allow_squash_merge=false</code>、<code>allow_rebase_merge=false</code>、<code>delete_branch_on_merge=true</code>」是本 repo 的設定，見本機節「repo 層合併設定」格。值欄依 <code>R7</code> 改寫一處：原寫死 <code>--subject "🔀 merge(#N): …"</code>，但讀回 PR #34 的 merge commit subject 實為 <code>📝 merge(#33): …</code>（<code>git log --oneline --merges -8 origin/main</code>：#2／#7／#14／#18／#28 用 🔀，#4／#30／#33 用該次變更本身的 gitmoji），實際生效的機制是 <code>--subject</code> 原樣接受任意字串、gitmoji 並非固定值，故改為 <code>&lt;gitmoji&gt;</code>。驗證方式兩項全驗（原第 (2)(3) 項；原第 (1) 項是 repo 設定讀回，隨該事實移到本機節）：(2) <code>--merge</code> 確實產生兩親 merge commit——<code>gh pr view 34 --json mergeCommit --jq .mergeCommit.oid</code> 得 <code>8029dfa12092701c3a6807405e2b047d036b1745</code>，<code>git cat-file -p 8029dfa12092701c3a6807405e2b047d036b1745 | grep -n '^parent'</code> 期望兩行，實際 <code>2:parent 333d087c9f529cddcf04d00db587c7a52c50cea8</code> 與 <code>3:parent 51dce7d6ec33d7b3d38240925342dcddda9024d8</code>，第二個 parent 等於 <code>gh pr view 34 --json headRefOid --jq .headRefOid</code> 的 <code>51dce7d6ec33d7b3d38240925342dcddda9024d8</code>（逐行定位，不以計數為唯一依據）；(3) <code>--subject</code>／<code>--body</code> 生效——<code>git log -1 --format='%s%n%b' 8029dfa12092701c3a6807405e2b047d036b1745</code> 實際輸出 subject <code>📝 merge(#33): hermes.md 派工／worktree／中斷交接三格結帳，HITL 降 ⬜</code>、body 首行 <code>PR #34; reviewer codex(gpt-5.6-sol) ×5; head 51dce7d</code>，三段與值欄 body 的 <code>PR #N; reviewer …; head &lt;sha&gt;</code> 逐段對應；此處讀的是該兩個選項<strong>產出的成品</strong>，不是拿 commit 訊息的自述當證據。<code>gh pr merge</code> 無法對已合併 PR 重跑，故依 <code>R8</code> 採讀回成品的前瞻讀法——(2)(3) 對本 repo 任一已合併 PR 皆可照做，第三者現在可重現。受測環境：2026-09-11；gh 2.97.0；<code>grep</code> 為 GNU grep 3.11；git 2.43.0（orchestrator 於主 checkout 實測 <code>git version 2.43.0</code>；coder 白名單無 <code>git --version</code>）；執行身分為對 <code>AugustusHsu/agent-devflow</code> 具 admin 的 <code>gh</code> 登入（<code>gh api repos/AugustusHsu/agent-devflow --jq .permissions</code> 輸出 <code>{"admin":true,"maintain":true,"pull":true,"push":true,"triage":true}</code>），(2)(3) 只需 pull ＋ 本機有該 repo 的 clone；目標 repo <code>AugustusHsu/agent-devflow</code>；證據：上述指令輸出 ＋ merge commit <code>8029dfa12092701c3a6807405e2b047d036b1745</code>）</td>
+</tr>
+<tr>
+<td>已合併訊號（<code>C1</code>）</td>
+<td>coordinator</td>
+<td><code>gh pr view &lt;N&gt; --json state,mergedAt,mergeCommit</code> ＋ <code>git merge-base --is-ancestor</code></td>
+<td>✅ 可用（實測 2026-09-11，驗證方式兩項全驗：(1) forge 端——<code>gh pr view 34 --json state,mergedAt,mergeCommit --jq '{state, mergedAt, mergeCommit: .mergeCommit.oid}'</code> 期望 <code>state</code> 為 <code>MERGED</code>、<code>mergedAt</code> 非 null、<code>mergeCommit</code> 為 sha，實際輸出 <code>{"mergeCommit":"8029dfa12092701c3a6807405e2b047d036b1745","mergedAt":"2026-09-10T20:27:56Z","state":"MERGED"}</code>；(2) 本地 git 端獨立確認——<code>gh pr view 34 --json headRefOid --jq .headRefOid</code> 取 head <code>51dce7d6ec33d7b3d38240925342dcddda9024d8</code>，執行 <code>git merge-base --is-ancestor 51dce7d6ec33d7b3d38240925342dcddda9024d8 origin/main</code> 期望 exit 0，實際 exit 0；同一次以 <code>git rev-parse origin/main</code> 讀回 <code>8029dfa12092701c3a6807405e2b047d036b1745</code>，確認比對的是當下 main。兩項互補且缺一不可：(1) 只是 forge 自述，反例「PR 標 <code>MERGED</code> 但 head 不在 main 的歷史裡」要靠 (2) 擋下。第三者現在可對本 repo 任一已合併 PR 照做（本機需先有 <code>origin/main</code> 的 fetch）。受測環境：2026-09-11；gh 2.97.0；git 2.43.0（orchestrator 於主 checkout 實測 <code>git version 2.43.0</code>；coder 白名單無 <code>git --version</code>）；執行身分為對 <code>AugustusHsu/agent-devflow</code> 具 admin 的 <code>gh</code> 登入（<code>gh api repos/AugustusHsu/agent-devflow --jq .permissions</code> 輸出 <code>{"admin":true,"maintain":true,"pull":true,"push":true,"triage":true}</code>），兩項實際只需 pull；目標 repo <code>AugustusHsu/agent-devflow</code>；證據：上述指令輸出）</td>
+</tr>
+<tr>
+<td>合併後刪分支（<code>C1</code>）</td>
+<td>coordinator</td>
+<td>repo 設定 <code>delete_branch_on_merge=true</code> 開啟時，合併由 GitHub 自動刪遠端分支；<code>git ls-remote --heads origin &lt;branch&gt;</code> 驗</td>
+<td>✅ 可用（實測 2026-09-11，依 <code>R9</code> 自原「合併後刪分支（<code>C1</code>）」一格拆出：本格只宣稱 GitHub 的自動刪分支機制與讀回方式，「本 repo 的 <code>delete_branch_on_merge</code> 為 <code>true</code>」是本 repo 的設定，其讀回（原第 (1) 項）併入本機節「repo 層合併設定」格。值欄依 <code>R7</code> 改寫：原列 <code>gh pr merge --delete-branch</code> 或 <code>git push origin --delete &lt;branch&gt;</code> 兩法皆未實測，本 repo 今日的合併都沒有帶 <code>--delete-branch</code>，實際生效的是 repo 設定 <code>delete_branch_on_merge=true</code>，故改寫後只留該機制、不沿用原宣稱。驗證方式：(2) 機制生效——<code>gh pr view 34 --json headRefName --jq .headRefName</code> 取已合併 PR 的分支名 <code>33-hermes-cells</code>，<code>git ls-remote --heads origin 33-hermes-cells</code> 期望無輸出，實際無輸出；為排除「遠端連不上時同樣是空輸出」這個反例，同一次另跑 <code>git ls-remote --heads origin</code>，實際只輸出兩行——<code>b791d4d408c8ae7a3dd1e8ba4b896a62b0d8d94b</code> → <code>refs/heads/4-lookup-table-settlement</code>、<code>8029dfa12092701c3a6807405e2b047d036b1745</code> → <code>refs/heads/main</code>，證明遠端可連通且 <code>33-hermes-cells</code> 確實不在其中。第三者現在可對本 repo 任一已合併 PR 照做；換 repo 時以該 repo 的已合併 PR 為參數，且該 repo 的 <code>delete_branch_on_merge</code> 須先為 <code>true</code>（本 repo 的讀值見本機節「repo 層合併設定」格）。受測環境：2026-09-11；gh 2.97.0；git 2.43.0（orchestrator 於主 checkout 實測 <code>git version 2.43.0</code>；coder 白名單無 <code>git --version</code>）；執行身分為對 <code>AugustusHsu/agent-devflow</code> 具 admin 的 <code>gh</code> 登入（<code>gh api repos/AugustusHsu/agent-devflow --jq .permissions</code> 輸出 <code>{"admin":true,"maintain":true,"pull":true,"push":true,"triage":true}</code>），(2) 只需 pull；目標 repo <code>AugustusHsu/agent-devflow</code>；證據：上述指令輸出）</td>
+</tr>
+<tr>
+<td>CI 位置</td>
+<td>—</td>
+<td><code>.github/workflows/</code></td>
+<td>✅ 可用（實測 2026-09-11，驗證方式兩項全驗：(1) 檔案位置——在該 repo 的工作目錄執行 <code>ls .github/workflows/</code> 期望列出 workflow 檔，實際輸出 <code>devflow-checks.yml</code>；(2) 該位置確實被 GitHub 讀取並執行——<code>gh run list --workflow=devflow-checks.yml --limit 1</code> 期望至少一筆 run，實際輸出一列（tab 分隔）<code>completed</code>、<code>success</code>、<code>📝 process(對照表): hermes.md 派工／worktree／HITL／中斷交接四格結帳</code>、<code>devflow checks</code>、<code>33-hermes-cells</code>、<code>pull_request</code>、<code>34526392736</code>、<code>11s</code>、<code>2026-09-10T20:26:31Z</code>。(1) 單獨只證「檔案在那個路徑」，反例「檔案放對但 GitHub 沒在跑」要靠 (2) 擋下。第三者現在可照做。受測環境：2026-09-11；gh 2.97.0；<code>ls</code> 為 GNU coreutils 9.4；執行身分為對 <code>AugustusHsu/agent-devflow</code> 具 admin 的 <code>gh</code> 登入（<code>gh api repos/AugustusHsu/agent-devflow --jq .permissions</code> 輸出 <code>{"admin":true,"maintain":true,"pull":true,"push":true,"triage":true}</code>），(1) 需本機有該 repo 的 checkout、(2) 只需 pull；目標 repo <code>AugustusHsu/agent-devflow</code>；證據：上述兩條指令輸出 ＋ run <code>34526392736</code>）</td>
+</tr>
+<tr>
+<td>人類站（<code>D3</code>）</td>
+<td>—</td>
+<td>GitHub Pages：<code>gh-pages</code> 分支或 Actions 部署</td>
+<td>⬜ 未測</td>
+</tr>
+<tr>
+<td>故障退路（<code>F3</code>）</td>
+<td>coordinator</td>
+<td><code>F3</code>（forge 回錯或逾時）在 GitHub 的讀回程序：尚未推導</td>
+<td>⬜ 未測（值欄依 <code>R9</code> 自「—」改寫，只補上宣稱對象，未推導內容）</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_2">已知限制（文件推導，待實測）<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<ul>
+<li>同一帳號不能核可自己的 PR；單人 repo 的 required approvals 必須是 0，審查證據靠 review 內容與 head sha，不靠 approval 計數。</li>
+<li>REST <code>/issues</code> 會混入 PR，列 issue 時要過濾。</li>
+<li>公開 repo 預設任何人可送 review；必要時開 code review limits。</li>
+</ul></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../../js/base.js"></script>
+        <script src="../../../search/main.js"></script>
+        <script src="../../../js/version-select.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>
