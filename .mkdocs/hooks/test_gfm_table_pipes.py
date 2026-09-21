@@ -34,6 +34,27 @@ cases = [
     # 儲存格內 pre 之後的 code 仍要改（pre 深度已歸零）
     (T % "<td><pre><code>x \\| y</code></pre><code>p \\| q</code></td>",
      T % "<td><pre><code>x \\| y</code></pre><code>p | q</code></td>"),
+    # 審查 R2 反例：HTML 註解裡的假標籤不計深度
+    ("<!-- <table><td><code> --><p>outside \\| text</p><!-- </code></td></table> -->",
+     "<!-- <table><td><code> --><p>outside \\| text</p><!-- </code></td></table> -->"),
+    # 審查 R2 反例：<script> 內的字串不計深度
+    ("<script>const s=\"<table><td><code>\";</script><p>outside \\| text</p>",
+     "<script>const s=\"<table><td><code>\";</script><p>outside \\| text</p>"),
+    # 註解在真表格內：註解本身不動，旁邊的 code 照改
+    (T % "<td><!-- a \\| b --><code>a \\| b</code></td>", T % "<td><!-- a \\| b --><code>a | b</code></td>"),
+    # <style> 內容整段跳過
+    ("<style>td::after{content:\"<code>\"}</style>" + T % "<td><code>a \\| b</code></td>",
+     "<style>td::after{content:\"<code>\"}</style>" + T % "<td><code>a | b</code></td>"),
+    # <th> 內 <pre>：不動
+    (T % "<th><pre><code>x \\| y</code></pre></th>", T % "<th><pre><code>x \\| y</code></pre></th>"),
+    # 未閉合的 <td>：到 </table> 為止都算格內（深度不會因缺 </td> 而錯位到表格外）
+    (T % "<td><code>a \\| b</code>" + "<code>c \\| d</code>", T % "<td><code>a | b</code>" + "<code>c \\| d</code>"),
+    # 未閉合的 <td> 不得延續到下一個表格的格外區域（caption 不是格）
+    (T % "<td><code>a \\| b</code>" + "<table><caption><code>c \\| d</code></caption></table>",
+     T % "<td><code>a | b</code>" + "<table><caption><code>c \\| d</code></caption></table>"),
+    # code 內的轉義 '<'（&lt;）不是標籤
+    (T % "<td><code>gh pr review &lt;N&gt; --approve\\|--request</code></td>",
+     T % "<td><code>gh pr review &lt;N&gt; --approve|--request</code></td>"),
 ]
 bad = [(i, o, fix(i)) for i, o in cases if fix(i) != o]
 for i, o, got in bad:

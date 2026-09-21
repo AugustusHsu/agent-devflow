@@ -10,28 +10,38 @@
 - 巢狀表格：以深度計數處理，內外層儲存格都算。
 - <td><pre><code>（HTML 表格才可能出現）：<pre> 內是作者原文，不動。
 - 沒有 <table> 祖先的 <td>（畸形 HTML）：不動。
+- HTML 註解、<script>／<style> 的內容整段原樣輸出，也不計入深度（裡面的「標籤」不是標籤）。
 - 其他標籤與屬性一律原樣輸出，不重寫 HTML。
 """
 import re
 
-_TAG = re.compile(r"<(/?)(table|td|th|pre|code)\b[^>]*>", re.I)
+# 三種 token：整段跳過的區塊（註解、script、style）｜計深度的開閉標籤。
+_TOKEN = re.compile(
+    r"(?P<skip><!--.*?-->|<script\b[^>]*>.*?</script\s*>|<style\b[^>]*>.*?</style\s*>)"
+    r"|<(?P<close>/?)(?P<name>table|td|th|pre|code)\b[^>]*>",
+    re.I | re.S,
+)
 
 
 def unescape_table_code_pipes(html: str) -> str:
     out = []
     pos = 0
     table = cell = pre = code = 0
-    for m in _TAG.finditer(html):
+    for m in _TOKEN.finditer(html):
         text = html[pos:m.start()]
         if code and cell and table and not pre:
             text = text.replace("\\|", "|")
         out.append(text)
         out.append(m.group(0))
         pos = m.end()
-        closing, name = m.group(1) == "/", m.group(2).lower()
+        if m.group("skip") is not None:
+            continue
+        closing, name = m.group("close") == "/", m.group("name").lower()
         delta = -1 if closing else 1
         if name == "table":
             table = max(0, table + delta)
+            if table == 0:          # 最外層表格關閉：未閉合的 <td>／<code> 不得延續到表格外
+                cell = code = 0
         elif name in ("td", "th"):
             cell = max(0, cell + delta)
         elif name == "pre":

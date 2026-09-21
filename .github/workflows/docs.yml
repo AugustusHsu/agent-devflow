@@ -47,7 +47,9 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${EVENT}" = "push" ]; then tag="${GITHUB_REF_NAME}"; else tag="${INPUT_TAG}"; fi
-          case "${tag}" in v[0-9]*.[0-9]*.[0-9]*.[0-9]*) ;; *) echo "💥 tag 不是 v<a.b.c.d>：${tag}"; exit 2;; esac
+          # 四碼純數字，錨定頭尾（shell glob 的 * 會吞任意字元，不能用）。不合格的 tag 不建版，也不動 latest。
+          printf '%s' "${tag}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "💥 tag 不是 v<a.b.c.d>（四碼純數字）：${tag}"; exit 2; }
           git rev-parse -q --verify "refs/tags/${tag}^{commit}" >/dev/null \
             || { echo "💥 tag ${tag} 不存在於遠端"; exit 2; }
           # 內容一律來自 tag：先無條件清掉 main 上的三個文檔路徑，再從 tag 取回。
@@ -80,7 +82,19 @@ jobs:
           set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # `latest` 別名指向最後部署的版本；重跑或回填舊 tag 會把 latest 移到舊版，之後要對最新 tag 再跑一次。
-          mike deploy -F .mkdocs/mkdocs.yml --push --update-aliases "${TAG}" latest
-          mike set-default -F .mkdocs/mkdocs.yml --push latest
+          # `latest` 必須指向「版本最高」而不是「最後部署」：回填舊 tag、重跑舊 run、佇列順序與版本順序不同，
+          # 都會把 latest 拉回舊版。所以先問 gh-pages 上已有哪些版本（mike list 讀 versions.json），
+          # 只有本 tag ≥ 已有全部版本時才掛 latest；否則只建版、不動 latest。四碼比較用 sort -V。
+          git fetch -q origin gh-pages:refs/remotes/origin/gh-pages 2>/dev/null || true
+          existing="$(mike list -F .mkdocs/mkdocs.yml 2>/dev/null | awk '{print $1}' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+          top="$(printf '%s\n%s\n' "${existing}" "${TAG}" | grep -v '^$' | sort -V | tail -n 1)"
+          if [ "${top}" = "${TAG}" ]; then
+            echo "本 tag ${TAG} 是最高版本：建版並掛 latest"
+            mike deploy -F .mkdocs/mkdocs.yml --push --update-aliases "${TAG}" latest
+            mike set-default -F .mkdocs/mkdocs.yml --push latest
+          else
+            echo "已有更高版本 ${top}：只建版 ${TAG}，latest 不動"
+            mike deploy -F .mkdocs/mkdocs.yml --push "${TAG}"
+          fi
           echo "已推 gh-pages：$(git ls-remote --heads origin gh-pages | cut -c1-7)"
+          mike list -F .mkdocs/mkdocs.yml
