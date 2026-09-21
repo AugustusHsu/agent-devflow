@@ -1,0 +1,100 @@
+# 人類站發布（WORKFLOW.md D3：版本跟 kit release）。mike 把每個 kit tag 建成站的一個版本，推到 gh-pages 分支；
+# GitHub Pages 從 gh-pages 根目錄供應。gh-pages 是產物分支，不走 PR（I3 管的是 main）。
+#
+# 一條路徑、兩個觸發：工具鏈（.mkdocs/、本檔）永遠取 main；文檔內容永遠取指定 tag。
+#   push tag v*        —— 新 release 自動建版（V5 保證 tag 不移動；同一 tag 不會再自動觸發）。
+#   workflow_dispatch  —— 回填既有 tag（如 v0.0.0.1 在本 workflow 之前就已發）。
+# 不加 push: branches: [main]：站的版本跟 tag，不跟 main（D3）。
+#
+# 已知平台邊界（GitHub 文件 events-that-trigger-workflows#push）：一次 push 超過 3 個 tag 不產生 tag push 事件。
+# kit 的 tag 逐個發（V 節），不會碰到；若真發生，用 workflow_dispatch 逐個回填。
+name: docs
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要建版的 kit tag（如 v0.0.0.1）；必須已存在於遠端"
+        required: true
+        type: string
+
+permissions:
+  contents: write   # mike 推 gh-pages
+
+# gh-pages 是單一分支，兩個 deploy 同時 push 會互相覆蓋 → 序列化。
+# queue: max 讓多個等待中的 run 排隊而不是只留最後一個（預設會取消較早的 pending run，會掉版本）。
+concurrency:
+  group: docs-gh-pages
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main               # 工具鏈固定取 main，不隨觸發 ref（tag 上可能沒有 .mkdocs/）
+          fetch-depth: 0          # 需要全部 tag 與 gh-pages 分支歷史（mike 續寫 versions.json）
+
+      - name: 決定版本，換入該 tag 的文檔內容
+        id: ver
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT}" = "push" ]; then tag="${GITHUB_REF_NAME}"; else tag="${INPUT_TAG}"; fi
+          # 四碼純數字，錨定頭尾（shell glob 的 * 會吞任意字元，不能用）。不合格的 tag 不建版，也不動 latest。
+          printf '%s' "${tag}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "💥 tag 不是 v<a.b.c.d>（四碼純數字）：${tag}"; exit 2; }
+          git rev-parse -q --verify "refs/tags/${tag}^{commit}" >/dev/null \
+            || { echo "💥 tag ${tag} 不存在於遠端"; exit 2; }
+          # 內容一律來自 tag：先無條件清掉 main 上的三個文檔路徑，再從 tag 取回。
+          # tag 上沒有的路徑就保持不存在——不能讓 main 的新內容冒充舊版。
+          for p in README.md devflow docs; do
+            git rm -rq --cached --ignore-unmatch -- "${p}"
+            rm -rf -- "${p}"
+            if git cat-file -e "${tag}:${p}" 2>/dev/null; then
+              git checkout -q "${tag}" -- "${p}"
+            fi
+          done
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "版本 ${tag}（${EVENT}）；內容 commit $(git rev-parse --short "${tag}")；工具鏈 main $(git rev-parse --short HEAD)"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: 安裝站工具鏈（pin 見 .mkdocs/requirements.txt）
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet --disable-pip-version-check -r .mkdocs/requirements.txt
+          python3 .mkdocs/hooks/test_gfm_table_pipes.py
+          mkdocs --version; mike --version
+
+      - name: 建版並推 gh-pages
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # `latest` 必須指向「版本最高」而不是「最後部署」：回填舊 tag、重跑舊 run、佇列順序與版本順序不同，
+          # 都會把 latest 拉回舊版。所以先問 gh-pages 上已有哪些版本（mike list 讀 versions.json），
+          # 只有本 tag ≥ 已有全部版本時才掛 latest；否則只建版、不動 latest。四碼比較用 sort -V。
+          git fetch -q origin gh-pages:refs/remotes/origin/gh-pages 2>/dev/null || true
+          existing="$(mike list -F .mkdocs/mkdocs.yml 2>/dev/null | awk '{print $1}' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+          top="$(printf '%s\n%s\n' "${existing}" "${TAG}" | grep -v '^$' | sort -V | tail -n 1)"
+          if [ "${top}" = "${TAG}" ]; then
+            echo "本 tag ${TAG} 是最高版本：建版並掛 latest"
+            mike deploy -F .mkdocs/mkdocs.yml --push --update-aliases "${TAG}" latest
+            mike set-default -F .mkdocs/mkdocs.yml --push latest
+          else
+            echo "已有更高版本 ${top}：只建版 ${TAG}，latest 不動"
+            mike deploy -F .mkdocs/mkdocs.yml --push "${TAG}"
+          fi
+          echo "已推 gh-pages：$(git ls-remote --heads origin gh-pages | cut -c1-7)"
+          mike list -F .mkdocs/mkdocs.yml
