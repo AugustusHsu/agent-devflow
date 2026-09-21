@@ -5,22 +5,44 @@
 擴充也把它當分隔跳脫，但**保留反斜線**留在 <code> 內（實測 Markdown 3.10.3：`x \\| y` → `<code>x \\| y</code>`）。
 不處理的話站上每條這類指令都多一個反斜線，第三者照抄會錯（R8）。
 
-作法：on_page_content 在產出 HTML 後，只對 <td>／<th> 內的 <code>…</code> 做 `\\|` → `|`。
-不碰表格外的 code（那裡的 `\\|` 是作者原意）、不碰 <pre>（fenced block 不在表格內）。
+作法：on_page_content 在產出 HTML 後線性掃描 <table>／<td>／<th>／<pre>／<code> 的開閉標籤，維持深度計數；
+只有「在 <table> 內的 <td>／<th> 內、不在 <pre> 內」的 <code> 文字才做 `\\|` → `|`。
+- 巢狀表格：以深度計數處理，內外層儲存格都算。
+- <td><pre><code>（HTML 表格才可能出現）：<pre> 內是作者原文，不動。
+- 沒有 <table> 祖先的 <td>（畸形 HTML）：不動。
+- 其他標籤與屬性一律原樣輸出，不重寫 HTML。
 """
 import re
 
-_CELL = re.compile(r"(<t[dh]\b[^>]*>)(.*?)(</t[dh]>)", re.S)
-_CODE = re.compile(r"(<code\b[^>]*>)(.*?)(</code>)", re.S)
-
-
-def _fix_cell(m: "re.Match[str]") -> str:
-    inner = _CODE.sub(lambda c: c.group(1) + c.group(2).replace("\\|", "|") + c.group(3), m.group(2))
-    return m.group(1) + inner + m.group(3)
+_TAG = re.compile(r"<(/?)(table|td|th|pre|code)\b[^>]*>", re.I)
 
 
 def unescape_table_code_pipes(html: str) -> str:
-    return _CELL.sub(_fix_cell, html)
+    out = []
+    pos = 0
+    table = cell = pre = code = 0
+    for m in _TAG.finditer(html):
+        text = html[pos:m.start()]
+        if code and cell and table and not pre:
+            text = text.replace("\\|", "|")
+        out.append(text)
+        out.append(m.group(0))
+        pos = m.end()
+        closing, name = m.group(1) == "/", m.group(2).lower()
+        delta = -1 if closing else 1
+        if name == "table":
+            table = max(0, table + delta)
+        elif name in ("td", "th"):
+            cell = max(0, cell + delta)
+        elif name == "pre":
+            pre = max(0, pre + delta)
+        elif name == "code":
+            code = max(0, code + delta)
+    tail = html[pos:]
+    if code and cell and table and not pre:
+        tail = tail.replace("\\|", "|")
+    out.append(tail)
+    return "".join(out)
 
 
 def on_page_content(html, page, config, files):  # MkDocs hook 入口
