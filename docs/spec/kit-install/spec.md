@@ -1,5 +1,5 @@
 ---
-version: 0.0.0.1
+version: 0.0.0.2
 ---
 
 # kit-install：把 agent-devflow 完整安裝到消費者專案；升級與回復皆為重裝
@@ -39,7 +39,7 @@ version: 0.0.0.1
 - 不驗來源是否為 tag checkout。`V5` 保證已發 tag 不移動，故從 tag checkout 安裝時 VERSION 與內容一一對應；從其他 commit 安裝是使用者的選擇，安裝器只報 VERSION。
 - 不合併內容。`devflow/**` 是 kit 的，消費者在其下的修改會被下一次鏡像覆寫或刪除——`--dry-run` 先列出（AC-10）。
 
-**與入口規格的關係**：入口規格「目標與範圍」寫「不複製 `devflow/` 目錄」，本檔使該句不再成立——依 `V6` 標為**不相容**：受影響契約＝「`install.py` 只動入口檔」；遷移＝無（尚無消費者）；入口規格該句改為引用本檔（editorial，另單）。入口規格 AC-1～AC-12 全部保留，由本安裝器在鏡像之後執行（AC-13 是本 repo CI 的 `i5`，不由安裝器執行）；其 harness 案例保留、斷言前綴依 AC-20 調整。
+**與入口規格的關係**：入口規格「目標與範圍」寫「不複製 `devflow/` 目錄」，本檔使該句不再成立——依 `V6` 標為**不相容**：受影響契約＝「`install.py` 只動入口檔」；遷移＝無（尚無消費者）；入口規格該句已改為引用本檔（入口規格 0.0.1.1，editorial）。入口規格 AC-1～AC-12 全部保留，由本安裝器在鏡像之後執行（AC-13 是本 repo CI 的 `i5`，不由安裝器執行）；其 harness 案例保留、斷言前綴依 AC-20 調整。
 
 **kit 內容前提**（本檔不實作、v0.0.0.1 前完成、另單）：kit 的 `devflow/{coders,forges,orchestrators}/*.md` 只保留「通用」節；「本機」節（含 kit 自身的）移到各消費者的 `devflow.local/`。AC-17 以此為 kit 義務，`R9` 措辭與 SKILL.md 路徑同步屬該單。
 
@@ -55,7 +55,7 @@ version: 0.0.0.1
 - AC-6: 以 kit 副本 A（VERSION `0.0.0.1`）安裝，再以副本 B（VERSION `0.0.0.2`；相對 A 恰一檔改、一檔增、一檔刪）安裝 → 摘要模式 `upgrade`，動作行恰為 `updated`／`created`／`deleted` 各一；再以 A 安裝 → 摘要模式 `downgrade`，目標 `devflow/` 整棵樹 bytes 與第一次安裝後逐 byte 相同
 - AC-7: 目標無 `devflow.local`（`os.path.lexists` 假）→ 建目錄與 `devflow.local/README.md`（bytes 等於 `devflow/templates/local-README.md`），stdout 一行 `devflow.local/README.md: created`；`lexists` 真（目錄、空目錄、缺 README、檔案、symlink 皆算）→ 不建、不改、不印
 - AC-8: 目標有 `devflow.yml` → 安裝前後 bytes 相同；目標無 → 不建
-- AC-9: exit 0 且目標無 `devflow.yml` → stderr 含恰一行 `devflow.yml: absent; copy devflow/templates/devflow.yml and edit (advisory)`，exit 不受影響；`--dry-run` 同樣印。**advisory 優先序**（本檔對入口規格的唯一收窄）：所有 advisory（本條與入口規格 AC-7 的）只在 exit 0 時印，且在 stderr 的順序為 AC-7 先、本條後；exit 非 0 時 stderr 只有錯誤那一行。入口規格 AC-7 現行實作在決策中途即印 advisory，改為緩衝到決策成功後再印；既有 harness 案例的 advisory 皆為 exit 0 情境，斷言不變
+- AC-9: exit 0 且目標無 `devflow.yml` → stderr 含恰一行 `devflow.yml: absent; copy devflow/templates/devflow.yml and edit (advisory)`，exit 不受影響；`--dry-run` 同樣印。**advisory 優先序**（本檔對入口規格的唯一收窄）：所有 advisory（本條與入口規格 AC-7 的）只在 exit 0 時印，**兩條 advisory 互斥**（AC-7 的要 `devflow.yml` 存在且可讀，本條要它以 `lexists` 不存在），同一個一致的檔案系統狀態不會同時觸發，故無順序問題；實作若同時累積兩者，AC-7 在前（實作 #138 已如此）；exit 非 0 時 stderr 只有錯誤那一行。入口規格 AC-7 現行實作在決策中途即印 advisory，改為緩衝到決策成功後再印；既有 harness 案例的 advisory 皆為 exit 0 情境，斷言不變
 - AC-10: `--dry-run` → 執行完整決策階段、不進入寫入階段（目標整棵樹 bytes 與存在性前後相同）；**決策階段的結果**——exit 0／1／2 的判定、stderr、stdout 的摘要行與動作行——與實際執行對同一安裝前狀態**逐字相同**；入口檔部分依入口規格 AC-10（unified diff 或 `unchanged`）。exit 3 只存在於寫入階段，dry-run 不可能產生，不在本條的一致性範圍內（同一狀態下實跑 exit 3 而 dry-run exit 0 不是本條的反例）
 - AC-11: exit 0 時 stdout 第一行恰為 `kit-install: <舊版或 none> -> <新版> (<模式>)`，模式取 `fresh|upgrade|downgrade|same|replace` 之一，`replace` 時舊版印 `invalid`；其後為動作行（`devflow/...` 與 `devflow.local/README.md`），以路徑字串 `sorted()` 排序；再接入口檔輸出（入口規格 AC-3／AC-10 格式）
 - AC-12: 來源無 `devflow/VERSION`、或內容不合「版本」定義 → exit 2，stderr `devflow/VERSION: <原因>`；不讀目標、不做任何決策
@@ -67,6 +67,6 @@ version: 0.0.0.1
 - AC-17: harness 對**執行中的 kit 本身**檢：`devflow/VERSION` 合「版本」定義；`devflow/templates/devflow.yml` 與 `devflow/templates/local-README.md` 存在；`devflow/` 下（排除路徑以外）無 symlink；`devflow/{coders,forges,orchestrators}/*.md` 無 `## 本機` 標題行。任一不成立即該案失敗
 - AC-18: 目標中 `devflow/`、`devflow.local/`、入口檔集合以外的任何路徑，安裝前後 bytes 與存在性相同（含 exit 3 的情境）；harness 以整棵樹快照比對（比 bytes 與 lexists，不比 stat）
 - AC-19: 目標路徑即 kit 根（來源＝目標）→ 鏡像全部 `unchanged`、無 `deleted`；`devflow.local/` 依 AC-7；入口檔依入口規格；摘要模式 `same`；exit 0
-- AC-20: `tests/install/harness.py` 擴充：本檔每條 AC 每個分支至少一案；需變造來源的案例把 kit 複製到 `/tmp` 後變造、執行該副本的 `install.py`（AC-6 的 A／B 即兩份副本）；入口規格既有案例全部保留，其 stdout 斷言改為「摘要行＋動作行」前綴之後的部分逐字不變
+- AC-20: `tests/install/harness.py` 擴充：本檔每條 AC 每個分支至少一案；需變造來源的案例把 kit 複製到 `/tmp` 後變造、執行該副本的 `install.py`（AC-6 的 A／B 即兩份副本）；入口規格既有案例全部保留，其 stdout 斷言改為「摘要行＋動作行」前綴之後的部分逐字不變；其 stderr 斷言改為剝除**結尾恰一行**本條 AC-9 advisory（若存在）之後逐字不變——既有案例的假專案多無 `devflow.yml`，AC-9 必然多印該行；exit code 斷言不變
 
 ## 未決事項
