@@ -17,7 +17,7 @@
 - **實作位（`seats/implementer.md`）永遠在 worktree**（`../<repo>.worktrees/<N>`），主 checkout 只做協調。
 - **合併預設由人按**（`merge: human`）；獨立審查建議異廠、不強制。
 - **Bypass 是有範圍的例外**：需當次授權、引用 `bypass` issue、寫明跳過哪條與恢復方式。
-- **文檔一個來源兩種投影**：`devflow/` 與 `docs/spec/` 給 agent（也給人看），`docs/guide/` 只給人。人類站等首個 release 再接 MkDocs＋mike；不做 wiki 投影。
+- **文檔一個來源兩種投影**：`devflow/` 與 `docs/spec/` 給 agent（也給人看），`docs/guide/` 只給人。人類站 https://augustushsu.github.io/agent-devflow/ 由 MkDocs 投影同一批檔案、mike 依 kit tag 建版（`.mkdocs/`、`.github/workflows/docs.yml`）；不做 wiki 投影。
 
 規則的完整條文與 ID 見 [`devflow/WORKFLOW.md`](devflow/WORKFLOW.md)。
 

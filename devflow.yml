@@ -36,7 +36,7 @@ stage: 1
 # 誰按合併（WORKFLOW.md M2）：human | orchestrator（後者需有機械 guard 驗 M1，否則視同 human）
 merge: human
 
-# 人類文檔投影（WORKFLOW.md D3）。現在只靠 forge 渲染；mkdocs + mike 等 kit 首個 release。
+# 人類文檔投影（WORKFLOW.md D3）。設定在 .mkdocs/mkdocs.yml，發布在 .github/workflows/docs.yml（跟 kit tag）。
 docs:
-  site: none           # none | mkdocs
-  versioning: none     # none | mike
+  site: mkdocs         # none | mkdocs
+  versioning: mike     # none | mike

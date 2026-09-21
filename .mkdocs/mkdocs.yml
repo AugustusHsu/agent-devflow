@@ -1,0 +1,49 @@
+# 人類站設定（WORKFLOW.md D1／D3、I5）。站是產物：只投影 repo 裡已有的 markdown，不另寫一份、不手寫 nav。
+# 放在 .mkdocs/ 而不是根目錄：MkDocs 不允許 docs_dir 是設定檔所在目錄；docs_dir: .. 讓整個 repo 成為來源，
+# exclude_docs 剔掉非文檔。本機：`mkdocs build -f .mkdocs/mkdocs.yml`；發布：.github/workflows/docs.yml（mike）。
+site_name: agent-devflow
+site_url: https://augustushsu.github.io/agent-devflow/
+repo_url: https://github.com/AugustusHsu/agent-devflow
+edit_uri: ""
+docs_dir: ..
+# 不能在 docs_dir 內（MkDocs 拒絕）。mike deploy 也用這個目錄（它呼叫 `mkdocs build` 後從 site_dir 收檔，
+# mike 2.2.0 commands.py:101），所以 CI 與本機都寫到這裡；ubuntu runner 的 /tmp 可寫。
+site_dir: /tmp/agent-devflow-site
+use_directory_urls: true
+strict: true
+
+# gitignore 語法。dot 開頭的目錄（.github/.mkdocs/.serena）MkDocs 預設就不收。
+exclude_docs: |
+  tests/
+  scripts/
+  devflow.local/
+  devflow.yml
+  CLAUDE.md
+  AGENTS.md
+  *.py
+  *.json
+  *.yml
+  *.yaml
+  *.sh
+  *.txt
+  devflow/VERSION
+
+theme:
+  name: mkdocs
+  locale: zh_TW
+
+plugins:
+  - search
+  - mike:       # 版本選單；版本清單讀 gh-pages 的 versions.json
+      # 別名（latest）用 HTML 轉址而不用預設的 git symlink：GitHub Pages 對 symlink 的處理未實測，
+      # 轉址是純檔案、任何靜態主機都成立。代價是 latest/ 多一份小 HTML（每頁一個轉址檔）。
+      alias_type: redirect
+
+hooks:
+  - hooks/gfm_table_pipes.py   # 相對於本設定檔
+
+markdown_extensions:
+  - tables
+  - fenced_code
+  - toc:
+      permalink: true
