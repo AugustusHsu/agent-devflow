@@ -503,7 +503,7 @@
 #       環境錯誤案例（PR #152）。設 True 之前另取了一個 advisory 期間的真實 CI 反向
 #       run（PR #153 probe，run 35585351635，blob e067a13：`📝 動到 devflow/ 卻沒有進位`、
 #       exit 0），證明 CI 上的 base 取得（`origin/<GITHUB_BASE_REF>`，需 `fetch-depth: 0`）
-#       與 diff 路徑過濾在真實 `pull_request` 事件下行為與本地一致（`G4` 的「工具可執行」）。
+#       與 diff 路徑過濾在真實 `pull_request` 事件下行為與本地一致。
 #       設 True 之後 README「升 required 的判定方式」要的同 blob 正反兩個真實 run
 #       記在 issue #150（AC-3）。
 #
