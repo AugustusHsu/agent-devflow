@@ -15,13 +15,16 @@
 
 做法：
   1. 把「git add -A 之後會在 repo 裡的檔案」（受版控 ＋ 未忽略的未追蹤檔）複製到一個
-     臨時目錄，git init ＋ git add —— 檢查器認的是 `git ls-files`，所以 index 有就夠，
-     不必 commit。
+     臨時目錄，git init ＋ git add ＋ 一個初始 commit —— 多數項認的是 `git ls-files`，
+     index 有就夠；`v7`（issue #150）比的卻是兩個 git 物件，沒有 commit 就無從比起。
+     那個初始 commit 就是 `v7` 案例的 base，突變做成的第二個 commit 是 HEAD。
   2. 先跑一次**沒有突變**的正向案例，要求 exit 0 且一個 ❌ 都沒有。
   3. 每個關卡至少注入一個「應擋」的突變，要求 exit 1，且輸出裡出現該關卡的訊息；
      案例另外指定明細時，那條明細要在**同一條 ❌ 底下**（reports()／candidates()）。
      每個案例都從乾淨的沙箱重造，突變之間不互相污染。
-  4. 另有「突變後仍應通過」的正向案例（PASSING）：證明判準不誤擋正當變更，要求 exit 0 且 0 個 ❌。
+     突變函式回傳的 dict 會併進該案例的環境變數（`v7` 用它把 base sha 傳給檢查器）。
+  4. 另有「突變後仍應通過」的正向案例（PASSING）：證明判準不誤擋正當變更，要求 exit 0 且 0 個 ❌；
+     案例可再指定一個「輸出裡必須出現的片段」，用來分辨 exit code 分不出來的兩條正向路徑。
   5. 另有「一個突變同時觸發多項」的案例（MULTI）：要求 ❌ 的條數恰好等於列出的那幾條，
      且每條期望各自配到**不同**的一條 ❌（unmatched()）。
      用來鎖 fail closed——某一項該報而沒報時，條數會少，本檔就失敗（issue #91 AC-1）。
@@ -43,6 +46,15 @@ CHECKER = REPO / "scripts" / "devflow_checks.py"
 
 # 沙箱裡當成 head branch 的名字：合 `I1` 的 `<N>-<slug>`，讓正向案例真的跑到 i1 而不是略過。
 GOOD_HEAD_REF = "82-extract-checker"
+
+# 沙箱裡做 commit 的固定引數（issue #150）。身分一律用 `-c` 當場給，不依賴使用者的全域
+# config——沒設 user.email 的機器上 `git commit` 會直接失敗。gpgsign 關掉、hook 跳過，
+# 同理：使用者全域開了簽章或 core.hooksPath，沙箱沒有金鑰／那些 hook 不該跑。
+SANDBOX_COMMIT = ["git",
+                  "-c", "user.name=devflow smoke",
+                  "-c", "user.email=smoke@example.invalid",
+                  "-c", "commit.gpgsign=false",
+                  "commit", "-q", "--no-verify"]
 
 
 # ── 沙箱 ──────────────────────────────────────────────────────────
@@ -76,8 +88,11 @@ def make_sandbox(files, dest):
         if not src.is_file():          # 已刪除但還在 index 的，跳過
             continue
         shutil.copy2(src, dst)
+    # 初始 commit 是 issue #150 加的：`v7` 比的是兩個 git 物件，只有 index 沒有 commit
+    # 就沒有 base 可比。它同時是每個 `v7` 案例的 base（突變再 commit 一次當 HEAD）。
     for args in (["git", "-c", "init.defaultBranch=main", "init", "-q"],
-                 ["git", "add", "-A"]):
+                 ["git", "add", "-A"],
+                 SANDBOX_COMMIT + ["-m", "沙箱初始 commit"]):
         p = subprocess.run(args, cwd=dest, stdout=subprocess.PIPE,
                            stderr=subprocess.STDOUT)
         if p.returncode != 0:
@@ -107,13 +122,40 @@ def edit_bytes(root, rel, fn):
 
 def remove(root, rel):
     """從沙箱的 index 與工作樹一起刪掉。檢查器認的是 `git ls-files`，只刪工作樹等於沒刪。
-    沙箱沒有 commit，index 相對 HEAD 全是新檔，`git rm` 不加 `-f` 會拒絕。"""
+    `-f` 仍留著：沙箱自 issue #150 起有初始 commit，乾淨的檔案不加 `-f` 也刪得掉，
+    但同一案先改過再刪的檔案 `git rm` 照樣會拒絕，加著就不必分兩種寫法。"""
     if not (root / rel).is_file():
         sys.exit("要刪的檔案不存在：%s（repo 內容和本測試的假設不符）" % rel)
     p = subprocess.run(["git", "rm", "-q", "-f", "--", rel], cwd=root,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if p.returncode != 0:
         sys.exit("git rm %s 失敗：%s" % (rel, p.stdout.decode("utf-8", "replace")))
+
+
+def head_sha(root):
+    """沙箱目前的 HEAD sha。`v7` 的 base 要的是**突變之前**那個 commit，所以在 commit 前取。"""
+    p = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if p.returncode != 0:
+        sys.exit("沙箱 git rev-parse HEAD 失敗：%s" % p.stdout.decode("utf-8", "replace"))
+    return p.stdout.decode("utf-8").strip()
+
+
+def commit_mutation(root, message):
+    """把工作樹上的突變做成第二個 commit，回傳 `{"DEVFLOW_V7_BASE": <突變前的 HEAD sha>}`。
+
+    `v7` 比的是兩個 git 物件，突變只留在工作樹它一個字都看不到——所以 `v7` 的案例一定要
+    走這裡。回傳的 dict 由 main() 併進該案例的環境變數，檢查器於是以初始 commit 當 base、
+    以突變 commit 當 HEAD（issue #150 AC-2）。**這個變數只指定比較對象，不放寬判定**：
+    設了之後 merge-base 照算、四碼照比。"""
+    base = head_sha(root)
+    for args in (["git", "add", "-A"], SANDBOX_COMMIT + ["-m", message]):
+        p = subprocess.run(args, cwd=root, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT)
+        if p.returncode != 0:
+            sys.exit("沙箱 commit 失敗（%s）：%s"
+                     % (" ".join(args), p.stdout.decode("utf-8", "replace")))
+    return {"DEVFLOW_V7_BASE": base}
 
 
 def drop_line(text, needle):
@@ -801,6 +843,73 @@ def mut_tables_merge_later_bad(root):
                    + replace_first(t, "filler: hermes", "<<: [*good, *later]"))
 
 
+# ── v7（issue #150）：動 devflow/** 就得進位 devflow/VERSION ─────────────────
+# 每個案例都把突變 commit 起來——`v7` 讀的是兩個 git 物件，留在工作樹的改動它看不到。
+# 探針一律是「空行 ＋ HTML 註解」附在檔尾：codex.md 以對照表的最後一列結尾，沒有空行
+# 就接內容會被 markdown-it 收成表格的一列（狀態格為空 → `table` 連帶 ❌），那就不是
+# 「exit 1 只能由目標項造成」了。HTML 註解不觸發 `table` 的 raw HTML 判定（只認 `<table`
+# start tag，見 ok_table_html_comment），也不觸發 `link`（沒有 href／src）。
+V7_PROBE = "\n<!-- v7 探針：動 devflow/** 一行 -->\n"
+
+
+def v7_touch_coder(root):
+    edit(root, "devflow/coders/codex.md", lambda t: append(t, V7_PROBE))
+
+
+def ok_v7_untouched(root):
+    """(1) 不動 `devflow/**`：只改 README.md，`v7` 應印「不觸發」。"""
+    edit(root, "README.md", lambda t: append(t, "\n<!-- v7 探針：不動 devflow/** -->\n"))
+    return commit_mutation(root, "v7: 只動 README.md")
+
+
+def ok_v7_bumped(root):
+    """(2) 動 `devflow/coders/codex.md` 一行 ＋ VERSION `0.1.0.0`→`0.1.0.1` → ✅。"""
+    v7_touch_coder(root)
+    edit(root, "devflow/VERSION", lambda t: "0.1.0.1\n")
+    return commit_mutation(root, "v7: 動 devflow/** 並進位")
+
+
+def ok_v7_version_only(root):
+    """(3) 只動 `devflow/VERSION` → ✅（`V7` 明文把 VERSION 自己排除在觸發條件外）。
+
+    **刻意改低**（`0.1.0.0`→`0.0.0.1`）：改高的話「有排除」與「沒排除」兩種實作都會 ✅，
+    這一案就證明不了排除。改低之後，VERSION 若沒被排除，changed 非空且 HEAD < base，
+    本案會 ❌——排除真的生效，才會是「不觸發」。"""
+    edit(root, "devflow/VERSION", lambda t: "0.0.0.1\n")
+    return commit_mutation(root, "v7: 只動 devflow/VERSION")
+
+
+def mut_v7_no_bump(root):
+    """(4) 動 `devflow/coders/codex.md`，VERSION 不動。"""
+    v7_touch_coder(root)
+    return commit_mutation(root, "v7: 動 devflow/** 未進位")
+
+
+def mut_v7_downgrade(root):
+    """(5) 動 `devflow/**` 且 VERSION 改**低**——「有改到」不等於「有進位」。"""
+    v7_touch_coder(root)
+    edit(root, "devflow/VERSION", lambda t: "0.0.9.9\n")
+    return commit_mutation(root, "v7: 動 devflow/** 但 VERSION 改低")
+
+
+def mut_v7_leading_zero(root):
+    """(6) VERSION 改為 `0.1.0.01`（前導零），不合 kit-install 規格的「版本」定義。
+
+    同時要動一個 `devflow/**` 的檔：changed 為空時檢查器根本不會去讀 VERSION，
+    這一案就測不到格式判定。判定用的是安裝器的 VERSION_RE，不是檢查器自己寫的 regex。"""
+    v7_touch_coder(root)
+    edit(root, "devflow/VERSION", lambda t: "0.1.0.01\n")
+    return commit_mutation(root, "v7: VERSION 前導零")
+
+
+def mut_v7_subdir(root):
+    """(7) 動 `devflow/templates/issue.md`（子目錄）未動 VERSION：路徑過濾 `-- devflow/`
+    是遞迴的，子目錄一樣算。"""
+    edit(root, "devflow/templates/issue.md",
+         lambda t: append(t, "\n<!-- v7 探針：devflow/ 的子目錄 -->\n"))
+    return commit_mutation(root, "v7: 動 devflow/ 子目錄未進位")
+
+
 CASES = [
     ("encoding", "encoding", mut_encoding, {},
      ("devflow/seats/approver.md 的內容不是合法 UTF-8", "位元組偏移")),
@@ -894,10 +1003,30 @@ CASES = [
      ("有 1 列的狀態欄不是 ✅ 可用／📝 已宣稱／⬜ 未測", "狀態欄=「✅ 可用性佳」")),
     ("r9:other-word", "r9", mut_r9_other_word, {},
      ("有 1 列的狀態欄不是 ✅ 可用／📝 已宣稱／⬜ 未測", "狀態欄=「✅ 完成」")),
+    # issue #150 AC-2 的四個應擋案例。前三案的摘要只差在兩端的版本值，明細再指出是哪個
+    # 檔觸發的——摘要片段帶上 `base … → HEAD …`，才分得出「沒動」「改低」是哪一種。
+    ("v7:no-bump", "v7", mut_v7_no_bump, {},
+     ("動到 devflow/ 卻沒有進位 devflow/VERSION：base 0.1.0.0 → HEAD 0.1.0.0",
+      "變更：devflow/coders/codex.md")),
+    ("v7:downgrade", "v7", mut_v7_downgrade, {},
+     ("動到 devflow/ 卻沒有進位 devflow/VERSION：base 0.1.0.0 → HEAD 0.0.9.9",
+      "變更：devflow/coders/codex.md")),
+    # 明細比對整行（含被拒絕的那串 bytes）：只比「不合……定義」的話，換成別的不合規內容
+    # 也會命中，證明不了擋的是前導零。
+    ("v7:leading-zero", "v7", mut_v7_leading_zero, {},
+     ("devflow/ 動了 1 個檔，但兩端的 devflow/VERSION 至少有一端判不了，無法判斷有沒有進位",
+      "HEAD 的 devflow/VERSION 不合 kit-install 規格的「版本」定義"
+      "（四碼 a.b.c.d、除單獨的 0 外無前導零、恰一個換行、無 BOM）：b'0.1.0.01\\n'")),
+    ("v7:subdir", "v7", mut_v7_subdir, {},
+     ("動到 devflow/ 卻沒有進位 devflow/VERSION：base 0.1.0.0 → HEAD 0.1.0.0",
+      "變更：devflow/templates/issue.md")),
 ]
 
 # 「突變後仍應通過」的正向案例：判準不能誤擋正當變更。
 # 目標關卡照樣以 DEVFLOW_GATE_<KEY>=1 打開——就算它日後被降為建議，這裡驗的仍是「當關卡也不擋」。
+# 每筆是 (案例名, 關卡, 突變)，可再加**選填的第四個元素**：輸出裡必須出現的片段。
+# 多數案例只要求 exit 0 ＋ 0 條 ❌ 就夠，但 `v7` 的正向有「不觸發」與「已進位」兩條不同
+# 的路徑，exit code 分不出來，而 issue #150 AC-2 (1) 要的正是**印出來的那一行**。
 def ok_tables_merge_key(root):
     """`seats.reviewer.filler` 只由 merge key 提供。
 
@@ -949,6 +1078,13 @@ PASSING = [
     ("dupid:prose-in-strong", "dupid", ok_dupid_prose_in_strong),
     # 斷言的是**現況行為**，而且那是一個已知漏認（絆線）——理由見該函式的 docstring。
     ("dupid:task-list", "dupid", ok_dupid_task_list),
+    # issue #150 AC-2 的三個正向案例。
+    ("v7:untouched", "v7", ok_v7_untouched,
+     "沒有動到 devflow/（devflow/VERSION 自己除外），V7 不觸發"),
+    ("v7:bumped", "v7", ok_v7_bumped,
+     "devflow/ 動了 1 個檔，devflow/VERSION 已進位 0.1.0.0 → 0.1.0.1"),
+    ("v7:version-only", "v7", ok_v7_version_only,
+     "沒有動到 devflow/（devflow/VERSION 自己除外），V7 不觸發"),
 ]
 
 # 「一個突變同時觸發多項」的案例（issue #91 AC-1 的 fail closed）。
@@ -995,6 +1131,13 @@ def run_checker(cwd, gate=None, extra_env=None):
     # 不放行的話每一案都會先撞上 pin 守衛的 exit 2 而測不到關卡（issue #91）。
     # CI 不設這個變數，pin 守衛在那裡照常生效。
     env.setdefault("DEVFLOW_ALLOW_PIN_DRIFT", "1")
+    # `v7` 的 base，每一案都給（issue #150）。上面固定設了 GITHUB_EVENT_NAME=pull_request，
+    # 不給 base 的話每一案都會撞上 `v7` 的 die——那個 die 是 `i1` 同款的「pull_request 卻
+    # 沒有檢查對象」，不能為了讓測試跑得動而稀釋它。給 `HEAD`：merge-base(HEAD, HEAD)＝HEAD、
+    # diff 必為空，走的是「這個 PR 沒動 devflow/**」那條真實路徑，`v7` 不觸發也就不影響
+    # 任何既有案例的 ❌ 條數。`v7` 自己的案例以 extra_env 覆蓋成沙箱初始 commit 的 sha。
+    # 直接指派而不是 setdefault：外面的 shell 若設了這個變數，每一案都會拿到錯的 base。
+    env["DEVFLOW_V7_BASE"] = "HEAD"
     if gate:
         # 環境變數只能加嚴不能放寬：目標項就算日後被改回 advisory，這個案例仍是關卡。
         env["DEVFLOW_GATE_" + gate.upper()] = "1"
@@ -1124,19 +1267,24 @@ def main():
         print()
 
         # 正向：突變後仍應通過，同樣 exit 0 且 0 個 ❌。
-        for n, (name, gate, mutate) in enumerate(PASSING):
+        for n, case in enumerate(PASSING):
+            name, gate, mutate = case[:3]
+            expect_out = case[3] if len(case) > 3 else None   # 選填，見 PASSING 的註解
             work = Path(tmp) / ("pass-%02d" % n)
             shutil.copytree(pristine, work)
-            mutate(work)
-            code, out = run_checker(work, gate=gate)
+            extra_env = mutate(work) or {}
+            code, out = run_checker(work, gate=gate, extra_env=extra_env)
             marks = crosses(out)
-            good = (code == 0 and not marks)
+            printed = expect_out is None or expect_out in out
+            good = (code == 0 and not marks and printed)
             print("正向  %-22s 通過    exit %d（期望 0）  ❌ %d 條  %s"
                   % (name, code, len(marks), "PASS" if good else "FAIL"))
             for m in marks:
                 print("          ❌ %s" % m)
             if not good:
-                failures.append("%s：exit %d（期望 0）、%d 條 ❌" % (name, code, len(marks)))
+                failures.append("%s：exit %d（期望 0）、%d 條 ❌%s"
+                                % (name, code, len(marks),
+                                   "" if printed else "，且輸出裡找不到「%s」" % expect_out))
             shutil.rmtree(work)
             print()
 
@@ -1144,8 +1292,9 @@ def main():
         for n, (name, gate, mutate, extra_env, expect) in enumerate(CASES):
             work = Path(tmp) / ("case-%02d" % n)
             shutil.copytree(pristine, work)
-            if mutate:
-                mutate(work)
+            # 突變函式回傳的環境變數蓋過案例自己寫死的：只有 `v7` 用得到，它要的
+            # base sha 在沙箱造出來之前不存在，寫不進 CASES 這張表。
+            extra_env = dict(extra_env, **(mutate(work) or {})) if mutate else extra_env
             code, out = run_checker(work, gate=gate, extra_env=extra_env)
             marks = crosses(out)
             # 命中＝存在一條 ❌，其摘要含 expect 且（沒指定明細，或**它自己的**明細

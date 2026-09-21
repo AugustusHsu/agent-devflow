@@ -11,8 +11,8 @@
 # 注意不是 `G4`：`G4` 住第 9 節，依第 0 節與 `ST2` 要 stage 2 才生效，現在是 stage 1，
 # 不能引為依據。
 # 本檔每一項檢查都有自己的開關（下面的 GATES）：True＝必需關卡，False＝建議（只報告不擋）。
-# 十二項裡十一項是 True（`encoding`、`d2`、`i1`、`i5`、`version`、`fence`、`tables`、`table`、
-# `link`、`r9`、`dupid`），一項是 False（`refs`）——分界不是「哪一項比較重要」，
+# 十三項裡十一項是 True（`encoding`、`d2`、`i1`、`i5`、`version`、`fence`、`tables`、`table`、
+# `link`、`r9`、`dupid`），兩項是 False（`refs`、`v7`）——分界不是「哪一項比較重要」，
 # 而是**定義域封不封閉**，見下面各節。
 #
 # ── ⚠️ 這個 check 擋什麼、不擋什麼 ───────────────────────────────────────
@@ -36,8 +36,9 @@
 # issue #91 開的——它原本不是關卡而是 exit 2，理由見下面「exit code 的分類守則」與該項自己的註解；
 # `r9` 是 issue #94 開的，見「r9 為什麼可以是關卡」；`dupid` 是 issue #96 開的，
 # 見「dupid 為什麼可以是關卡」）。
-# 不擋（exit 0，只把發現印在 log）：`refs` 一項，仍是 advisory（issue #96 逐項評估過三個
-# 收斂方向，沒有一個封得住定義域，見下面「擋不住什麼」的 refs 那條）。
+# 不擋（exit 0，只把發現印在 log）：`refs`（issue #96 逐項評估過三個收斂方向，沒有一個
+# 封得住定義域，見下面「擋不住什麼」的 refs 那條）與 `v7`（issue #150 新開，定義域是封閉的，
+# 停在 advisory 只是因為還缺正反兩個真實 run，見下面「v7 為什麼先是建議」）。
 #
 # 「GATES 是 True」只讓這個 check 自己變紅，**不等於它是 branch protection 的
 # required status check**——後者是 repo 設定，要另外設，前提見下面「升 required 的前提」。
@@ -484,6 +485,24 @@
 #     code span 裡的示範）鎖住這一邊。srcset 已知會誤擋的寫法見上面「刻意的政策」的後兩條。
 #     **不宣稱「不存在假陽性」**。
 #
+# ── v7 為什麼先是建議（issue #150）──────────────────────────────────────
+# `V7`（WORKFLOW.md 1.5.0.0，#147）：PR 動到 `devflow/**`（`devflow/VERSION` 自身除外）時，
+# 同一 PR 須使 `devflow/VERSION` 進位。安裝器只報 VERSION、kit tag 只打在 main 已含的
+# commit（`V5`），所以 main 上「同版號不同內容」只能靠這一關擋。
+#   生效性：`V7` 住第 3 節，依 `ST1`（「單線：第 3～8、10 節生效」）在 stage 1 已生效，
+#       和 `version` 同一條依據。
+#   定義域封閉：兩個 git 物件（merge-base 與 HEAD）、一個檔案（`devflow/VERSION`）、
+#       一條 diff 路徑過濾（`-- devflow/`，Python 端再排除 VERSION 自己）。沒有散文判讀、
+#       不打 API、不看 issue、不讀 tag。「版本」的判定**直接 import 安裝器的 VERSION_RE**，
+#       不另寫一份——同 `i5` 不另寫一份 AC-7 判定的理由：兩份判定就有第三個可漂移的東西。
+#   不判位數對不對：`a`／`b`／`c`／`d` 該進哪一位是 `V1`／`V2` 的語意判斷，`V2` 明文不許
+#       機械自判，留給審查者。本項只判「有沒有進位」（四碼數值元組嚴格遞增）。
+#   為什麼還是 False：定義域封得住，但 README「升 required 的判定方式」要的正反兩個
+#       **真實 run** 還沒取得（issue #150 AC-3；本 PR 自己不動 `devflow/**`，只產得出
+#       「不觸發」那一路）。取得後由 AC-4 另一個 commit 改 True，順序同前面各項：
+#       本地正反 → 設 True → CI 正反。本地正反在 tests/smoke_devflow_checks.py 的
+#       三個 `v7:*` 正向案例與四個 `v7:*` 應擋案例。
+#
 # ── 不發明規則：`i1` 的 slug 為什麼不限字元集 ─────────────────────────────
 # `I1` 的原文只有「分支名 `<N>-<slug>`」，沒有規定 slug 的字元集。
 # 收成 `^[0-9]+-[a-z0-9-]+$` 會擋掉 `26-封閉定義域`、`4-v0.0.2.0-bump`、`26-Fix-D2`——
@@ -762,7 +781,7 @@ if _drift and os.environ.get("DEVFLOW_ALLOW_PIN_DRIFT") != "1":
 
 # ── 關卡開關 ──────────────────────────────────────────────────────
 # True＝必需關卡（失敗就擋）；False＝建議（只報告）。
-# 十二項裡十一項是 True，一項是 False。分界是定義域封不封閉，理由見檔頭。
+# 十三項裡十一項是 True，兩項是 False。分界是定義域封不封閉，理由見檔頭。
 # 驗證用：DEVFLOW_GATE_<KEY>=1 可單獨打開一項，環境變數只能加嚴不能放寬。
 # 順序＝執行順序：`encoding` 在讀檔當下就判，排在最前面。
 GATES = {
@@ -778,6 +797,8 @@ GATES = {
     "dupid":   True,    # 規則 ID 唯一定義（定義域＝節前綴判準；issue #96）
     "refs":    False,   # 規則 ID 無懸空引用（會誤擋非規則代號，見檔頭）
     "r9":      True,    # R9 對照表狀態欄三值（issue #94：64 格已換成條文原文）
+    "v7":      False,   # V7 動到 devflow/** 須進位 devflow/VERSION（第 3 節，ST1 起生效；
+                        # issue #150。定義域封閉，但 AC-3 的正反真實 run 未齊，先是建議）
 }
 for _k in GATES:
     if os.environ.get("DEVFLOW_GATE_" + _k.upper()) == "1":
@@ -874,6 +895,15 @@ ID_RE = re.compile(r"([A-Z]{1,4})[0-9]+")
 # text_collapse 併回 `text`（`&#35211;` 到 children 裡是內容為「見」的 `text`，`\*` 是 `**`），
 # 兩個都收是為了不依賴 parser 版本——沒併回時它一樣承載字面文字，不能當成標記放行。
 TEXT_TOKENS = ("text", "text_special")
+
+# V7 的定義域：一條 diff 路徑過濾、一個檔案、兩個 git 物件（merge-base 與 HEAD）。
+# `V7` 原文排除的是 `devflow/VERSION` 自己——路徑過濾交給 git（`-- devflow/`），
+# 排除交給 Python（逐字比對整條路徑），兩步都不做路徑正規化。
+V7_DIR = "devflow/"
+V7_VERSION_FILE = "devflow/VERSION"
+# 本機／沙箱指定 base 的環境變數（issue #150 AC-2）。值是 sha 或任何 git 解析得了的 ref。
+# 它**只能指定比較對象，不能放寬判定**：設了之後照樣算 merge-base、照樣比四碼。
+V7_BASE_ENV = "DEVFLOW_V7_BASE"
 
 # 解析器：commonmark ＋ GitHub 也認得的兩個擴充。`table` 是對照表要用的；`strikethrough`
 # 是 issue #98 補的——GitHub 算繪的是 GFM，`~~舊~~` 在讀者眼裡是刪除線**標記**，
@@ -2410,6 +2440,111 @@ if r9_clean:
     ok("對照表狀態欄全部合 R9"
        + ("" if GATES["r9"] else
           " —— 可把 GATES[\"r9\"] 改成 True 升為必需關卡（前提見 README 第三出口的判定方式）"))
+
+print()
+print("── V7：devflow/** 改動須進位 kit VERSION（%s）" % tag("v7"))
+# 判定逐條照 `V7` 第一句，理由見檔頭「v7 為什麼先是建議」。
+#
+# **「版本」的定義只有一份**：直接用安裝器的 VERSION_RE（kit-install 規格「名詞定義」：
+# 四碼十進位非負整數、除單獨的 0 外無前導零、恰一個 `\n`、無 BOM，整檔 bytes fullmatch）。
+# 不另寫一份——同 `i5` 不另寫一份 AC-7 判定的理由。installer 在 `i5` 那一節已經載好。
+V7_VERSION_RE = getattr(installer, "VERSION_RE", None)
+if V7_VERSION_RE is None:
+    die("%s 沒有 VERSION_RE，V7 沒有「版本」定義的來源" % I5_INSTALLER)
+
+
+def v7_git(args):
+    """跑一個 git 指令，回傳 (returncode, stdout bytes, stderr 文字)。
+
+    **不自己決定失敗是 die 還是 ❌**：兩者在本項都有——git 跑不動、base 解析不了
+    （淺 clone 拿不到 base 分支的歷史）是檢查器無法執行（exit 2）；某一端讀不到
+    `devflow/VERSION` 是被檢查的內容有問題（❌）。呼叫端各自分類。"""
+    p = subprocess.run(["git"] + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return p.returncode, p.stdout, p.stderr.decode("utf-8", "replace").strip()
+
+
+def v7_version(rev, side):
+    """讀 `<rev>:devflow/VERSION` 的 bytes，回傳 (四碼元組, 顯示字串, 說明或 None)。
+
+    物件不存在（那一端根本沒有這個檔）與內容不合「版本」定義，都是**輸入錯**——
+    ❌ 而不是 exit 2。檢查器執行得好好的，是被比較的兩個 commit 裡有一個放了
+    判不了的東西（同 `encoding` 的分類：內容壞不是檢查器壞）。"""
+    where = side if rev == side else "%s（%s）" % (side, rev)
+    rc, raw, err = v7_git(["show", "%s:%s" % (rev, V7_VERSION_FILE)])
+    if rc != 0:
+        return None, None, ("%s 讀不到 %s：%s" % (where, V7_VERSION_FILE, err))
+    m = V7_VERSION_RE.fullmatch(raw)
+    if m is None:
+        return None, None, (
+            "%s 的 %s 不合 kit-install 規格的「版本」定義"
+            "（四碼 a.b.c.d、除單獨的 0 外無前導零、恰一個換行、無 BOM）：%r"
+            % (where, V7_VERSION_FILE, raw))
+    return tuple(int(g) for g in m.groups()), raw.decode("ascii").rstrip("\n"), None
+
+
+# base 的取得順序：`DEVFLOW_V7_BASE`（本機與煙霧測試沙箱用）＞ CI 的 `origin/<GITHUB_BASE_REF>`。
+# 兩個都沒有時與 `i1` 同款：`pull_request` 事件卻取不到就 die（略過會讓關卡靜默失效），
+# 非 `pull_request` 就略過並印明。event_name 是 `i1` 那一節取的同一個事實，不重取。
+v7_base_env = os.environ.get(V7_BASE_ENV, "").strip()
+v7_base_ref = os.environ.get("GITHUB_BASE_REF", "").strip()
+if v7_base_env:
+    v7_base, v7_base_from = v7_base_env, V7_BASE_ENV
+elif v7_base_ref:
+    v7_base, v7_base_from = "origin/%s" % v7_base_ref, "GITHUB_BASE_REF"
+else:
+    v7_base = v7_base_from = None
+
+if v7_base is None:
+    if event_name == "pull_request":
+        die("pull_request 事件卻取不到 base（%s 與 GITHUB_BASE_REF 都沒有），V7 沒有比較對象"
+            % V7_BASE_ENV)
+    print("  ⏭️ 非 pull_request 執行（event=%s），取不到 base，略過"
+          % (event_name or "本機"))
+else:
+    # 兩個 git 物件是 merge-base 與 HEAD，**不是 base tip 與 HEAD**：changed 由
+    # `<merge-base>..HEAD` 算，版本就得和同一個起點比，否則「這個 PR 有沒有進位」會
+    # 被 base 分支上別人的進位影響。`V7` 第二句（多張 PR 平行時以 main 當時的值重新進位）
+    # 明文不在本項範圍（issue #150「不在範圍」），由合併衝突處理。
+    # CI 上兩者其實重合：`pull_request` 跑的是 GitHub 生成的 merge commit，base tip 是它的
+    # 父，merge-base 就等於 base tip；差別只在本機拿舊分支跑的時候看得到。
+    rc, out, err = v7_git(["merge-base", v7_base, "HEAD"])
+    if rc != 0:
+        die("git merge-base %s HEAD 失敗（exit %d）：%s；"
+            "CI 上多半是 checkout 深度不足（見 .github/workflows/devflow-checks.yml 的 fetch-depth）"
+            % (v7_base, rc, err))
+    v7_mb = out.decode("utf-8", "replace").strip()
+    # `-z` 而不是預設輸出：git 對含空白／非 ASCII 的路徑會加引號並跳脫，那會讓
+    # 「排除 devflow/VERSION」的逐字比對對不上（同 tracked() 用 -z 的理由）。
+    rc, out, err = v7_git(["diff", "--name-only", "-z", "%s..HEAD" % v7_mb, "--", V7_DIR])
+    if rc != 0:
+        die("git diff %s..HEAD 失敗（exit %d）：%s" % (v7_mb, rc, err))
+    v7_changed = [n for n in out.decode("utf-8", "replace").split("\0")
+                  if n and n != V7_VERSION_FILE]
+    if not v7_changed:
+        ok("%s..HEAD 沒有動到 %s（%s 自己除外），V7 不觸發（base＝%s，取自 %s）"
+           % (v7_mb[:12], V7_DIR, V7_VERSION_FILE, v7_base, v7_base_from))
+    else:
+        v7_base_ver, v7_base_str, v7_base_bad = v7_version(v7_mb, "base")
+        v7_head_ver, v7_head_str, v7_head_bad = v7_version("HEAD", "HEAD")
+        v7_detail = ["變更：%s" % n for n in v7_changed]
+        v7_bad = [b for b in (v7_base_bad, v7_head_bad) if b]
+        if v7_bad:
+            # 一條 ❌ 不是兩條：兩端都壞掉時問題仍然只有一個——「判不出有沒有進位」。
+            report("v7", "%s 動了 %d 個檔，但兩端的 %s 至少有一端判不了，無法判斷有沒有進位"
+                   % (V7_DIR, len(v7_changed), V7_VERSION_FILE),
+                   v7_bad + ["base＝%s（%s，取自 %s）" % (v7_mb, v7_base, v7_base_from)]
+                   + v7_detail)
+        elif v7_head_ver > v7_base_ver:
+            ok("%s 動了 %d 個檔，%s 已進位 %s → %s"
+               % (V7_DIR, len(v7_changed), V7_VERSION_FILE, v7_base_str, v7_head_str))
+        else:
+            report("v7", "動到 %s 卻沒有進位 %s：base %s → HEAD %s"
+                   % (V7_DIR, V7_VERSION_FILE, v7_base_str, v7_head_str),
+                   ["V7：PR 動到 devflow/**（devflow/VERSION 自身除外）時，"
+                    "同一 PR 須使 devflow/VERSION 進位",
+                    "位數（a／b／c／d）依 V1／V2 由人判，本項只判有沒有進位",
+                    "base＝%s（%s，取自 %s）" % (v7_mb, v7_base, v7_base_from)]
+                   + v7_detail)
 
 print()
 if errors:
