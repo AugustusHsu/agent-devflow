@@ -6,7 +6,7 @@
 已含的 commit、已發版本不移動、不刪、不重打（`V5`）。
 
 五個步驟依序跑。每步一個可以整段貼進終端機的區塊，**步驟之間不共用 shell 變數**：每步各自
-重算 `tag` 與 `sha`，所以任一步都能單獨重跑、隔一天再跑，也不怕中途換了終端機。每個區塊第一行
+重算 `tag` 與 `sha`，所以隔一天再跑、中途換了終端機都不怕；但**重跑時一律從步驟 1 起**——步驟 2 的讀回只斷言 tag 指向 `$sha` 且為 annotated，分支、VERSION 與 tag 名相符這三項只在步驟 1 檢查。每個區塊第一行
 就切到 repo 根，從 repo 內哪個目錄起跑都一樣。
 
 `V5` 在 GitHub 端有機械保證：tag ruleset `23780350` 擋掉對 `refs/tags/v*` 的移動與刪除。
@@ -172,8 +172,9 @@ echo "✅ $tag 可從 tag 重裝：install.py --dry-run 對 $consumer exit 0（�
 - 對已發 tag 做任何移動——改指另一個 commit、或先刪再建，兩者都是移動。
 
 需要修正時發**下一版**：改內容 → 進位 `devflow/VERSION`（`V7`）→ 走一次本程序。
-tag ruleset `23780350` 會在 GitHub 端把前三者擋成 `GH013`（連 admin 也不能繞），
-但規則先於機械保證：不要為了繞過去而改 ruleset。
+tag ruleset `23780350` 只擋**移動與刪除**（第一、二、四條會在 GitHub 端得到 `GH013`，連 admin 也不能繞）；
+**建立新 tag 不受 ruleset 管**，所以第三條 `git push --tags` 只能靠本程序擋——而且推錯的 tag 因同一個 ruleset 刪不掉，只能燒版號。
+規則先於機械保證：不要為了繞過去而改 ruleset。
 
 ## 失敗處置
 
