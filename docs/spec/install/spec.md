@@ -1,5 +1,5 @@
 ---
-version: 0.0.1.0
+version: 0.0.1.1
 ---
 
 # install：把入口區塊安全插入其他專案的 CLAUDE.md／AGENTS.md
@@ -12,7 +12,7 @@ version: 0.0.1.0
 
 **形式**：`devflow/install.py`，Python 3 stdlib only，`python3 devflow/install.py <目標 repo 路徑> [--dry-run]`。
 
-**只做入口區塊**：不複製 `devflow/` 目錄、不建 `devflow.yml`（既有者只讀頂層 `implementer_filler` 鍵——`seats.implementer.filler` 的投影，見 AC-7、AC-13）、不碰 `.gitignore`、不 commit。完整安裝／升級／回復是 Phase 4，本檔不定義其範圍。
+**本檔只定義入口區塊**：不建 `devflow.yml`（既有者只讀頂層 `implementer_filler` 鍵——`seats.implementer.filler` 的投影，見 AC-7、AC-13）、不碰 `.gitignore`、不 commit。`devflow/` 目錄的鏡像、`devflow.local/` 與版本由 `docs/spec/kit-install/spec.md`（kit-install 規格）定義；同一支 `install.py` 先依該規格鏡像，再依本檔處理入口檔（該規格 AC-16 的寫入序）。本檔 AC-1～AC-12 全部保留；AC-13 是本 repo CI 的 `i5`，不由安裝器執行。
 
 **名詞定義**（全文適用）：
 - **模板**：`devflow/templates/entry-block.md` 的完整 bytes，以 `<!-- devflow:begin -->` 行起、`<!-- devflow:end -->` 行止，含兩標記行；正規化為 LF、無 BOM、尾端恰一個 `\n`
@@ -59,7 +59,7 @@ version: 0.0.1.0
 
 ## 未決事項
 
-- **消費者 repo 的投影一致性**：AC-13 只涵蓋本 repo。在 Phase 4 安裝／升級工具（能帶 YAML parser、或直接生成投影）落地前，消費者 repo 只有 AC-7 的 advisory——「有 `seats:` 而無合規 `implementer_filler:`」會被提示，「兩處值不同」無人攔。
+- **消費者 repo 的投影一致性**（**已決，非未決**，kit-install 0.0.0.1）：安裝器**不建、不改** `devflow.yml`（kit-install 規格「不做」第一條），故不生成投影、不帶 YAML parser。消費者 repo 的一致性保證只有 AC-7 的 advisory 與 kit-install AC-9 的 advisory（無 `devflow.yml` 時提示複製模板）；「兩處值不同」在消費者端仍無人攔——這是**刻意的**：`devflow.yml` 是消費者的檔，安裝器不替人改；消費者要機械保證得自帶 CI（kit-install 規格「不做」第三條：v0.0.0.1 不安裝 CI，另立 issue）。
 - **BOM 對齊**：安裝器不剝檔首 UTF-8 BOM、CI `d2` 以 `utf-8-sig` 讀檔會剝。差異作用在**標記行的辨識**：首行是標記行的檔案加上 BOM 之後，兩邊認到的標記位置不同（CI 認得首行，安裝器不認得）。
   - **本項不描述「哪些輸入會走哪條 AC」。** 那取決於 BOM、首行標記種類、其餘標記排列三者的組合，是一張多維對照表；本段的散文描述已經寫錯三次（PR #105 兩輪審查各抓到一組反例：`BOM ＋begin ＋begin`（全檔無 end）走 AC-5 而非 AC-2；`BOM ＋begin ＋begin ＋end` 走 AC-3／4、exit 0 而非拒絕）。**權威來源是 `tests/install/harness.py` 的案例集**——要知道某個輸入走哪一路，加一案跑它。
   - **AC-5c 的觸發條件是合取**，不是一類輸入的描述：命中 AC-5b（落單 end）**且** 檔首為 UTF-8 BOM、去掉該 BOM 後首行 `strip()` 等於 begin 標記。兩者皆真才改訊息。
