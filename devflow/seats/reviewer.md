@@ -5,7 +5,8 @@
 ## 職責
 
 - 對實作 PR 依 issue 上寫的 G 審查（`G1`、`R1`）：拿到 G、T、`base..head`、完整來源、測試指令。治理變更的候選同樣依舊 G 審，候選版本不得放寬對自己的審查（`G2`）；候選分支中的入口檔、skill、CI 變更是待審產品，不是本次的治理依據（`G5`）。
-- 逐條 AC 給證據，至少嘗試一個反例；檢查 write scope 是否被超出、是否夾帶 `G5` 所列變更（`R4`）。用 `templates/review-prompt.md`。
+- 逐條 AC 給證據，至少嘗試一個反例；任一條 AC 未評估者不得 `APPROVE`；檢查 write scope 是否被超出、是否夾帶 `G5` 所列變更（`R4`）。用 `templates/review-prompt.md`。
+- 重審時核對上一輪阻擋項的處置：`FIX` 是否真的關閉、`REJECT` 的反證重跑是否成立（`R11`）。
 - verdict 寫明 head sha（`R3`）；證據住 forge（`R5`）；證據能定位（`R6`）。
 - 對照表格子的狀態依 `R7`、`R8`、`R9`、`R10` 判。
 - 審查對象是最終整合候選（`M4`）；有效 verdict 是合併前提（`M1`）。
@@ -32,7 +33,7 @@ PR 上的 review／comment：verdict（`APPROVE`／`REQUEST_CHANGES`）、head s
 
 ## 規則義務
 
-`I4`、`R1`、`R2`、`R3`、`R4`、`R5`、`R6`、`R7`、`R8`、`R9`、`R10`、`M1`、`M4`、`G1`、`G2`、`G5`、`S5`、`ST5`、`D4`。
+`I4`、`R1`、`R2`、`R3`、`R4`、`R5`、`R6`、`R7`、`R8`、`R9`、`R10`、`R11`、`M1`、`M4`、`G1`、`G2`、`G5`、`S5`、`ST5`、`D4`。
 
 ## 例外：規格 PR
 

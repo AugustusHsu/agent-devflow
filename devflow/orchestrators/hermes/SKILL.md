@@ -99,7 +99,7 @@ prompt 以 `templates/review-prompt.md` 為底，另加：
 
 ### 8. verdict 處理（`R3`、`R5`、`F1`、`F2`）
 
-- 完整 verdict 貼成 PR 留言（`R5`；`forges/github.md` 「審查證據（`R3`／`R5`）」格），另一則留摘要表：阻擋 → 處置。
+- 完整 verdict 貼成 PR 留言（`R5`；`forges/github.md` 「審查證據（`R3`／`R5`）」格），另一則留處置表（`R11`）：每條阻擋項 → `FIX`（commit sha）／`DEFER`（issue 號）／`REJECT`（可重跑的反證指令與輸出）；該留言 URL 記入 issue「審查處置」段。未標處置的阻擋項不得進下一輪。
 - `REQUEST_CHANGES` 分兩類：
   - 實作阻擋 → coder `--resume` 修（步驟 4；`F1`）。
   - T 的漏洞 → 依 `F2`。Hermes 側：問人、答案寫回原 issue（`L3` 通道）→ T 修訂作為新任務走步驟 1～10（新 issue／分支／worktree；原分支已承載開啟中的 PR，不再開第二張；原任務 coder 已停、worktree 依 `C3` 保留）→ 合入後把原 issue 的 T 更新為新 commit、影響分析留言 → 重派原任務。
