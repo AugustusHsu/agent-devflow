@@ -190,7 +190,12 @@ def mut_fence(root):
 
 
 def mut_table(root):
-    """對照表表頭缺「面向」欄。"""
+    """對照表表頭缺「面向」欄。
+
+    `7ef0537`（#135）把本機節搬去 devflow.local/ 之後，每個 kit 對照表檔只剩「通用」
+    一張表——唯一一張表的形狀壞掉，就等於「整個檔案沒有一張合格的對照表」，形狀那條
+    必然是 2 項，`r9` 也連帶報「找不到可判讀狀態欄的表」。所以本案在 MULTI（恰好 2 條
+    ❌）而不在 CASES（恰好 1 條）：issue #149。"""
     edit(root, "devflow/forges/github.md",
          lambda t: replace_first(t, "| 面向 |", "| 項目 |"))
 
@@ -209,14 +214,17 @@ def mut_table_raw_html(root):
 
 def mut_table_short_row(root):
     """資料列缺狀態格（issue #90 缺口 3）：markdown-it 會把它補成 4 格、狀態格為空字串。
-    codex.md 的最後一行是本機表的資料列，附加在檔尾才會接進同一張表；前面若多一個空行，
-    這一行就只是段落，本案會以 exit 0 失敗而不是靜默通過。"""
+    codex.md 的最後一行是「通用」表的資料列（#135 把本機節搬去 devflow.local/ 之前，
+    那裡是本機表的資料列），附加在檔尾才會接進同一張表；前面若多一個空行，這一行就只是
+    段落，本案會以 exit 0 失敗而不是靜默通過。
+    壞掉的是檔內唯一一張表，所以連帶兩條 ❌——理由與去處見 mut_table 的 docstring。"""
     edit(root, "devflow/coders/codex.md",
          lambda t: append(t, "| 短列 | coordinator |\n"))
 
 
 def mut_table_blank_status(root):
-    """狀態格有寫但只有空白。欄數與本機表相同，排除「短列」那條路徑。附加位置同上。"""
+    """狀態格有寫但只有空白。欄數與「通用」表相同，排除「短列」那條路徑。
+    附加位置與連帶的兩條 ❌ 同上。"""
     edit(root, "devflow/coders/codex.md",
          lambda t: append(t, "| 空白狀態 | — | 值 |   |\n"))
 
@@ -673,9 +681,10 @@ def ok_dupid_task_list(root):
 
 
 # ── r9：狀態欄取 R9 三值之一（issue #94 AC-4）─────────────────────────
-# 四個應擋案例的突變一律附加在 devflow/coders/codex.md 檔尾——最後一行是本機表的
-# 資料列，附加的列會接進同一張表（錨點同 mut_table_short_row）。每列都是四格、
-# 狀態格非空，所以 `table` 的形狀判定照樣通過：exit 1 只會由 r9 造成。
+# 四個應擋案例的突變一律附加在 devflow/coders/codex.md 檔尾——最後一行是「通用」表的
+# 資料列（#135 之後本機節已搬去 devflow.local/），附加的列會接進同一張表（錨點同
+# mut_table_short_row）。每列都是四格、狀態格非空，所以 `table` 的形狀判定照樣通過：
+# exit 1 只會由 r9 造成。
 # 舊詞那一案的 `✅ 實測` 落在表格的資料列上，不會另外觸發「敘述句仍用二值用語」
 # ——那條只掃合格表的資料列以外的行。
 def mut_r9_old_word(root):
@@ -812,13 +821,11 @@ CASES = [
      "推導不出必需的對照表"),
     ("tables:merge-later-bad", "tables", mut_tables_merge_later_bad, {},
      "推導不出必需的對照表"),
-    ("table", "table", mut_table, {}, "的對照表形狀不合 R9"),
+    # `table`、`table:short-row`、`table:blank-status` 在 MULTI：它們弄壞的是檔內唯一
+    # 一張表，必然連帶 2 條 ❌（issue #149）。附加 raw HTML 表格的那幾案不影響原本那張
+    # markdown 表，仍是恰好 1 條。
     ("table:raw-html", "table", mut_table_raw_html, {},
      ("devflow/orchestrators/paperclip.md 的對照表形狀不合 R9（1 項）", "有 raw HTML 的 <table>")),
-    ("table:short-row", "table", mut_table_short_row, {},
-     ("devflow/coders/codex.md 的對照表形狀不合 R9（1 項）", "列的狀態格為空")),
-    ("table:blank-status", "table", mut_table_blank_status, {},
-     ("devflow/coders/codex.md 的對照表形狀不合 R9（1 項）", "列的狀態格為空")),
     ("table:quoted-text", "table", mut_table_quoted_text, {},
      "的對照表形狀不合 R9"),
     ("table:script", "table", mut_table_script, {}, "的對照表形狀不合 R9"),
@@ -947,10 +954,25 @@ PASSING = [
 #   name    = 案例名
 #   gates   = 要打開的關卡（全部以 DEVFLOW_GATE_<KEY>=1 打開）
 #   mutate  = 怎麼把輸入弄壞
-#   expects = 摘要裡必須出現的 ❌ 片段，一條片段對一條 ❌
+#   expects = 摘要裡必須出現的 ❌ 片段，一條片段對一條 ❌。每條的寫法同 CASES 的 expect：
+#             字串＝摘要片段；(摘要片段, 明細片段)＝另外要求該 ❌ 底下的明細含第二個片段
 MULTI = [
     ("encoding:fail-closed", ("encoding", "fence"), mut_encoding_fail_closed,
      ["README.md 的內容不是合法 UTF-8", "的 fenced code block 沒有關閉"]),
+    # issue #149：#135 之後每個 kit 對照表檔只剩一張表，弄壞它就一定是 2 條 ❌——形狀
+    # 那條 2 項（該表自己的問題 ＋「整個檔案沒有一張合格的對照表」）＋ `r9` 的「找不到
+    # 可判讀狀態欄的表」。摘要片段帶「（2 項）」：形狀那一節少報一項時（例如「沒有一張
+    # 合格的對照表」被跳過）條數對不上，本檔就失敗，這才是 fail closed 的鎖點。
+    # 明細片段仍在，三案共用同一條摘要時靠它分出是哪一種擋的（同 CASES 的 `table` 群）。
+    ("table", ("table", "r9"), mut_table,
+     [("devflow/forges/github.md 的對照表形狀不合 R9（2 項）", "表頭缺 面向"),
+      "devflow/forges/github.md 找不到可判讀狀態欄的表（形狀那一節已報）"]),
+    ("table:short-row", ("table", "r9"), mut_table_short_row,
+     [("devflow/coders/codex.md 的對照表形狀不合 R9（2 項）", "列的狀態格為空"),
+      "devflow/coders/codex.md 找不到可判讀狀態欄的表（形狀那一節已報）"]),
+    ("table:blank-status", ("table", "r9"), mut_table_blank_status,
+     [("devflow/coders/codex.md 的對照表形狀不合 R9（2 項）", "列的狀態格為空"),
+      "devflow/coders/codex.md 找不到可判讀狀態欄的表（形狀那一節已報）"]),
 ]
 
 
@@ -1071,13 +1093,17 @@ def main():
             code, out = run_checker(
                 work, extra_env={"DEVFLOW_GATE_" + g.upper(): "1" for g in gates})
             marks = crosses(out)
-            missing = [e for e in expects if not any(e in m for m in marks)]
-            good = (code == 1 and not missing and len(marks) == len(expects))
+            # 一條期望＝(摘要片段, 明細片段)，明細為 None 就只比摘要（同 CASES 的 expect）。
+            pairs = [(e, None) if isinstance(e, str) else e for e in expects]
+            missing = ["%s%s" % (s, "" if d is None else "＋明細「%s」" % d)
+                       for s, d in pairs
+                       if not any(s in m for m in marks) or (d is not None and d not in out)]
+            good = (code == 1 and not missing and len(marks) == len(pairs))
             print("多項  %-22s 應擋    exit %d（期望 1）  ❌ %d 條（期望 %d）  %s"
-                  % (name, code, len(marks), len(expects), "PASS" if good else "FAIL"))
+                  % (name, code, len(marks), len(pairs), "PASS" if good else "FAIL"))
             for m in marks:
                 print("        %s ❌ %s"
-                      % ("←" if any(e in m for e in expects) else " ", m))
+                      % ("←" if any(s in m for s, _ in pairs) else " ", m))
             if not good:
                 failures.append(
                     "%s：exit %d（期望 1）、%d 條 ❌（期望 %d）%s"
