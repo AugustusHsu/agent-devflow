@@ -55,6 +55,7 @@ cd ../<repo>.worktrees/<N> && systemd-run --user --scope --unit=coder-<N> --coll
 - `--unit` 名稱是中斷把手；白名單以 `hermes.md` 「中斷交接」格所載為底，**不含** `systemd-run`／`systemctl`／`busctl`、`gh api`、`git push`（push 由 orchestrator 代行，步驟 6）。
 - 啟動後依「派工」格讀回三項（`pstree -p`、`/proc/<pid>/cmdline`、`/proc/<pid>/cwd`）；**不用 `ps | grep 'claude -p'`**。headless 旗標對照 `coders/claude-code.md` 「headless 執行（`L2`）」格、「權限」格。
 - prompt 必含（`L2`）：worktree 路徑、base sha、write scope、G／T、驗證指令、紀律（不 push、不開 PR、工具生成物依 `L3` 末段）、交付格式（含 `L3` 留言）；大檔明寫 `D4`。
+- 派工後在 issue 留言記派工紀錄三項（鏡射 `L1`，不加該條沒有的義務）：coder／reviewer 的**完整啟動指令**（含版本旗標與工具版本）、`session_id` 或同等識別、**驗證指令的輸出原文**（首行 JSON、`-o` 全文、review id 與比對結果等；只寫「正常」「通過」等結論不構成紀錄）。輸出原文只證明驗證方式曾實跑並供核對，對照表狀態仍須另滿足 `R8`（第四節）。
 
 ### 4. coder 撞 `--max-turns`（`coders/claude-code.md` 「交接（`--resume`）」格）
 
@@ -166,7 +167,7 @@ gh issue view <N> --json state --jq .state
 
 ## 四、對照表結帳（`R7`～`R10`）
 
-格的成立條件依 `R7`、`R8`、`R9`、`R10`。Hermes 側證據鏈：啟動前留言（`git worktree list`、worktree HEAD、完整啟動指令）→ coder 產物（commit、驗證輸出）→ orchestrator 貼 stdout JSON 關鍵欄位（`session_id`、`num_turns`、`result` 摘要）→ 證據 URL 以 `gh api repos/<owner>/<repo>/issues/comments/<id>` 讀回。
+格的成立條件依 `R7`、`R8`、`R9`、`R10`。Hermes 側證據鏈：啟動前留言（`git worktree list`、worktree HEAD、完整啟動指令）→ coder 產物（commit、驗證輸出）→ orchestrator 貼 stdout JSON 關鍵欄位（`session_id`、`num_turns`、`result` 摘要）→ 證據 URL 以 `gh api repos/<owner>/<repo>/issues/comments/<id>` 讀回。這條證據鏈的留言就是步驟 3 末條那則 `L1` 派工紀錄（同一則，不另開），`L1` 生效後的執行要當對照表證據時只能引它。
 
 `R8` 一次性條件的已知例：`.comments[-1]`（用留言 id）；`createdAt == updatedAt` 在 close 後失效（看 `lastEditedAt: null`）；驗證用 PR 永久留在 `--state all`（改可丟棄 repo）；`pgrep -P` 不證無殘留（用 cgroup）。
 
