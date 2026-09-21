@@ -41,11 +41,11 @@ version: 1.5.0.0
 - `V4` 適用對象：規格文檔（含本檔）與 kit release tag `v<a.b.c.d>`。`stage` 不是版本號；第三方版本、工具版本、issue 編號保持原值。
 - `V5` kit tag 只打在 main 已含的 commit；已發版本不移動、不刪、不重打，修正走下一版。
 - `V6` 變更若使既有契約或用法不再成立，不論位數為何，須在 issue 與 PR 說明中標明「不相容」，並列出受影響的契約與遷移方式。審查者可提報未標明者；不得據以要求改位數（`V2`）。
-- `V7` PR 動到 `devflow/**`（`devflow/VERSION` 自身除外）時，同一 PR 須使 `devflow/VERSION` 進位，位數依 `V2`。兩張 PR 都動 `devflow/**` 時，後合入者以 main 當時的值重新進位；不以 tag 為基準，不以「與最近 tag 相同」為免進位理由。
+- `V7` PR 動到 `devflow/**`（`devflow/VERSION` 自身除外）時，同一 PR 須使 `devflow/VERSION` 進位；位數只依該 PR 對 `devflow/**`（同前排除）的變更套用 `V1`、`V2` 判定，同一 PR 對其他 `V4` 適用對象（如 `docs/spec/**`）的變更各自判定，不納入 kit 的混合取最高。兩張 PR 都動 `devflow/**` 時，後合入者以 main 當時的值重新進位；不以 tag 為基準，不以「與最近 tag 相同」為免進位理由。
 
 ## 4. 任務生命週期（L）
 
-- `L1` 派工前 issue 必須有：目標與對應 AC、G、T、write scope、阻塞依賴、共用契約、外部資源；「未決事項」為空。模板 `templates/issue.md`。派工後 orchestrator 須在 issue 留言記派工紀錄：coder／reviewer 的完整啟動指令（含版本旗標與工具版本）、`session_id` 或同等識別、驗證指令的輸出原文（首行 JSON、`-o` 全文、review id 與比對結果等；只寫「正常」「通過」等結論者不構成紀錄）。對照表引用**本條生效後**的執行作證據時，只能引此紀錄，不引記憶；本條生效前的既有證據依其原記載引用，不受本句限制。
+- `L1` 派工前 issue 必須有：目標與對應 AC、G、T、write scope、阻塞依賴、共用契約、外部資源；「未決事項」為空。模板 `templates/issue.md`。派工後 orchestrator 須在 issue 留言記派工紀錄：coder／reviewer 的完整啟動指令（含版本旗標與工具版本）、`session_id` 或同等識別、驗證指令的輸出原文（首行 JSON、`-o` 全文、review id 與比對結果等；只寫「正常」「通過」等結論者不構成紀錄）。輸出原文只證明驗證方式曾實跑並供核對；對照表狀態仍須另滿足 `R8`。對照表引用**本條生效後**的執行作證據時，只能引此紀錄，不引記憶；本條生效前的既有證據依其原記載引用，不受本句限制。
 - `L2` 派工：從最新 main 建分支與 worktree；coder 收到 issue、G、T、worktree 路徑、驗證指令。
 - `L3` coder 遇未決事項不猜，依判準分兩路徑。停（blocked），任一命中即停：(a) 處置會落在 write scope 外（repo 設定、branch protection、`WORKFLOW.md`、其他任務的 worktree）或會改變 issue 明列的 AC；(b) issue 本體、規格、issue 留言互相矛盾。命中：issue 留言 → 停；orchestrator 問人，答案寫回 issue，再重派。續：未命中者為工程判斷，issue 留言記錄情況、暫定處置、位置後繼續，不停。issue 留言是持久紀錄，提問通道只是通道。工作區內出現非本任務產生的檔案或工具生成物（MCP、編輯器、快取自動寫入者）同樣適用：回報，不自行 `add`、不自行刪除。
 - `L4` 完成：測試綠 → push 分支 → 開 PR，引用 issue、G、T、head sha。模板 `templates/pr.md`。
