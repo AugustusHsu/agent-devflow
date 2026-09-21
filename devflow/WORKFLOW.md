@@ -1,5 +1,5 @@
 ---
-version: 1.6.0.0
+version: 1.7.0.0
 ---
 
 # agent-devflow WORKFLOW
@@ -45,12 +45,21 @@ version: 1.6.0.0
 
 ## 4. 任務生命週期（L）
 
-- `L1` 派工前 issue 必須有：目標與對應 AC、G、T、write scope、阻塞依賴、共用契約、外部資源；「未決事項」為空。模板 `templates/issue.md`。派工後 orchestrator 須在 issue 留言記派工紀錄：coder／reviewer 的完整啟動指令（含版本旗標與工具版本）、`session_id` 或同等識別、驗證指令的輸出原文（首行 JSON、`-o` 全文、review id 與比對結果等；只寫「正常」「通過」等結論者不構成紀錄）。輸出原文只證明驗證方式曾實跑並供核對；對照表狀態仍須另滿足 `R8`。對照表引用**本條生效後**的執行作證據時，只能引此紀錄，不引記憶；本條生效前的既有證據依其原記載引用，不受本句限制。
+- `L1` 派工前 issue 必須有：目標與對應 AC、G、T、write scope、阻塞依賴、共用契約、外部資源；「未決事項」為空。模板 `templates/issue.md`。派工後 orchestrator 須在 issue 留言記派工紀錄：coder／reviewer 的完整啟動指令（含版本旗標與工具版本）、`session_id` 或同等識別、驗證指令的輸出原文（首行 JSON、`-o` 全文、review id 與比對結果等；只寫「正常」「通過」等結論者不構成紀錄）。輸出原文只證明驗證方式曾實跑並供核對；對照表狀態仍須另滿足 `R8`。對照表引用**本條生效後**的執行作證據時，只能引此紀錄，不引記憶；本條生效前的既有證據依其原記載引用，不受本句限制。符合 `L7` 條件者，`L1` 各欄齊備後尚須 `L7` 讀審 `READY`、或 `L7` 停損後人的書面裁決，方可派工。
 - `L2` 派工：從最新 main 建分支與 worktree；coder 收到 issue、G、T、worktree 路徑、驗證指令。
 - `L3` coder 遇未決事項不猜，依判準分兩路徑。停（blocked），任一命中即停：(a) 處置會落在 write scope 外（repo 設定、branch protection、`WORKFLOW.md`、其他任務的 worktree）或會改變 issue 明列的 AC；(b) issue 本體、規格、issue 留言互相矛盾。命中：issue 留言 → 停；orchestrator 問人，答案寫回 issue，再重派。續：未命中者為工程判斷，issue 留言記錄情況、暫定處置、位置後繼續，不停。issue 留言是持久紀錄，提問通道只是通道。工作區內出現非本任務產生的檔案或工具生成物（MCP、編輯器、快取自動寫入者）同樣適用：回報，不自行 `add`、不自行刪除。
 - `L4` 完成：測試綠 → push 分支 → 開 PR，引用 issue、G、T、head sha。模板 `templates/pr.md`。
 - `L5` 之後依序：審查（第 5 節）→ 合併（第 6 節）→ 收尾（第 8 節）。
 - `L6` 取消任務而分支已有 commit：先問人保留或丟棄，不得逕自刪除。
+- `L7` 派工前讀審：符合觸發條件的 issue，須先經獨立讀審回 `READY` 才得派工。
+  - **時點**：`L1` 之後、`L2` 之前。本條列於 `L6` 之後，時點由本文字表達，不由條文位置表達。
+  - **觸發條件**：(a) 基準欄的 T 不是「`docs/spec/**` 路徑 ＋ 已在 `origin/main` 的 commit sha」；(b) write scope 含 `devflow/**` 任一路徑。任一命中即觸發。
+  - **讀審者**：fresh-context、唯讀；不得由撰寫該 issue 的 session 擔任；建議與協調位工具（`devflow.yml` 的 `seats.coordinator.filler` 值）異廠，協調位由人填時改取 `seats.implementer.filler`，只有一家可用時用同廠的全新 context。可讀檔、唯讀 git、跑不改變狀態的指令；不得寫檔、不得 commit、不得對 forge 寫。
+  - **材料**：issue 本體（附 `gh issue view <N> --json updatedAt` 的值）＋全部留言、G、repo 在 base 的 checkout。模板 `templates/issue-review-prompt.md`。
+  - **回覆**：`READY` 或 `REVISE`；以 `Issue @ <T 留言 id> + <本體 updatedAt>` 一行寫明所綁的 issue 狀態，並寫明讀審者的工具與 session 識別；`REVISE` 每個 block 四欄 `Blocker`／`Evidence`／`Minimum revision`／`Acceptance check`。issue 本體或 T 留言在 `READY` 之後變更，該 `READY` 失效。
+  - **處置**：協調者對每個 block 在 issue 留言標三態之一：`FIX` 須附修改內容；`DEFER` 須附承接單號；`REJECT` 須附可重跑的反證。處置不等於放行；處置完須再跑一輪，但受下列「停損」限制。不套用 `R11` 的 PR 留言與「審查處置」段。
+  - **停損**：第二輪仍 `REVISE` → 升人，不自動第三輪；本句優先於上列「處置」的重跑要求。人可 (i) 以書面裁決代 `READY`，或 (ii) 授權再跑一輪；(ii) 的那輪仍 `REVISE` 即回到本款，由人再選。
+  - **留痕**：issue「派工紀錄」段的「派工前讀審」行，讀審結束即填；進行中可記各輪 URL，**派工當下**必為三值之一：`READY <URL>`、`人裁決 <URL>`、`未觸發 a／b 皆否`。
 
 ## 5. 審查（R）
 
