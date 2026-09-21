@@ -1,27 +1,40 @@
 #!/usr/bin/env python3
-"""tests/install/harness.py — devflow/install.py 的驗收測試（spec AC-1～AC-12；AC-13 由 CI 執行，不在此）。
+"""tests/install/harness.py — devflow/install.py 的驗收測試。
+
+涵蓋兩份規格：
+- docs/spec/install/spec.md（入口區塊，AC-1～AC-12；AC-13 由 CI 執行，不在此）——案例名
+  以 `AC-n-` 開頭。
+- docs/spec/kit-install/spec.md（完整安裝，AC-1～AC-20 含 AC-14b）——案例名以 `kit-AC-n-`
+  開頭，每條 AC 每個分支至少一案（kit-install AC-20）。
 
 執行：
     python3 tests/install/harness.py            # 全部案例
+    python3 tests/install/harness.py kit        # 只跑 kit-install 案例
     python3 tests/install/harness.py AC-7       # 只跑名稱含 AC-7 的案例
-
-規格：docs/spec/install/spec.md。每條 AC 的每個分支至少一案（AC-12）。
 
 作法：
 - 每案在 /tmp（tempfile 預設目錄）建獨立假專案，跑完清理，可獨立重跑。
 - 假專案內容以 bytes 字面量寫在案例裡，不用 fixture 檔——spec 的 AC 全以 bytes 定義
   （CRLF、無尾端換行、BOM、非 UTF-8），fixture 檔會被編輯器與 git 正規化掉。
 - 斷言一律 bytes 比對；「不寫檔」另以 mtime 驗證（同 bytes 重寫也算寫）。
-- 需要別的模板時（AC-8 >30 行、模板正規化），把 install.py 複製到暫存目錄並放
-  自己的 templates/entry-block.md——install.py 以 __file__ 定位模板，不是 cwd。
+- 需要別的模板時（AC-8 >30 行、模板正規化），用 sandboxed_install() 把 install.py 複製到
+  暫存目錄並放自己的 templates/entry-block.md——install.py 以 __file__ 定位模板，不是 cwd。
+- 需要變造**來源 kit**時（kit-install AC-6／AC-12／AC-13／AC-16）用 kit_copy()：整個
+  devflow/ 複製到 /tmp 再變造，repo 的 kit 一個 byte 都不動。
 - 可寫性案例（chmod 0444 檔、0555 目錄）以非 root 為前提：root 對它們 os.access(W_OK)
   恆真，構造不出反例；偵測到 os.geteuid() == 0 時該類案例標 SKIP（不算 FAIL）。
 - 輸出每案一行 `PASS|FAIL|SKIP <AC-n>-<分支名>`，失敗細節印到 stderr，最後一行總計
   （含 skip 數）；無 FAIL 即 exit 0。
+
+入口規格案例與 kit-install 的介面（AC-20）：安裝器現在的 stdout 前面多了 kit-install 的
+摘要行與動作行、stderr 在沒有 devflow.yml 的假專案裡多了 AC-9 的 advisory。入口規格既有
+案例的期望值**逐字不變**，只是套在剝掉這兩個前／後綴之後的部分——見 entry_out() 與
+entry_stderr()。exit code 的期望一個字都沒動。
 """
 import difflib
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -34,6 +47,9 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 INSTALL = REPO / "devflow" / "install.py"
 TEMPLATE_PATH = REPO / "devflow" / "templates" / "entry-block.md"
+LOCAL_TEMPLATE = REPO / "devflow" / "templates" / "local-README.md"
+KIT_VERSION = (REPO / "devflow" / "VERSION").read_bytes()
+V = KIT_VERSION.strip()          # 摘要行裡的版本字串（kit-install AC-11）
 
 # 直接載入 install.py 以驗 read_implementer 的回傳值（AC-7 的 L；CI 的 i5 也是這樣取）。
 # 子程序執行仍是判定 exit／stdout／stderr／建檔的來源，這裡只多驗讀取器本身。
@@ -199,29 +215,129 @@ def project(files=None):
 
 @contextmanager
 def sandboxed_install(template=None):
-    """把 install.py 複製到暫存目錄，配上自訂模板（None＝不放模板檔）。"""
+    """把 install.py 複製到暫存目錄，配上自訂模板（None＝不放 entry-block.md）。
+
+    這個暫存目錄是安裝器眼中的「來源 devflow/」，所以得是合規的 kit：VERSION 要合
+    kit-install 的「版本」定義（AC-12，否則一律 exit 2），local-README.md 要在（AC-7 的
+    bytes 來源）。兩者都照抄 repo 的 kit，本函式只換 entry-block.md。
+    """
     d = Path(tempfile.mkdtemp(prefix="devflow-install-sandbox-"))
     try:
         shutil.copy(INSTALL, d / "install.py")
+        shutil.copy(REPO / "devflow" / "VERSION", d / "VERSION")
+        (d / "templates").mkdir()
+        shutil.copy(LOCAL_TEMPLATE, d / "templates" / "local-README.md")
         if template is not None:
-            (d / "templates").mkdir()
             (d / "templates" / "entry-block.md").write_bytes(template)
         yield d / "install.py"
     finally:
         remove_tree(d)
 
 
+@contextmanager
+def kit_copy(version=None, mutate=None):
+    """整個 kit 的 devflow/ 複製到 /tmp，改 VERSION、套 mutate，回傳副本的 install.py 路徑。
+
+    kit-install AC-20：需變造**來源**的案例一律在副本上變造（AC-6 的 A／B 即兩份副本），
+    repo 的 kit 一個 byte 都不動。version 是 VERSION 的完整 bytes（None＝照抄）；
+    mutate 收到副本的 devflow/ 路徑（Path），可任意增刪改。
+    排除路徑（__pycache__／*.pyc）不複製：它們在兩邊都不算數，帶進副本只會讓斷言難讀。
+    """
+    d = Path(tempfile.mkdtemp(prefix="devflow-kit-"))
+    try:
+        src = d / "devflow"
+        shutil.copytree(str(REPO / "devflow"), str(src), symlinks=True,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        if version is not None:
+            (src / "VERSION").write_bytes(version)
+        if mutate is not None:
+            mutate(src)
+        yield src / "install.py"
+    finally:
+        remove_tree(d)
+
+
 def ok_run(r):
-    """exit 0、stderr 空。"""
+    """exit 0、stderr 除 kit-install AC-9 的 advisory 外為空。"""
     eq(r.returncode, 0, "exit code（stderr=%s）" % short(r.stderr))
-    eq(r.stderr, b"", "stderr")
+    eq(entry_stderr(r), b"", "stderr")
 
 
 def err_run(r, code):
-    """exit 1／2：stdout 全部抑制（AC-10）。"""
+    """exit 非 0：stdout 全部抑制（入口規格 AC-10、kit-install「驗收標準」開頭）。"""
     eq(r.returncode, code, "exit code（stderr=%s）" % short(r.stderr))
     eq(r.stdout, b"", "stdout must be suppressed on exit %d" % code)
     expect(r.stderr != b"", "stderr must explain")
+
+
+# ── kit-install 的前綴／後綴（AC-11、AC-9、AC-20）─────────────────────
+
+KIT_SUMMARY_RE = re.compile(
+    rb"kit-install: (?:none|invalid|[0-9]+(?:\.[0-9]+){3}) -> [0-9]+(?:\.[0-9]+){3}"
+    rb" \((?:fresh|upgrade|downgrade|same|replace)\)\n")
+KIT_ACTION_RE = re.compile(rb"devflow(?:\.local)?/[^\n]*: (?:created|updated|deleted)\n")
+# AC-9 的 advisory。入口檔的路徑一律是絕對路徑，不會與動作行的 devflow… 前綴相混
+KIT_YML_ADVISORY = b"devflow.yml: absent; copy devflow/templates/devflow.yml and edit (advisory)\n"
+
+
+def split_stdout(stdout):
+    """(摘要行, 動作行 list, 入口檔那一段)；前兩項已去掉行尾 \\n。
+
+    AC-11：第一行恰為摘要行，其後為動作行，再接入口檔輸出。入口規格的既有斷言套在第三項上。
+    """
+    lines = split_lf(stdout)
+    expect(bool(lines) and KIT_SUMMARY_RE.fullmatch(lines[0]),
+           "stdout 第一行須為 kit-install 摘要行（AC-11）", short(stdout))
+    i = 1
+    while i < len(lines) and KIT_ACTION_RE.fullmatch(lines[i]):
+        i += 1
+    return lines[0][:-1], [line[:-1] for line in lines[1:i]], b"".join(lines[i:])
+
+
+def entry_out(r):
+    """stdout 去掉 kit-install 前綴後，入口檔那一段（AC-20）。"""
+    return split_stdout(r.stdout)[2]
+
+
+def summary_of(r):
+    return split_stdout(r.stdout)[0]
+
+
+def actions_of(r):
+    return split_stdout(r.stdout)[1]
+
+
+def entry_stderr(r):
+    """stderr 去掉 AC-9 的 advisory（依 AC-9 的優先序固定在最後）後的部分。
+
+    假專案多數沒有 devflow.yml，AC-9 要求 exit 0 時必印這一行。入口規格既有案例的 stderr
+    期望逐字不變，只是套在這上面——與 stdout 的前綴同理（AC-20）。exit 非 0 時 stderr 只有
+    錯誤那一行，本函式等同恆等式。
+    """
+    if r.stderr.endswith(KIT_YML_ADVISORY):
+        return r.stderr[:-len(KIT_YML_ADVISORY)]
+    return r.stderr
+
+
+def snapshot(root):
+    """整棵樹的 bytes 與存在性（AC-18／AC-5：比 bytes 與 lexists，不比 stat）。
+
+    symlink 記其指向、不跟隨；os.walk(followlinks=False) 不進入 symlink 指向的目錄。
+    """
+    out = {}
+    for dirpath, dirnames, filenames in os.walk(str(root), followlinks=False):
+        for name in dirnames + filenames:
+            full = Path(dirpath) / name
+            rel = str(full.relative_to(root))
+            if full.is_symlink():
+                out[rel] = ("link", os.readlink(str(full)))
+            elif full.is_dir():
+                out[rel] = ("dir", None)
+            elif full.is_file():
+                out[rel] = ("file", full.read_bytes())
+            else:
+                out[rel] = ("other", None)
+    return out
 
 
 # ── 案例 ─────────────────────────────────────────────────────────────
@@ -314,7 +430,7 @@ def _():
     with project({"CLAUDE.md": data}) as p:
         r = p.run()
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "stdout")
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n", "stdout")
         eq(p.read("CLAUDE.md"), data, "bytes")
         expect(not p.rewritten("CLAUDE.md"), "file must not be rewritten")
 
@@ -325,7 +441,7 @@ def _():
     with project({"CLAUDE.md": data}) as p:
         r = p.run()
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "stdout")
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n", "stdout")
         eq(p.read("CLAUDE.md"), data, "CRLF block left as is")
         expect(not p.rewritten("CLAUDE.md"), "file must not be rewritten")
 
@@ -457,7 +573,7 @@ def _():
     with project({"CLAUDE.md": data}) as p:
         r = p.run()
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "stdout")
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n", "stdout")
         expect(not p.rewritten("CLAUDE.md"), "file must not be rewritten")
 
 
@@ -554,7 +670,7 @@ def _():
     with project({"CLAUDE.md": T}) as p:
         r = p.run()
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "stdout")
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n", "stdout")
         expect(not p.rewritten("CLAUDE.md"), "file must not be rewritten")
 
 
@@ -608,7 +724,7 @@ def _():
     with project({"CLAUDE.md": data}) as p:
         r = p.run()
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "later lone begin must not raise AC-5")
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n", "later lone begin must not raise AC-5")
         eq(p.read("CLAUDE.md"), data, "bytes")
         expect(not p.rewritten("CLAUDE.md"), "file must not be rewritten")
 
@@ -1281,7 +1397,7 @@ def _():
         snap = {n: p.read(n) for n in ("CLAUDE.md", "AGENTS.md")}
         r = p.run()
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n"
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n"
            + p.display("AGENTS.md") + b": unchanged\n", "stdout")
         eq({n: p.read(n) for n in snap}, snap, "bytes == snapshot")
 
@@ -1293,7 +1409,7 @@ def _():
         snap = p.read("AGENTS.md")
         r = p.run()
         ok_run(r)
-        eq(r.stdout, p.display("AGENTS.md") + b": unchanged\n", "stdout")
+        eq(entry_out(r), p.display("AGENTS.md") + b": unchanged\n", "stdout")
         eq(p.read("AGENTS.md"), snap, "bytes == snapshot")
         expect(not p.exists("CLAUDE.md"), "CLAUDE.md must not be created")
 
@@ -1306,7 +1422,7 @@ def _():
     with project({"CLAUDE.md": orig}) as p:
         r = p.run("--dry-run")
         ok_run(r)
-        eq(r.stdout, unified(orig, T + b"\n" + orig, b"CLAUDE.md"), "stdout == unified diff")
+        eq(entry_out(r), unified(orig, T + b"\n" + orig, b"CLAUDE.md"), "stdout == unified diff")
         eq(p.read("CLAUDE.md"), orig, "bytes")
         expect(not p.rewritten("CLAUDE.md"), "file must not be rewritten")
 
@@ -1316,7 +1432,7 @@ def _():
     with project() as p:
         r = p.run("--dry-run")
         ok_run(r)
-        eq(r.stdout, unified(b"", T, b"AGENTS.md"), "stdout == diff from empty")
+        eq(entry_out(r), unified(b"", T, b"AGENTS.md"), "stdout == diff from empty")
         expect(not p.exists("AGENTS.md") and not p.exists("CLAUDE.md"), "nothing created")
 
 
@@ -1326,7 +1442,7 @@ def _():
     with project({"CLAUDE.md": data}) as p:
         r = p.run("--dry-run")
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "stdout")
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n", "stdout")
         eq(p.read("CLAUDE.md"), data, "bytes")
 
 
@@ -1336,7 +1452,7 @@ def _():
     with project({"CLAUDE.md": PREFIX + T, "AGENTS.md": a}) as p:
         r = p.run("--dry-run")
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n"
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n"
            + unified(a, T + b"\n" + a, b"AGENTS.md"), "stdout: CLAUDE.md then AGENTS.md")
         eq(p.read("AGENTS.md"), a, "AGENTS.md bytes")
         expect(not p.rewritten("AGENTS.md"), "AGENTS.md must not be rewritten")
@@ -1351,7 +1467,7 @@ def _():
         ok_run(r)
         expected = unified(orig, T + b"\n" + orig, b"CLAUDE.md")
         expect(not expected.endswith(b"\n"), "precondition: difflib output ends without newline")
-        eq(r.stdout, expected, "stdout == difflib output byte for byte")
+        eq(entry_out(r), expected, "stdout == difflib output byte for byte")
         expect(b"No newline" not in r.stdout, "no synthetic marker line", r.stdout)
 
 
@@ -1361,7 +1477,7 @@ def _():
     with project({"CLAUDE.md": orig}) as p:
         r = p.run("--dry-run")
         ok_run(r)
-        eq(r.stdout, unified(orig, PREFIX + T, b"CLAUDE.md"), "stdout == difflib output byte for byte")
+        eq(entry_out(r), unified(orig, PREFIX + T, b"CLAUDE.md"), "stdout == difflib output byte for byte")
         eq(p.read("CLAUDE.md"), orig, "bytes")
 
 
@@ -1476,7 +1592,7 @@ def _():
         p.chmod("CLAUDE.md", 0o444)
         r = p.run()
         ok_run(r)
-        eq(r.stdout, p.display("CLAUDE.md") + b": unchanged\n", "stdout")
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n", "stdout")
 
 
 @case("AC-12-atomic-writable-plus-readonly-nothing-written")
@@ -1540,8 +1656,741 @@ def _():
 def _():
     r = subprocess.run([sys.executable, str(INSTALL), str(REPO), "--dry-run"], capture_output=True)
     ok_run(r)
-    eq(r.stdout, str(REPO / "CLAUDE.md").encode() + b": unchanged\n"
+    eq(entry_out(r), str(REPO / "CLAUDE.md").encode() + b": unchanged\n"
        + str(REPO / "AGENTS.md").encode() + b": unchanged\n", "stdout")
+
+
+# ════════════════════════════════════════════════════════════════════
+# kit-install（docs/spec/kit-install/spec.md）：鏡像 devflow/ ＋ devflow.local/
+# 案例名一律以 `kit-AC-n-` 開頭，`python3 tests/install/harness.py kit` 只跑這一段。
+# ════════════════════════════════════════════════════════════════════
+
+
+def kit_files(src=REPO / "devflow"):
+    """鏡像集合：src 下、排除路徑以外的一般檔，POSIX 相對路徑、sorted。"""
+    out = []
+    for dirpath, dirnames, filenames in os.walk(str(src), followlinks=False):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for name in filenames:
+            if not name.endswith(".pyc"):
+                out.append(str((Path(dirpath) / name).relative_to(src)))
+    return sorted(out)
+
+
+def created_lines(files, local=True):
+    """全新安裝的期望動作行：全部 created，依**路徑字串** sorted()（AC-11）。"""
+    actions = [(b"devflow/" + f.encode(), b"created") for f in files]
+    if local:
+        actions.append((b"devflow.local/README.md", b"created"))
+    return [path + b": " + action for path, action in sorted(actions)]
+
+
+def outside_snapshot(root):
+    """devflow/、devflow.local/、入口檔集合以外的整棵樹（AC-18）。"""
+    owned = ("devflow", "devflow.local", "CLAUDE.md", "AGENTS.md")
+    return {k: v for k, v in snapshot(root).items() if k.split(os.sep)[0] not in owned}
+
+
+def local_snapshot(root):
+    return {k: v for k, v in snapshot(root).items() if k.split(os.sep)[0] == "devflow.local"}
+
+
+# kit-AC-1：目標無 devflow/ → 建立；每檔 bytes 等於來源；devflow.local 依 AC-7；模式 fresh
+
+@case("kit-AC-1-fresh-mirrors-whole-tree")
+def _():
+    src = REPO / "devflow"
+    files = kit_files()
+    with project() as p:
+        r = p.run()
+        ok_run(r)
+        eq(summary_of(r), b"kit-install: none -> " + V + b" (fresh)", "摘要行模式 fresh")
+        eq(actions_of(r), created_lines(files), "動作行：鏡像集合全部 created ＋ devflow.local")
+        for rel in files:
+            eq((p.root / "devflow" / rel).read_bytes(), (src / rel).read_bytes(),
+               "devflow/%s bytes == 來源" % rel)
+        eq(p.read("devflow.local/README.md"), LOCAL_TEMPLATE.read_bytes(), "devflow.local/README.md")
+        eq(entry_out(r), p.display("AGENTS.md") + b": created\n", "入口檔依入口規格")
+        eq(p.read("AGENTS.md"), T, "入口區塊 bytes")
+
+
+# kit-AC-2：bytes 不同、或目標是 symlink → updated
+
+@case("kit-AC-2-updated-different-bytes")
+def _():
+    with project() as p:
+        ok_run(p.run())
+        p.write("devflow/WORKFLOW.md", b"stale\n")
+        r = p.run()
+        ok_run(r)
+        eq(actions_of(r), [b"devflow/WORKFLOW.md: updated"], "恰一行 updated")
+        eq(p.read("devflow/WORKFLOW.md"), (REPO / "devflow" / "WORKFLOW.md").read_bytes(),
+           "覆寫為來源 bytes")
+
+
+@case("kit-AC-2-updated-symlink-replaced-by-file")
+def _():
+    with project({"outside.md": b"outside\n"}) as p:
+        ok_run(p.run())
+        os.remove(str(p.path("devflow/WORKFLOW.md")))
+        p.symlink("devflow/WORKFLOW.md", "../outside.md")
+        r = p.run()
+        ok_run(r)
+        eq(actions_of(r), [b"devflow/WORKFLOW.md: updated"], "symlink（任何指向）→ updated")
+        expect(not p.path("devflow/WORKFLOW.md").is_symlink(), "symlink 由一般檔取代")
+        eq(p.read("devflow/WORKFLOW.md"), (REPO / "devflow" / "WORKFLOW.md").read_bytes(), "bytes")
+        eq(p.read("outside.md"), b"outside\n", "不寫進連結的指向")
+
+
+# kit-AC-3：不在鏡像集合的一般檔或 symlink → deleted；刪後空目錄移除（devflow/ 本身保留）
+
+@case("kit-AC-3-deleted-extra-file")
+def _():
+    with project() as p:
+        ok_run(p.run())
+        p.write("devflow/stray.md", b"mine\n")
+        r = p.run()
+        ok_run(r)
+        eq(actions_of(r), [b"devflow/stray.md: deleted"], "恰一行 deleted")
+        expect(not os.path.lexists(str(p.path("devflow/stray.md"))), "已刪除")
+
+
+@case("kit-AC-3-deleted-symlink-and-empty-dirs-pruned")
+def _():
+    with project({"outside.md": b"outside\n"}) as p:
+        ok_run(p.run())
+        (p.root / "devflow" / "extra" / "deep").mkdir(parents=True)
+        p.write("devflow/extra/deep/x.md", b"x\n")
+        p.symlink("devflow/extra/link.md", "../../../outside.md")
+        r = p.run()
+        ok_run(r)
+        eq(actions_of(r), [b"devflow/extra/deep/x.md: deleted", b"devflow/extra/link.md: deleted"],
+           "一般檔與 symlink 都 deleted，依路徑字串排序")
+        expect(not os.path.lexists(str(p.path("devflow/extra"))), "刪後空目錄一併移除（深者先）")
+        expect(p.path("devflow").is_dir(), "devflow/ 本身保留")
+        eq(p.read("outside.md"), b"outside\n", "symlink 只移除連結本身，不進入其指向")
+
+
+# kit-AC-4：unchanged 不印任何行；排除路徑雙邊不複製、不刪除、不印
+
+@case("kit-AC-4-unchanged-prints-nothing")
+def _():
+    with project() as p:
+        ok_run(p.run())
+        r = p.run()
+        ok_run(r)
+        eq(actions_of(r), [], "全部 unchanged → 一行動作行都沒有")
+
+
+@case("kit-AC-4-excluded-paths-both-sides")
+def _():
+    def add_junk(src):
+        (src / "__pycache__").mkdir()
+        (src / "__pycache__" / "install.cpython-99.pyc").write_bytes(b"source cache\n")
+        (src / "stale.pyc").write_bytes(b"source pyc\n")
+
+    with kit_copy(mutate=add_junk) as inst, project() as p:
+        ok_run(p.run(install=inst))
+        expect(not os.path.lexists(str(p.path("devflow/__pycache__"))), "來源的 __pycache__ 不複製")
+        expect(not os.path.lexists(str(p.path("devflow/stale.pyc"))), "來源的 .pyc 不複製")
+        (p.root / "devflow" / "__pycache__").mkdir()
+        p.write("devflow/__pycache__/x.cpython-99.pyc", b"target cache\n")
+        p.write("devflow/other.pyc", b"target pyc\n")
+        r = p.run(install=inst)
+        ok_run(r)
+        eq(actions_of(r), [], "目標的排除路徑不刪除、不印")
+        eq(p.read("devflow/__pycache__/x.cpython-99.pyc"), b"target cache\n", "留著")
+        eq(p.read("devflow/other.pyc"), b"target pyc\n", "留著")
+
+
+# kit-AC-5：連續兩次 → 第二次恰為摘要行（same）＋入口規格 AC-3 的 unchanged 行；快照相同
+
+@case("kit-AC-5-second-run-same-and-snapshot")
+def _():
+    with project({"CLAUDE.md": PREFIX}) as p:
+        ok_run(p.run())
+        snap = snapshot(p.root)
+        r = p.run()
+        ok_run(r)
+        eq(summary_of(r), b"kit-install: " + V + b" -> " + V + b" (same)", "模式 same")
+        eq(actions_of(r), [], "第二次沒有動作行")
+        eq(entry_out(r), p.display("CLAUDE.md") + b": unchanged\n", "入口規格 AC-3 的 unchanged 行")
+        eq(snapshot(p.root), snap, "整棵樹的 bytes 與存在性 == 第一次執行後的快照")
+
+
+# kit-AC-6：A（0.0.0.1）→ B（0.0.0.2，恰一檔改、一檔增、一檔刪）→ A，逐 byte 回到原狀。
+# 「一檔改」就是 VERSION 自己——A 與 B 的版本不同是這條 AC 的前提，那一檔必然 updated。
+
+@case("kit-AC-6-upgrade-then-downgrade")
+def _():
+    def b_changes(src):
+        (src / "seats" / "added.md").write_bytes(b"added by B\n")      # 增
+        os.remove(str(src / "seats" / "approver.md"))                  # 刪
+
+    with kit_copy(version=b"0.0.0.1\n") as a, project() as p:
+        ok_run(p.run(install=a))
+        first = snapshot(p.root / "devflow")
+        with kit_copy(version=b"0.0.0.2\n", mutate=b_changes) as b:
+            r = p.run(install=b)
+            ok_run(r)
+            eq(summary_of(r), b"kit-install: 0.0.0.1 -> 0.0.0.2 (upgrade)", "模式 upgrade")
+            eq(actions_of(r), [b"devflow/VERSION: updated",
+                               b"devflow/seats/added.md: created",
+                               b"devflow/seats/approver.md: deleted"],
+               "updated／created／deleted 各一")
+        r = p.run(install=a)
+        ok_run(r)
+        eq(summary_of(r), b"kit-install: 0.0.0.2 -> 0.0.0.1 (downgrade)", "模式 downgrade")
+        eq(actions_of(r), [b"devflow/VERSION: updated",
+                           b"devflow/seats/added.md: deleted",
+                           b"devflow/seats/approver.md: created"], "反向三個動作")
+        eq(snapshot(p.root / "devflow"), first, "整棵樹逐 byte 回到第一次安裝後")
+
+
+# kit-AC-7：devflow.local
+
+@case("kit-AC-7-local-created-when-absent")
+def _():
+    with project() as p:
+        r = p.run()
+        ok_run(r)
+        expect(b"devflow.local/README.md: created" in actions_of(r), "動作行", actions_of(r))
+        eq(p.read("devflow.local/README.md"), LOCAL_TEMPLATE.read_bytes(),
+           "bytes == devflow/templates/local-README.md")
+        eq(sorted(os.listdir(str(p.path("devflow.local")))), ["README.md"], "只放 README.md")
+
+
+@case("kit-AC-7-local-existing-forms-untouched")
+def _():
+    def a_dir(p):
+        (p.root / "devflow.local").mkdir()
+
+    def a_dir_missing_readme(p):
+        (p.root / "devflow.local").mkdir()
+        p.write("devflow.local/notes.md", b"mine\n")
+
+    def a_file(p):
+        p.write("devflow.local", b"not a directory\n")
+
+    def a_dangling_symlink(p):
+        p.symlink("devflow.local", "nowhere")
+
+    for make, why in ((a_dir, "空目錄"), (a_dir_missing_readme, "目錄但缺 README"),
+                      (a_file, "一般檔"), (a_dangling_symlink, "dangling symlink")):
+        with project() as p:
+            make(p)
+            before = local_snapshot(p.root)
+            r = p.run()
+            ok_run(r)
+            expect(not any(b"devflow.local" in line for line in actions_of(r)),
+                   "lexists 真 → 不印任何 devflow.local 行（%s）" % why, actions_of(r))
+            eq(local_snapshot(p.root), before, "devflow.local 整棵不碰（%s）" % why)
+
+
+# kit-AC-8：devflow.yml 不建、不改
+
+@case("kit-AC-8-devflow-yml-untouched")
+def _():
+    with project({"devflow.yml": REPO_YML}) as p:
+        ok_run(p.run())
+        eq(p.read("devflow.yml"), REPO_YML, "安裝前後 bytes 相同")
+        expect(not p.rewritten("devflow.yml"), "devflow.yml must not be rewritten")
+    with project() as p:
+        ok_run(p.run())
+        expect(not os.path.lexists(str(p.path("devflow.yml"))), "目標無 devflow.yml → 不建")
+
+
+# kit-AC-9：advisory 與其優先序
+
+@case("kit-AC-9-advisory-when-yml-absent")
+def _():
+    with project() as p:
+        rd = p.run("--dry-run")
+        eq(rd.returncode, 0, "dry-run exit 0")
+        eq(rd.stderr, KIT_YML_ADVISORY, "--dry-run 同樣印，且恰一行")
+        r = p.run()
+        eq(r.returncode, 0, "exit 0（advisory 不影響 exit）")
+        eq(r.stderr, KIT_YML_ADVISORY, "stderr 恰一行")
+
+
+@case("kit-AC-9-no-advisory-when-yml-present")
+def _():
+    with project({"devflow.yml": YML_CLAUDE}) as p:
+        r = p.run()
+        eq(r.returncode, 0, "exit 0")
+        eq(r.stderr, b"", "有 devflow.yml → 不印")
+
+
+@case("kit-AC-9-entry-advisory-alone-when-yml-present")
+def _():
+    # AC-9 的優先序條款（AC-7 先、本條後）在**一致的檔案系統下不可達**：AC-7 的 advisory
+    # 要 devflow.yml 讀得到且有 seats: 頂層行，本條的要 devflow.yml 不存在——兩者互斥，
+    # 實際 stderr 永遠至多一行 advisory。要讓兩行同時出現，只能在安裝器的兩次存在性判斷
+    # 之間讓檔案消失，那是在測一個人為競態，不是規格的行為，本 harness 不做
+    #（PR #138 第一輪阻擋 1 的處置）。實作的順序（choose_targets() 的 AC-7 advisory 先
+    # append、AC-9 的後 append）以 devflow/install.py run() 的程式碼為準。
+    # 本案驗的是：有 AC-7 advisory 時本條不出現，且 stderr 逐字如入口規格所期望。
+    with project({"devflow.yml": NESTED_CLAUDE}) as p:
+        r = p.run()
+        eq(r.returncode, 0, "exit 0")
+        eq(r.stderr, ADVISORY, "只有入口規格 AC-7 的 advisory")
+
+
+@case("kit-AC-9-no-advisory-on-exit-2")
+def _():
+    # exit 非 0 時 stderr 只有錯誤那一行（本例的目標無 devflow.yml，exit 0 時會有 advisory）
+    with project() as p:
+        p.write("devflow", b"not a directory\n")
+        r = p.run()
+        err_run(r, 2)
+        eq(r.stderr, b"devflow: not a directory\n", "stderr 恰一行錯誤，無 advisory")
+
+
+@case("kit-AC-9-entry-advisory-buffered-until-exit-0-on-exit-2")
+def _():
+    # 入口規格 AC-7 的 advisory 原本在 choose_targets() 中途就 print——那樣 exit 2 的
+    # stderr 會變兩行。構造：兩入口檔皆無 ＋ seats: 有但投影讀不到（advisory 觸發），
+    # 再讓決策階段在 choose_targets() **之後**失敗（devflow/ 不可寫 → AC-15）
+    require_non_root()
+    with project({"devflow.yml": NESTED_CLAUDE}) as p:
+        (p.root / "devflow").mkdir()
+        p.write("devflow/stray.md", b"mine\n")
+        os.chmod(str(p.path("devflow")), 0o555)
+        try:
+            r = p.run()
+            err_run(r, 2)
+            # AC-15 依路徑字串序檢查，第一個不可寫的即報：devflow/VERSION 要 created
+            eq(r.stderr, b"devflow/VERSION: directory not writable\n",
+               "stderr 恰一行錯誤，advisory 被緩衝掉")
+        finally:
+            os.chmod(str(p.path("devflow")), 0o755)
+
+
+@case("kit-AC-9-entry-advisory-buffered-until-exit-0-on-exit-3")
+def _():
+    # 同上，但失敗發生在**寫入階段**（exit 3）：advisory 一樣不印，stdout 一樣全部抑制。
+    # 目標的 devflow/a、devflow/b 直接鋪好，不先跑一次安裝——跑過就會有入口檔，
+    # 有入口檔就不會觸發入口規格 AC-7 的 advisory
+    def v2(src):
+        (src / "a").write_bytes(b"A2\n")
+        (src / "b").write_bytes(b"B2\n")
+        path = src / "install.py"
+        path.write_bytes(FAIL_SHIM + path.read_bytes())
+
+    with kit_copy(mutate=v2) as inst, project({"devflow.yml": NESTED_CLAUDE}) as p:
+        (p.root / "devflow").mkdir()
+        p.write("devflow/a", b"A0\n")
+        p.write("devflow/b", b"B0\n")
+        r = p.run(install=inst)
+        err_run(r, 3)
+        eq(r.stderr, b"devflow/b: Permission denied\n", "stderr 恰一行錯誤，無 advisory")
+        eq(p.read("devflow/a"), b"A2\n", "失敗路徑之前的動作已落盤")
+        eq(p.read("devflow/b"), b"B0\n", "失敗路徑未動")
+        expect(not os.path.lexists(str(p.path("AGENTS.md"))),
+               "入口檔在最後一階段，沒走到")
+
+
+@case("kit-stderr-exactly-one-line-both-entry-files-fail")
+def _():
+    # kit-install「驗收標準」開頭：exit 非 0 時 stderr **恰一行**。入口規格的原子性會把集合內
+    # 每個檔的錯都收集起來，兩個入口檔同時壞掉時原本會印兩行——收窄為只報決定 exit code 的
+    # 那一個；exit code 仍取最重的（這裡兩個都是 1）
+    bad = PREFIX + BEGIN_LINE + b"open\n"
+    with project({"CLAUDE.md": bad, "AGENTS.md": bad}) as p:
+        r = p.run()
+        err_run(r, 1)
+        eq(r.stderr, p.display("CLAUDE.md") + b":5: devflow:begin without end\n",
+           "stderr 恰一行，報集合內第一個錯")
+        for name in ("CLAUDE.md", "AGENTS.md"):
+            eq(p.read(name), bad, name + " 不寫")
+        expect(not os.path.lexists(str(p.path("devflow"))), "鏡像也不寫")
+
+
+# kit-AC-10：--dry-run 走完整決策、不寫；決策階段的結果與實跑逐字相同
+
+@case("kit-AC-10-dry-run-no-write-matches-real")
+def _():
+    files = {"CLAUDE.md": PREFIX}
+    with project(files) as dry, project(files) as real:
+        before = snapshot(dry.root)
+        rd = dry.run("--dry-run")
+        rr = real.run()
+        ok_run(rd)
+        ok_run(rr)
+        eq(snapshot(dry.root), before, "--dry-run 前後整棵樹的 bytes 與存在性相同")
+        eq(summary_of(rd), summary_of(rr), "摘要行逐字相同")
+        eq(actions_of(rd), actions_of(rr), "動作行逐字相同")
+        eq(rd.stderr, rr.stderr, "stderr 逐字相同")
+        eq(entry_out(rd), unified(PREFIX, T + b"\n" + PREFIX, b"CLAUDE.md"),
+           "入口檔部分依入口規格 AC-10")
+
+
+@case("kit-AC-10-dry-run-exit-2-matches-real")
+def _():
+    with project() as dry, project() as real:
+        for p in (dry, real):
+            p.write("devflow", b"not a directory\n")
+        before = snapshot(dry.root)
+        rd = dry.run("--dry-run")
+        rr = real.run()
+        err_run(rd, 2)
+        err_run(rr, 2)
+        eq(rd.stderr, rr.stderr, "exit 2 的 stderr 逐字相同")
+        eq(snapshot(dry.root), before, "兩者都不寫任何檔")
+        eq(snapshot(real.root), before, "兩者都不寫任何檔")
+
+
+# kit-AC-11：摘要行的五個模式與動作行的排序
+
+@case("kit-AC-11-summary-mode-replace-and-fresh")
+def _():
+    with project() as p:
+        ok_run(p.run())
+        p.write("devflow/VERSION", b"not a version\n")
+        r = p.run()
+        ok_run(r)
+        eq(summary_of(r), b"kit-install: invalid -> " + V + b" (replace)",
+           "舊版存在但不合「版本」定義 → 印 invalid、模式 replace")
+    with project() as p:
+        ok_run(p.run())
+        os.remove(str(p.path("devflow/VERSION")))
+        r = p.run()
+        ok_run(r)
+        eq(summary_of(r), b"kit-install: none -> " + V + b" (fresh)",
+           "有 devflow/ 但無 VERSION → fresh")
+
+
+@case("kit-AC-11-action-lines-sorted-by-path")
+def _():
+    # 排序鍵是**路徑字串**不是整行：`devflow/a` 與 `devflow/a.md` 的先後在兩種排法下相反
+    # （`:` > `.`）。devflow.local/README.md 排在 devflow/… 之前（`.` < `/`）。
+    def add(src):
+        (src / "a").write_bytes(b"a\n")
+        (src / "a.md").write_bytes(b"a.md\n")
+
+    with kit_copy(mutate=add) as inst, project() as p:
+        r = p.run(install=inst)
+        ok_run(r)
+        lines = actions_of(r)
+        eq(lines[0], b"devflow.local/README.md: created", "devflow.local 排在最前")
+        eq([line for line in lines if line.startswith(b"devflow/a")],
+           [b"devflow/a: created", b"devflow/a.md: created"], "依路徑字串，不是整行")
+        paths = [line.rsplit(b": ", 1)[0] for line in lines]
+        eq(paths, sorted(paths), "全域依路徑字串 sorted()")
+
+
+# kit-AC-12：來源 VERSION 缺或不合定義 → exit 2，不讀目標、不做任何決策
+
+@case("kit-AC-12-source-version-missing")
+def _():
+    def drop(src):
+        os.remove(str(src / "VERSION"))
+
+    with kit_copy(mutate=drop) as inst, project() as p:
+        before = snapshot(p.root)
+        r = p.run(install=inst)
+        err_run(r, 2)
+        expect(r.stderr.startswith(b"devflow/VERSION: "), "stderr 指 devflow/VERSION", r.stderr)
+        eq(r.stderr.count(b"\n"), 1, "stderr 恰一行")
+        eq(snapshot(p.root), before, "不寫任何檔")
+
+
+@case("kit-AC-12-source-version-checked-before-target")
+def _():
+    # AC-12 的「不讀目標、不做任何決策」：來源 VERSION 無效 ＋ **目標路徑根本不存在** →
+    # 仍須報 VERSION 那一行。先讀目標的實作會報入口規格 AC-11 的「目標路徑不存在」
+    with kit_copy(version=b"not a version\n") as inst, project() as p:
+        missing = str(p.root / "nope")
+        r = p.run(target=missing, install=inst)
+        err_run(r, 2)
+        eq(r.stderr, b"devflow/VERSION: malformed; expected exactly one line a.b.c.d\n",
+           "報 VERSION 的錯，證明版本檢查排在讀目標之前")
+        expect(missing.encode() not in r.stderr, "沒有報目標路徑", r.stderr)
+
+
+@case("kit-AC-12-source-version-malformed")
+def _():
+    for bad, why in ((b"0.0.1\n", "三碼"), (b"0.0.0.1.2\n", "五碼"),
+                     (b"0.0.0.1", "無尾端換行"), (b"0.0.0.1\n\n", "多一個換行"),
+                     (b"0.0.0.1\n0.0.0.2\n", "兩行"), (b"01.0.0.1\n", "前導零"),
+                     (b"\xef\xbb\xbf0.0.0.1\n", "BOM"), (b"v0.0.0.1\n", "前綴 v"),
+                     (b" 0.0.0.1\n", "前導空白"), (b"0.0.0.1 \n", "尾端空白"),
+                     (b"0.0.0.a\n", "非數字"), (b"", "空檔")):
+        with kit_copy(version=bad) as inst, project() as p:
+            r = p.run(install=inst)
+            err_run(r, 2)
+            eq(r.stderr, b"devflow/VERSION: malformed; expected exactly one line a.b.c.d\n",
+               "stderr（%s）" % why)
+    # 對照：合定義的邊界值照樣裝得起來，且摘要行用它
+    for good in (b"0.0.0.0\n", b"10.20.30.40\n"):
+        with kit_copy(version=good) as inst, project() as p:
+            r = p.run(install=inst)
+            ok_run(r)
+            eq(summary_of(r), b"kit-install: none -> " + good.strip() + b" (fresh)",
+               "合定義的版本（%s）" % short(good))
+
+
+# kit-AC-13：來源有 symlink → exit 2
+
+@case("kit-AC-13-source-symlink-rejected")
+def _():
+    def to_file(src):
+        os.symlink("WORKFLOW.md", str(src / "alias.md"))
+
+    def to_dir(src):
+        os.symlink("seats", str(src / "roles"))
+
+    def dangling(src):
+        os.symlink("nowhere.md", str(src / "gone.md"))
+
+    for mutate, rel, why in ((to_file, b"alias.md", "指向檔"),
+                             (to_dir, b"roles", "指向目錄"),
+                             (dangling, b"gone.md", "dangling")):
+        with kit_copy(mutate=mutate) as inst, project() as p:
+            before = snapshot(p.root)
+            r = p.run(install=inst)
+            err_run(r, 2)
+            eq(r.stderr, b"devflow/" + rel + b": symlink in source not supported\n",
+               "stderr（%s）" % why)
+            eq(snapshot(p.root), before, "不寫任何檔（%s）" % why)
+
+
+# kit-AC-14：目標 devflow 存在但不是目錄 → exit 2
+
+@case("kit-AC-14-target-devflow-not-a-directory")
+def _():
+    def a_file(p):
+        p.write("devflow", b"not a directory\n")
+
+    def symlink_to_dir(p):
+        (p.root / "elsewhere").mkdir()
+        p.symlink("devflow", "elsewhere")
+
+    def dangling(p):
+        p.symlink("devflow", "nowhere")
+
+    for make, expected, why in (
+            (a_file, b"devflow: not a directory\n", "一般檔"),
+            (symlink_to_dir, b"devflow: symlink, not a directory\n", "指向目錄的 symlink"),
+            (dangling, b"devflow: symlink, not a directory\n", "dangling symlink")):
+        with project() as p:
+            make(p)
+            before = snapshot(p.root)
+            r = p.run()
+            err_run(r, 2)
+            eq(r.stderr, expected, "stderr（%s）" % why)
+            eq(snapshot(p.root), before, "不寫任何檔（%s）" % why)
+
+
+# kit-AC-14b：目標 symlink 是鏡像集合某路徑的祖先 → exit 2；非祖先者照「動作」定義走
+
+@case("kit-AC-14b-symlink-ancestor-rejected")
+def _():
+    # 來源有 devflow/seats/<檔>，目標 devflow/seats 是指向別處的 symlink：必須 exit 2，
+    # 且連結指向的目錄一個新檔都沒有（否則寫入會沿連結越出目標）
+    with project() as p, project() as out:
+        (p.root / "devflow").mkdir()
+        p.symlink("devflow/seats", str(out.root))
+        before, out_before = snapshot(p.root), snapshot(out.root)
+        r = p.run()
+        err_run(r, 2)
+        eq(r.stderr, b"devflow/seats: symlink where source has directory\n", "stderr")
+        eq(snapshot(p.root), before, "不寫任何檔")
+        eq(snapshot(out.root), out_before, "連結指向的目錄沒有新檔")
+
+
+@case("kit-AC-14b-non-ancestor-symlink-is-deleted")
+def _():
+    # 祖先關係以 POSIX 路徑段判、不 resolve：devflow/sea 不是 devflow/seats/… 的祖先，
+    # 來源也沒有這個路徑 → 照「動作」定義是 deleted（來源同路徑是檔者 → updated，見 kit-AC-2）
+    with project({"outside.md": b"outside\n"}) as p:
+        ok_run(p.run())
+        p.symlink("devflow/sea", "../outside.md")
+        r = p.run()
+        ok_run(r)
+        eq(actions_of(r), [b"devflow/sea: deleted"], "非祖先的 symlink → deleted")
+        eq(p.read("outside.md"), b"outside\n", "只移除連結本身")
+
+
+# kit-AC-15：可寫性（決策階段，dry-run 亦檢查）
+
+@case("kit-AC-15-unwritable-existing-file-exit-2")
+def _():
+    require_non_root()
+    with project() as p:
+        ok_run(p.run())
+        p.write("devflow/WORKFLOW.md", b"stale\n")
+        p.chmod("devflow/WORKFLOW.md", 0o444)
+        before = snapshot(p.root)
+        rd = p.run("--dry-run")
+        rr = p.run()
+        err_run(rd, 2)
+        err_run(rr, 2)
+        eq(rd.stderr, rr.stderr, "dry-run 亦檢查，stderr 相同")
+        eq(rr.stderr, b"devflow/WORKFLOW.md: not writable\n", "stderr")
+        eq(snapshot(p.root), before, "不寫任何檔")
+
+
+@case("kit-AC-15-unwritable-directory-exit-2")
+def _():
+    require_non_root()
+    with project({"CLAUDE.md": PREFIX, "devflow.yml": YML_CLAUDE}) as p:
+        ok_run(p.run())
+        p.write("devflow/stray.md", b"mine\n")
+        os.chmod(str(p.path("devflow")), 0o555)
+        try:
+            before = snapshot(p.root)
+            rd = p.run("--dry-run")
+            rr = p.run()
+            err_run(rd, 2)
+            err_run(rr, 2)
+            eq(rd.stderr, rr.stderr, "dry-run 亦檢查，stderr 相同")
+            eq(rr.stderr, b"devflow/stray.md: directory not writable\n", "stderr")
+            eq(snapshot(p.root), before, "不寫任何檔")
+        finally:
+            os.chmod(str(p.path("devflow")), 0o755)
+
+
+# kit-AC-16：寫入全序與 exit 3。副本的 install.py 前面注入 shim 讓對 devflow/b 的
+# os.replace 拋 OSError——變造的是 /tmp 的副本，repo 的 install.py 不含任何測試鉤子。
+
+FAIL_SHIM = (b"import os as _os\n"
+             b"_real_replace = _os.replace\n"
+             b"def _replace(src, dst, **kw):\n"
+             b"    if str(dst).endswith('/devflow/b'):\n"
+             b"        raise OSError(13, 'Permission denied', str(dst))\n"
+             b"    return _real_replace(src, dst, **kw)\n"
+             b"_os.replace = _replace\n")
+
+
+@case("kit-AC-16-write-order-and-exit-3")
+def _():
+    def v1(src):
+        (src / "a").write_bytes(b"A1\n")
+        (src / "b").write_bytes(b"B1\n")
+
+    def v2(src):
+        (src / "a").write_bytes(b"A2\n")
+        (src / "b").write_bytes(b"B2\n")
+        path = src / "install.py"
+        path.write_bytes(FAIL_SHIM + path.read_bytes())
+
+    with kit_copy(mutate=v1) as first, project() as p:
+        ok_run(p.run(install=first))
+        outside = outside_snapshot(p.root)
+        entry_before = p.read("AGENTS.md")
+        with kit_copy(mutate=v2) as second:
+            r = p.run(install=second)
+            err_run(r, 3)
+            eq(r.stderr, b"devflow/b: Permission denied\n",
+               "stderr 恰一行 <失敗路徑>: <OSError strerror>")
+        # 全序＝階段順序 × 階段內 sorted()：created／updated 這一階段是 a → b → install.py
+        eq(p.read("devflow/a"), b"A2\n", "失敗路徑之前的動作已落盤")
+        eq(p.read("devflow/b"), b"B1\n", "失敗路徑未動")
+        expect(FAIL_SHIM not in p.read("devflow/install.py"), "失敗路徑之後的動作未動")
+        eq(p.read("AGENTS.md"), entry_before, "入口檔在最後一階段，未動")
+        eq(outside_snapshot(p.root), outside, "AC-18：exit 3 的情境下其他路徑仍不動")
+
+
+def prune_swap_shim(outside):
+    """同型的 shim，但注入的是**動作**不是失敗：deleted 階段移除 devflow/zz/deep/x.md 之後、
+    prune 之前，把 devflow/zz 換成指向 outside 的 symlink（決策之後才出現的 TOCTOU）。
+
+    與 FAIL_SHIM 一樣只寫進 /tmp 副本的 install.py，repo 的 install.py 不含任何測試鉤子。
+    """
+    return ("import os as _os\n"
+            "_real_remove = _os.remove\n"
+            "def _remove(path, **kw):\n"
+            "    _real_remove(path, **kw)\n"
+            "    if str(path).endswith('/devflow/zz/deep/x.md'):\n"
+            "        zz = _os.path.dirname(_os.path.dirname(str(path)))\n"
+            "        _os.rmdir(_os.path.join(zz, 'deep'))\n"
+            "        _os.rmdir(zz)\n"
+            "        _os.symlink(%r, zz)\n"
+            "_os.remove = _remove\n" % str(outside)).encode()
+
+
+@case("kit-AC-16-prune-refuses-link-ancestor")
+def _():
+    # 第二道 symlink 祖先檢查在 prune 也要有：os.path.isdir 與 os.listdir 都會跟隨連結，
+    # 祖先在決策之後變成 symlink 的話，os.rmdir 會刪掉目標外的目錄（PR #138 阻擋 3）。
+    # prune 深者先，devflow/zz/deep 排在 devflow/zz 之前——正是會沿著新連結出去的那一步。
+    with project() as outside, project() as p:
+        (outside.root / "deep").mkdir()
+        outside.write("keep.md", b"keep\n")
+        outside_before = snapshot(outside.root)
+
+        def swap(src):
+            path = src / "install.py"
+            path.write_bytes(prune_swap_shim(outside.root) + path.read_bytes())
+
+        with kit_copy(mutate=swap) as inst:
+            ok_run(p.run(install=inst))           # 第一次安裝：沒有 deleted，shim 不觸發
+            (p.root / "devflow" / "zz" / "deep").mkdir(parents=True)
+            p.write("devflow/zz/deep/x.md", b"x\n")
+            r = p.run(install=inst)
+            err_run(r, 3)
+            eq(r.stderr,
+               b"devflow/zz/deep: symlink appeared under devflow/ during the write phase\n",
+               "stderr 恰一行，走與其他寫入失敗相同的 exit 3 路徑")
+        expect(p.path("devflow/zz").is_symlink(), "前提：shim 真的把 zz 換成 symlink 了")
+        eq(snapshot(outside.root), outside_before, "連結指向的外部目錄一個 byte 都沒動")
+
+
+# kit-AC-17：對執行中的 kit 本身的四項檢查
+
+@case("kit-AC-17-kit-self-check")
+def _():
+    src = REPO / "devflow"
+    problems = []
+    if install.parse_version(KIT_VERSION) is None:
+        problems.append("devflow/VERSION 不合「版本」定義：%s" % short(KIT_VERSION))
+    for rel in ("templates/devflow.yml", "templates/local-README.md"):
+        if not (src / rel).is_file():
+            problems.append("devflow/%s 不存在" % rel)
+    for dirpath, dirnames, filenames in os.walk(str(src), followlinks=False):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for name in dirnames + filenames:
+            full = Path(dirpath) / name
+            if not name.endswith(".pyc") and full.is_symlink():
+                problems.append("devflow/%s 是 symlink" % full.relative_to(src))
+    for table_dir in ("coders", "forges", "orchestrators"):
+        for md in sorted((src / table_dir).glob("*.md")):
+            for n, line in enumerate(md.read_text(encoding="utf-8").split("\n"), 1):
+                if line.lstrip().startswith("## 本機"):
+                    problems.append("%s:%d 有「## 本機」標題行" % (md.relative_to(REPO), n))
+    expect(not problems, "kit 本身不合 AC-17：\n      " + "\n      ".join(problems))
+
+
+# kit-AC-18：devflow/、devflow.local/、入口檔以外的路徑，安裝前後 bytes 與存在性相同
+
+@case("kit-AC-18-other-paths-untouched")
+def _():
+    with project({"README.md": b"# mine\n", "notes.txt": b"notes\n"}) as p:
+        (p.root / "src").mkdir()
+        p.write("src/app.py", b"print(1)\n")
+        p.symlink("link.md", "README.md")
+        before = outside_snapshot(p.root)
+        ok_run(p.run())
+        eq(outside_snapshot(p.root), before, "第一次執行不動其他路徑")
+        p.write("devflow/stray.md", b"mine\n")
+        ok_run(p.run())
+        eq(outside_snapshot(p.root), before, "有 created／deleted 的執行也不動其他路徑")
+
+
+# kit-AC-19：來源＝目標
+
+@case("kit-AC-19-source-equals-target")
+def _():
+    with kit_copy() as inst:
+        root = inst.parent.parent          # <tmp>/devflow/install.py → <tmp>
+        r = subprocess.run([sys.executable, str(inst), str(root)], capture_output=True)
+        ok_run(r)
+        eq(summary_of(r), b"kit-install: " + V + b" -> " + V + b" (same)", "模式 same")
+        eq(actions_of(r), [b"devflow.local/README.md: created"],
+           "鏡像全部 unchanged、無 deleted；devflow.local 依 AC-7")
+        eq(entry_out(r), str(root / "AGENTS.md").encode() + b": created\n", "入口檔依入口規格")
+        eq(kit_files(root / "devflow"), kit_files(), "鏡像集合沒有被自己的安裝改動")
 
 
 # ── 執行 ─────────────────────────────────────────────────────────────
