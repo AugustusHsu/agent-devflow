@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh_TW" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        <link rel="canonical" href="https://augustushsu.github.io/agent-devflow/v0.1.1.0/devflow/WORKFLOW/">
+        <link rel="shortcut icon" href="../../img/favicon.ico">
+        <title>agent-devflow WORKFLOW - agent-devflow</title>
+        <link href="../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../css/brands.min.css" rel="stylesheet">
+        <link href="../../css/solid.min.css" rel="stylesheet">
+        <link href="../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <link href="../../css/version-select.css" rel="stylesheet">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../..">agent-devflow</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../.." class="nav-link">agent-devflow</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle active" aria-current="page" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Devflow</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="./" class="dropdown-item active" aria-current="page">agent-devflow WORKFLOW</a>
+</li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Coders</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../coders/claude-code/" class="dropdown-item">coder: claude-code</a>
+</li>
+            
+<li>
+    <a href="../coders/codex/" class="dropdown-item">coder: codex</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Forges</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../forges/gitea/" class="dropdown-item">forge: gitea</a>
+</li>
+            
+<li>
+    <a href="../forges/github/" class="dropdown-item">forge: github</a>
+</li>
+            
+<li>
+    <a href="../forges/gitlab/" class="dropdown-item">forge: gitlab</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Orchestrators</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../orchestrators/hermes/" class="dropdown-item">orchestrator: hermes</a>
+</li>
+            
+<li>
+    <a href="../orchestrators/none/" class="dropdown-item">orchestrator: none</a>
+</li>
+            
+<li>
+    <a href="../orchestrators/paperclip/" class="dropdown-item">orchestrator: paperclip</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Hermes</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../orchestrators/hermes/SKILL/" class="dropdown-item">devflow orchestrator（Hermes）</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Seats</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../seats/" class="dropdown-item">devflow/seats — 職位定義</a>
+</li>
+            
+<li>
+    <a href="../seats/approver/" class="dropdown-item">seat: approver（裁決位）</a>
+</li>
+            
+<li>
+    <a href="../seats/coordinator/" class="dropdown-item">seat: coordinator（協調位）</a>
+</li>
+            
+<li>
+    <a href="../seats/implementer/" class="dropdown-item">seat: implementer（實作位）</a>
+</li>
+            
+<li>
+    <a href="../seats/reviewer/" class="dropdown-item">seat: reviewer（審查位）</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Templates</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../templates/entry-block/" class="dropdown-item">Entry block</a>
+</li>
+            
+<li>
+    <a href="../templates/issue/" class="dropdown-item">Issue</a>
+</li>
+            
+<li>
+    <a href="../templates/local-README/" class="dropdown-item">devflow.local/</a>
+</li>
+            
+<li>
+    <a href="../templates/pr/" class="dropdown-item">Pr</a>
+</li>
+            
+<li>
+    <a href="../templates/review-prompt/" class="dropdown-item">Review prompt</a>
+</li>
+            
+<li>
+    <a href="../templates/spec/" class="dropdown-item">&lt;功能名稱&gt;</a>
+</li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Docs</a>
+                                <ul class="dropdown-menu">
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Guide</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../docs/guide/" class="dropdown-item">docs/guide — 人類專用</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Spec</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../docs/spec/" class="dropdown-item">docs/spec — 本 repo 的規格集</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../docs/spec/install/spec/" class="dropdown-item">install：把入口區塊安全插入其他專案的 CLAUDE.md／AGENTS.md</a>
+</li>
+    </ul>
+  </li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Kit install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../docs/spec/kit-install/spec/" class="dropdown-item">kit-install：把 agent-devflow 完整安裝到消費者專案；升級與回復皆為重裝</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                            <li class="nav-item">
+                                <a rel="prev" href="../.." class="nav-link">
+                                    <i class="fa fa-arrow-left"></i> Previous
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a rel="next" href="../coders/claude-code/" class="nav-link">
+                                    Next <i class="fa fa-arrow-right"></i>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="https://github.com/AugustusHsu/agent-devflow" class="nav-link"><i class="fa-brands fa-github"></i> GitHub</a>
+                            </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#agent-devflow-workflow" class="nav-link">agent-devflow WORKFLOW</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#0" class="nav-link">0. 變數與基準</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#1-i" class="nav-link">1. 不變層（I）</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#2-s" class="nav-link">2. 規格（S）</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#3-v" class="nav-link">3. 版本（V）</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#4-l" class="nav-link">4. 任務生命週期（L）</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#5-r" class="nav-link">5. 審查（R）</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#6-m" class="nav-link">6. 合併（M）</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#7-f" class="nav-link">7. 失敗與退版（F）</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#8-c" class="nav-link">8. 收尾（C）</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#9-g" class="nav-link">9. 治理與規則變更（G）</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#10-bypassb" class="nav-link">10. Bypass（B）</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#11-stagest" class="nav-link">11. Stage（ST）</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#12-p" class="nav-link">12. 平行（P）</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#13-d" class="nav-link">13. 文檔（D）</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="agent-devflow-workflow">agent-devflow WORKFLOW<a class="headerlink" href="#agent-devflow-workflow" title="Permanent link">&para;</a></h1>
+<p>給 agent 讀的規範本體。引用規則一律用 ID（例：<code>I2</code>、<code>R3</code>），不用節號。
+本檔不解釋理由；理由在對應規格與 README。人類導讀另見 <code>docs/guide/</code>（尚未建立）。</p>
+<h2 id="0">0. 變數與基準<a class="headerlink" href="#0" title="Permanent link">&para;</a></h2>
+<ul>
+<li>自變數住 <code>devflow.yml</code>：<code>forge</code>，以及 <code>seats</code> 下各職位（<code>seats/</code>）的綁定——<code>filler</code>（填充者：工具名，或 <code>human</code>）與選填的 <code>model</code>、<code>reasoning</code>；<code>coordinator</code> 省略＝<code>human</code>。其餘皆衍生值，見 <code>forges/</code>、<code>coders/</code>、<code>orchestrators/</code> 對照表；對照表每格標狀態（<code>R9</code>），非 <code>✅</code> 不得當作可用；實測狀態的認定依 <code>R7</code>、<code>R8</code>，不因 <code>stage</code> 放寬。</li>
+<li>每個任務固定兩個基準，寫在 issue 與 PR：</li>
+<li><strong>治理基準 G</strong>：本任務遵守的 <code>devflow/WORKFLOW.md</code> commit。</li>
+<li><strong>開發目標 T</strong>：本任務要實現的規格 commit 與 AC 清單。</li>
+<li>第 0、1、13 節永遠生效；其餘各節依 <code>stage</code>（第 11 節）啟用。</li>
+</ul>
+<h2 id="1-i">1. 不變層（I）<a class="headerlink" href="#1-i" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>I1</code> 同一時間：一張 issue ＝ 一條分支 ＝ 一個 worktree ＝ 一個實作者（職位，<code>seats/implementer.md</code>）。分支名 <code>&lt;N&gt;-&lt;slug&gt;</code>。</li>
+<li><code>I2</code> 實作者（職位，<code>seats/implementer.md</code>）不在主 checkout 工作。worktree 由協調者（職位，<code>seats/coordinator.md</code>；由工具或人填）建在 <code>../&lt;repo&gt;.worktrees/&lt;N&gt;</code>；實作者只收路徑。主 checkout 只供協調用：forge 操作、建 worktree、收尾。</li>
+<li><code>I3</code> 進 main 的每個變更都經 PR/MR，以 merge commit 合入；不 squash、不 rebase merge。唯一例外是直推 main；第 10 節生效時依該節。</li>
+<li><code>I4</code> 工單只住 forge。repo 內不放工單檔、BACKLOG、審查報告副本；orchestrator 不得持有工單的第二份拷貝。</li>
+<li><code>I5</code> 一個事實只住一處。入口檔區塊、對照表衍生物、人類站都是產物：不手抄、不設同步戳記。</li>
+<li><code>I6</code> 換 orchestrator 工具（<code>devflow.yml</code> 的 <code>seats.coordinator.filler</code> 值）不改變 forge 與 coder 工具（<code>devflow.yml</code> 的 <code>seats.implementer.filler</code> 值）的任何狀態：issue、分支、worktree、PR 的形狀在 <code>seats.coordinator.filler</code> 的三種值下相同。</li>
+</ul>
+<h2 id="2-s">2. 規格（S）<a class="headerlink" href="#2-s" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>S1</code> 規格住 <code>docs/spec/&lt;feature&gt;/spec.md</code>：frontmatter <code>version</code>（四碼），固定三個標題「目標與範圍」「驗收標準」「未決事項」；AC 一行一條、帶 <code>AC-n</code>。</li>
+<li><code>S2</code> 規格變更經 PR 合入。版本＝該 merge commit；<code>0.0.0.0</code> 是草稿，首個核准版本是 <code>0.0.0.1</code>。</li>
+<li><code>S3</code> 任務推導＝<code>git diff &lt;上版&gt;..&lt;這版&gt; -- docs/spec/&lt;feature&gt;/</code> ＋ 既有實作 ＋ 影響分析；每條受影響 AC 標 保留／修改／新增／取消。<strong>不由版本位數推導</strong>；首版也先辨識已完成的部分。</li>
+<li><code>S4</code> 一次規格變更可對應零到多個任務；不為湊數發明任務。</li>
+<li><code>S5</code> 規格 PR 由人審，依 <code>merge</code> 設定合併。</li>
+<li><code>S6</code> 「未決事項」非空的規格不得核准。</li>
+</ul>
+<h2 id="3-v">3. 版本（V）<a class="headerlink" href="#3-v" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>V1</code> 四碼 <code>a.b.c.d</code>，進位歸零；混合變更取影響最高的一位。這是本套件的自訂規則，不是 SemVer。</li>
+<li><code>V2</code> 位數語意：<code>a</code> 不相容（既有契約或用法不再成立），只在人明確要求時進位；<code>a</code> 位不由語意判定，協調者與審查者不得自判，也不得以語意為由要求進或不進 <code>a</code> 位；<code>b</code> 相容新增：新增使用者須遵守的義務或新的流程能力（新步驟、新必填欄位、新關卡）；<code>c</code> 修正既有能力與判準補充，承諾不變，包含新增條文，若該條文只是把既有義務的判準寫清楚，或修正既有條文的缺陷；<code>d</code> 內容修訂，不改行為與契約。</li>
+<li><code>V3</code> normative ＝ bump ≥ <code>c</code>；editorial ＝ bump <code>d</code>。兩者皆需 issue（<code>I1</code> 的分支名由此取 N）、皆走 PR、皆 bump。判斷依語意，不依章節位置或字數。</li>
+<li><code>V4</code> 適用對象：規格文檔（含本檔）與 kit release tag <code>v&lt;a.b.c.d&gt;</code>。<code>stage</code> 不是版本號；第三方版本、工具版本、issue 編號保持原值。</li>
+<li><code>V5</code> kit tag 只打在 main 已含的 commit；已發版本不移動、不刪、不重打，修正走下一版。</li>
+<li><code>V6</code> 變更若使既有契約或用法不再成立，不論位數為何，須在 issue 與 PR 說明中標明「不相容」，並列出受影響的契約與遷移方式。審查者可提報未標明者；不得據以要求改位數（<code>V2</code>）。</li>
+<li><code>V7</code> PR 動到 <code>devflow/**</code>（<code>devflow/VERSION</code> 自身除外）時，同一 PR 須使 <code>devflow/VERSION</code> 進位；位數只依該 PR 對 <code>devflow/**</code>（同前排除）的變更套用 <code>V1</code>、<code>V2</code> 判定，同一 PR 對其他 <code>V4</code> 適用對象（如 <code>docs/spec/**</code>）的變更各自判定，不納入 kit 的混合取最高。兩張 PR 都動 <code>devflow/**</code> 時，後合入者以 main 當時的值重新進位；不以 tag 為基準，不以「與最近 tag 相同」為免進位理由。</li>
+</ul>
+<h2 id="4-l">4. 任務生命週期（L）<a class="headerlink" href="#4-l" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>L1</code> 派工前 issue 必須有：目標與對應 AC、G、T、write scope、阻塞依賴、共用契約、外部資源；「未決事項」為空。模板 <code>templates/issue.md</code>。派工後 orchestrator 須在 issue 留言記派工紀錄：coder／reviewer 的完整啟動指令（含版本旗標與工具版本）、<code>session_id</code> 或同等識別、驗證指令的輸出原文（首行 JSON、<code>-o</code> 全文、review id 與比對結果等；只寫「正常」「通過」等結論者不構成紀錄）。輸出原文只證明驗證方式曾實跑並供核對；對照表狀態仍須另滿足 <code>R8</code>。對照表引用<strong>本條生效後</strong>的執行作證據時，只能引此紀錄，不引記憶；本條生效前的既有證據依其原記載引用，不受本句限制。</li>
+<li><code>L2</code> 派工：從最新 main 建分支與 worktree；coder 收到 issue、G、T、worktree 路徑、驗證指令。</li>
+<li><code>L3</code> coder 遇未決事項不猜，依判準分兩路徑。停（blocked），任一命中即停：(a) 處置會落在 write scope 外（repo 設定、branch protection、<code>WORKFLOW.md</code>、其他任務的 worktree）或會改變 issue 明列的 AC；(b) issue 本體、規格、issue 留言互相矛盾。命中：issue 留言 → 停；orchestrator 問人，答案寫回 issue，再重派。續：未命中者為工程判斷，issue 留言記錄情況、暫定處置、位置後繼續，不停。issue 留言是持久紀錄，提問通道只是通道。工作區內出現非本任務產生的檔案或工具生成物（MCP、編輯器、快取自動寫入者）同樣適用：回報，不自行 <code>add</code>、不自行刪除。</li>
+<li><code>L4</code> 完成：測試綠 → push 分支 → 開 PR，引用 issue、G、T、head sha。模板 <code>templates/pr.md</code>。</li>
+<li><code>L5</code> 之後依序：審查（第 5 節）→ 合併（第 6 節）→ 收尾（第 8 節）。</li>
+<li><code>L6</code> 取消任務而分支已有 commit：先問人保留或丟棄，不得逕自刪除。</li>
+</ul>
+<h2 id="5-r">5. 審查（R）<a class="headerlink" href="#5-r" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>R1</code> 實作 PR 由 fresh-context 審查者審：拿到 G、T、<code>base..head</code>、完整來源、測試指令；不接受作者摘要當證據。同一 session 不得對自己的工作簽正式 verdict。</li>
+<li><code>R2</code> 建議審查者（職位，<code>seats/reviewer.md</code>）由與 coder 工具（<code>devflow.yml</code> 的 <code>seats.implementer.filler</code> 值）異廠的工具填；只有一家可用時，用同廠的全新 context。</li>
+<li><code>R3</code> verdict 必須寫明 head sha；head 變更即失效，須重審。</li>
+<li><code>R4</code> 逐條 AC 給證據，至少嘗試一個反例；反例須涵蓋「正確的值出現在錯誤的位置」這一類，不只是「值不存在」——把 AC 要求的字串設想成落在另一列、另一節、另一格，再看現有證據是否仍然成立；仍成立即證據不足。檢查 write scope 是否被超出、是否夾帶 <code>G5</code> 所列變更。用 <code>templates/review-prompt.md</code>。</li>
+<li><code>R5</code> 審查證據住 forge（PR review／comment）。merge commit 訊息帶 PR 號、reviewer、head sha，作為離開 forge 時的可攜最小集合。</li>
+<li><code>R6</code> 證據須能定位：AC 的驗證指令要指出具體位置與內容。計數式斷言（<code>grep -c</code>、<code>wc -l</code>、<code>--count</code>、比對總數）不得作為任一條 AC 的唯一證據——計數相符不表示內容落在正確位置；須另以 <code>grep -n</code> 定位或 <code>git diff</code> 逐行比對，並貼出該行。</li>
+<li><code>R7</code> 對照表一格的值欄列出多個指令、選項或能力時，<code>✅ 實測</code> 必須對應全部皆已驗證。只驗證其中一部分：拆成獨立列各自標狀態，或在值欄逐項標明已驗證／未測，該格狀態取最保守者。實際生效的機制與值欄所列不同時（例如靠平台預設而非該指令），改寫值欄，不沿用原宣稱。值欄是包裝命令、腳本或別名時，先展開其涵蓋的能力再逐項適用本條；不得以「值欄只寫了一項」規避。</li>
+<li><code>R8</code> 對照表的證據採前瞻讀法：<code>✅</code> 的判準是「第三者現在照著所附驗證方式做，能得到值欄宣稱的結果」，不是「當時那次執行留下了可核對的紀錄」。驗證方式須已實際執行過，且不依賴當時那次執行的一次性條件；文件推導、類推、未執行的推測不構成 <code>✅</code>。不得以 commit 訊息或對照表自身互證。不得由「行為符合規則」反推規則已生效——該行為若同時被派工 prompt 或其他來源要求，證據分不出來源，不構成 <code>✅</code>。</li>
+<li><code>R9</code> 對照表狀態欄取三值之一。<code>✅ 可用</code>：第三者現在照著做能得到值欄宣稱的結果；須附第三者現在能執行的驗證方式與受測環境（<code>R8</code>、<code>R10</code>）。<code>📝 已宣稱</code>：有人做過並回報，來源具名；該格既有的驗證方式與受測環境記載不得刪去。依該格有無第三者現在能執行的驗證方式分兩種，須標明是哪一種。「無可執行的驗證方式」——該格沒有第三者現在能執行的驗證方式，不論先前是否驗證過。「驗證未達 <code>✅</code>」——該格附有第三者現在能執行的驗證方式，但不滿足 <code>✅</code> 的成立條件（例如未涵蓋當前宣稱、重跑結果不符、受測環境（<code>R10</code>）未附齊或與當前條件不符；不以此為限）。一格兼有兩者時，比照 <code>R7</code> 逐項標明是哪一種。<code>⬜ 未測</code>：沒做過，或做過的說法沒有具名來源。<code>📝</code> 只是資訊，不足以支持派工決策：不得據以宣告能力可用、不得當作任一條 AC 的證據、不得替代 <code>✅</code> 放行任何步驟。升為 <code>✅</code> 須使 <code>✅</code> 的成立條件全部成立；不得以回報次數、「沒有反例」或補齊部分條件代替。對照表得分為通用節與本機節。分節時先歸節、後判狀態。歸節只看值欄宣稱的對象，不看狀態欄：宣稱對象是具名的環境 instance——本機安裝的工具、帳號或組織、本 repo 的設定與資源——歸本機節；宣稱對象是可重用的工具能力或程序、repo 與環境只是可替換的參數者，歸通用節。值欄未表明宣稱對象時，先改寫值欄使其表明，不得直接歸節。一格兼含兩種宣稱時，拆成各自獨立的原子事實分別歸節，不把同一事實抄進兩節（<code>I5</code>、<code>R7</code>）。歸節後，各節的 <code>✅ 可用</code> 依下列定義，<code>📝</code>、<code>⬜</code> 及三值間的升降在兩節相同。通用節的 <code>✅ 可用</code>：第三者在任何專案照該格所附驗證方式做，能得到值欄宣稱的結果。本機節的 <code>✅ 可用</code>：第三者在本 repo 的當下環境照該格所附驗證方式做，能得到值欄宣稱的結果。兩節的 <code>✅</code> 皆須附第三者現在能執行的驗證方式與受測環境（<code>R8</code>、<code>R10</code>）；<code>R10</code> 的記載、比對與降級對兩節皆適用。未分節的表，<code>✅ 可用</code> 依本條前述定義。</li>
+<li><code>R10</code> <code>✅</code> 須連同受測環境記載：<strong>首次驗證與最近確認的日期與工具版本</strong>（同一次即寫一次）、執行身分或權限、目標 repo 或環境，以及其他會改變結果的條件。引用者與該格的關係：引用前先比對自己的環境與所記載者，有差異的項目自己重驗後再用；<strong>比對出的差異只約束引用者，不改變該格的狀態</strong>。該格的狀態：「最近確認」指在該格記載的路徑上實跑一次且結果與值欄相符，並附該次的 forge 紀錄（不限新版本；同版本重跑亦算）；<strong>最近確認距今超過 30 天</strong>、或權限／設定變更使記載條件不再成立時，該格依 <code>R9</code> 降為 <code>📝</code>。工具升版本身不改變該格狀態。</li>
+</ul>
+<h2 id="6-m">6. 合併（M）<a class="headerlink" href="#6-m" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>M1</code> 前提全部成立：測試綠；有效 verdict（<code>R3</code>）；候選的 base 是當下 main，或已 merge main 且重測、重審。</li>
+<li><code>M2</code> 合併者依 <code>devflow.yml</code> 的 <code>merge</code>：<code>human</code> 由人按；<code>orchestrator</code> 只在有機械 guard 能驗 <code>M1</code> 時允許，否則視同 <code>human</code>。</li>
+<li><code>M3</code> main 前進造成衝突：後合者 merge main 進自己的分支，重測、重審。</li>
+<li><code>M4</code> 無文字衝突不等於無語意衝突；<code>M1</code> 的驗證對象是最終整合候選。</li>
+</ul>
+<h2 id="7-f">7. 失敗與退版（F）<a class="headerlink" href="#7-f" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>F1</code> 實作未達 AC：同一 issue 修正；兩輪無進展升級到人。升級不等於放行。</li>
+<li><code>F2</code> 規格錯或出現新依賴：暫停受影響任務，先修訂 T；無關任務繼續。不自動關單丟棄工作。T 的修訂由人在 issue 裁決方向，經 PR、依 G（舊版）審查後合入；第 2 節生效時額外走該節的規格程序，否則 T 可為 <code>docs/spec/</code> 下的草稿 commit（<code>version: 0.0.0.0</code>），以 issue 上寫的 commit 為準。</li>
+<li><code>F3</code> forge 回錯或逾時：標「結果未定」，讀回 PR/MR 狀態、目標 sha、CI、分支後再決定；不盲目重送、不自行 bypass。</li>
+<li><code>F4</code> 合併成功但收尾失敗：記 cleanup pending，只補收尾；不重做合併、不回滾已成功的實作。</li>
+<li><code>F5</code> 撤回壞實作：revert PR（<code>git revert -m 1 &lt;merge&gt;</code> 產生 diff，仍走 <code>I3</code>）；規格仍正確就不撤規格。</li>
+<li><code>F6</code> 已部署或涉及 migration：Git revert 不替代部署回復，另行處置相容的產物、配置與資料。</li>
+</ul>
+<h2 id="8-c">8. 收尾（C）<a class="headerlink" href="#8-c" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>C1</code> 順序七步，每步判準成立才進下一步：(1) <code>git merge-base --is-ancestor &lt;head&gt; main</code> exit 0 → (2) 停止 coder 程序，已停與否依 <code>orchestrators/</code> 對照表判定 → (3) worktree 無需保留的未提交／未追蹤內容 → (4) <code>git worktree remove</code> → (5) 以步驟 (1) 所驗的同一 <code>&lt;head&gt;</code> 值（不重新讀取分支現值），<code>git update-ref -d refs/heads/&lt;branch&gt; &lt;head&gt;</code>：compare-and-delete，ref 已移動即拒絕；本步不驗合併狀態，與步驟 (1) 互補而非取代；不用 <code>git branch -d</code>／<code>-D</code> → (6) <code>git ls-remote --heads origin &lt;branch&gt;</code> 為空則跳過；非空則取其 OID，<code>git merge-base --is-ancestor &lt;OID&gt; main</code> exit 0 後 <code>git push origin --delete &lt;branch&gt;</code> → (7) <code>git ls-remote --heads origin &lt;branch&gt;</code> 為空＝成功。</li>
+<li><code>C2</code> 關 issue；forge 自動關閉也要讀回驗證。</li>
+<li><code>C3</code> 只清本次任務擁有的資源；其他活躍任務的 worktree、分支不動。blocked 或取消且成果未處置者保留並回報。</li>
+<li><code>C4</code> 「<code>git worktree list</code> 只剩主目錄」是成功收尾的判準，不是強清命令。</li>
+</ul>
+<h2 id="9-g">9. 治理與規則變更（G）<a class="headerlink" href="#9-g" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>G1</code> 每個任務記錄 G（本檔 commit）；PR 審查依 G 進行。</li>
+<li><code>G2</code> 本檔的 normative 變更不依 <code>stage</code>，三項依序皆須：issue 記錄問題與人的裁決，裁決＝選定唯一處置 → 實作（本檔、模板、對照表、skill 都是實作）經 PR → 依 G（舊版，<code>G1</code>）由 fresh-context 審查（<code>R1</code>）通過後合入。第 2 節生效時額外要求規格前置核准，不取代前三項。候選版本不得放寬對自己的審查。</li>
+<li><code>G3</code> 新版啟用點是合入後的下一個任務／session 邊界。進行中的任務預設續用舊 G；新版修補安全缺陷時，明確暫停受影響任務並遷移，不默默混用兩版。</li>
+<li><code>G4</code> 新規則要求的檢查器尚不存在時，先列為「建議」；工具可執行且正反測試通過後才升為必需關卡。</li>
+<li><code>G5</code> 候選分支中的 CLAUDE.md／AGENTS.md／skill／CI 變更是待審產品，不是本次的治理依據。</li>
+</ul>
+<h2 id="10-bypassb">10. Bypass（B）<a class="headerlink" href="#10-bypassb" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>B1</code> 直推 main 需人當次授權；不是常設許可。</li>
+<li><code>B2</code> commit 標題前綴 <code>⏭️</code>，引用一張帶 <code>bypass</code> label 的 issue，寫明：跳過哪條規則 ID、理由、影響範圍、恢復方式。</li>
+<li><code>B3</code> forge 不可用時先留本機紀錄（commit 訊息），恢復後補 issue。</li>
+<li><code>B4</code> <code>stage: 0</code> 期間直推 main 不需 bypass issue；離開 stage 0 後本節生效。</li>
+</ul>
+<h2 id="11-stagest">11. Stage（ST）<a class="headerlink" href="#11-stagest" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>ST0</code> bootstrap：尚無流程，直推 main。</li>
+<li><code>ST1</code> 單線：第 3～8、10 節生效；同時只有一個任務。</li>
+<li><code>ST2</code> 規格建版：加上第 2、9 節；任務從規格推導。</li>
+<li><code>ST3</code> 平行：加上第 12 節。</li>
+<li><code>ST4</code> stage 只標示已驗證的能力，不是權限開關；降 stage 不放寬 main 保護、憑證或發布授權。</li>
+<li><code>ST5</code> 保護節自 stage 0 起生效，不依 stage：第 5 節（R）、第 8 節（C）、第 9 節 <code>G1</code>～<code>G3</code>、<code>G5</code>。<code>G4</code> 例外，屬能力門檻，依 <code>ST2</code>。</li>
+</ul>
+<h2 id="12-p">12. 平行（P）<a class="headerlink" href="#12-p" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>P1</code> 兩張任務同時活躍的前提（全部成立）：無阻塞依賴；write scope 不重疊；共用契約已在 main 且無人同時修改；外部資源可隔離。任一項不可判定 → 排序執行。</li>
+<li><code>P2</code> 外部資源含 GPU、容器名、埠、資料目錄、image tag、部署環境。可平行編輯不等於可平行驗證或部署。</li>
+<li><code>P3</code> 合併序列化；後合者適應（<code>M3</code>）。</li>
+<li><code>P4</code> 不做 DAG／wave 排程器；<code>P1</code> 由 orchestrator 在派工時逐項確認並寫進 issue。</li>
+</ul>
+<h2 id="13-d">13. 文檔（D）<a class="headerlink" href="#13-d" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>D1</code> 一個來源、兩種投影：<code>devflow/</code>（agent 讀，也渲染給人）、<code>docs/spec/</code>（agent 與人）、<code>docs/guide/</code>（只給人）。規範只有一份，指南引用它。</li>
+<li><code>D2</code> 入口檔（CLAUDE.md／AGENTS.md）只擁有 <code>&lt;!-- devflow:begin --&gt;</code>…<code>&lt;!-- devflow:end --&gt;</code> 區塊，≤30 行；區塊須為入口檔的第一個 devflow 標記組，其前不得有任何 <code>&lt;!-- devflow:begin --&gt;</code> 或 <code>&lt;!-- devflow:end --&gt;</code> 行；區塊內容以 <code>devflow/templates/entry-block.md</code> 為準。區塊外是專案的內容，安裝與升級不得改動。</li>
+<li><code>D3</code> 人類站依 <code>devflow.yml</code> 的 <code>docs.site</code>／<code>docs.versioning</code>；版本跟 kit release。wiki 不當投影目標。</li>
+<li><code>D4</code> 超過 20 KB 的檔案不整份載入；先 <code>grep -n</code> 定位再局部讀。</li>
+</ul></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../js/base.js"></script>
+        <script src="../../search/main.js"></script>
+        <script src="../../js/version-select.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>
