@@ -10,7 +10,7 @@
 就切到 repo 根，從 repo 內哪個目錄起跑都一樣。
 
 `V5` 在 GitHub 端有機械保證：tag ruleset `23780350` 擋掉對 `refs/tags/v*` 的移動與刪除。
-機制、驗證方式與受測環境見 [`forges/github.md`](forges/github.md) 的「tag 保護」格，本檔不重述（`I5`）。
+機制、驗證方式與受測環境見 `forges/github.md` 的「tag 保護」格，本檔不重述（`I5`）。
 
 ## 1. 前置檢查
 
