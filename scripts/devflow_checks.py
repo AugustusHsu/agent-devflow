@@ -11,8 +11,8 @@
 # 注意不是 `G4`：`G4` 住第 9 節，依第 0 節與 `ST2` 要 stage 2 才生效，現在是 stage 1，
 # 不能引為依據。
 # 本檔每一項檢查都有自己的開關（下面的 GATES）：True＝必需關卡，False＝建議（只報告不擋）。
-# 十三項裡十一項是 True（`encoding`、`d2`、`i1`、`i5`、`version`、`fence`、`tables`、`table`、
-# `link`、`r9`、`dupid`），兩項是 False（`refs`、`v7`）——分界不是「哪一項比較重要」，
+# 十三項裡十二項是 True（`encoding`、`d2`、`i1`、`i5`、`version`、`fence`、`tables`、`table`、
+# `link`、`r9`、`dupid`、`v7`），一項是 False（`refs`）——分界不是「哪一項比較重要」，
 # 而是**定義域封不封閉**，見下面各節。
 #
 # ── ⚠️ 這個 check 擋什麼、不擋什麼 ───────────────────────────────────────
@@ -30,15 +30,16 @@
 #                 `r9` 對照表的狀態欄取 `R9` 三值之一（`✅ 可用`／`📝 已宣稱`／`⬜ 未測`；
 #                 三值之後可接分隔符與補充，見 R9_SEPS）、
 #                 `dupid` 規則本體沒有把同一個規則 ID 定義兩次（定義＝節前綴判準，
-#                 見下面「dupid 為什麼可以是關卡」）。
-# 就這十一項（`version`、`fence`、`table`、`link` 是 issue #80 開的，理由見下面「後四項為什麼現在
+#                 見下面「dupid 為什麼可以是關卡」）、
+#                 `v7` PR 動到 `devflow/**`（`devflow/VERSION` 自身除外）時 `devflow/VERSION`
+#                 有進位（merge-base 與 HEAD 兩份四碼嚴格遞增；只判有沒有進、不判位數）。
+# 就這十二項（`version`、`fence`、`table`、`link` 是 issue #80 開的，理由見下面「後四項為什麼現在
 # 可以是關卡」；`tables` 是 issue #87 開的，見「tables 為什麼可以是關卡」；`encoding` 是
 # issue #91 開的——它原本不是關卡而是 exit 2，理由見下面「exit code 的分類守則」與該項自己的註解；
 # `r9` 是 issue #94 開的，見「r9 為什麼可以是關卡」；`dupid` 是 issue #96 開的，
-# 見「dupid 為什麼可以是關卡」）。
+# 見「dupid 為什麼可以是關卡」；`v7` 是 issue #150 開的，見「v7 為什麼可以是關卡」）。
 # 不擋（exit 0，只把發現印在 log）：`refs`（issue #96 逐項評估過三個收斂方向，沒有一個
-# 封得住定義域，見下面「擋不住什麼」的 refs 那條）與 `v7`（issue #150 新開，定義域是封閉的，
-# 停在 advisory 只是因為還缺正反兩個真實 run，見下面「v7 為什麼先是建議」）。
+# 封得住定義域，見下面「擋不住什麼」的 refs 那條）。
 #
 # 「GATES 是 True」只讓這個 check 自己變紅，**不等於它是 branch protection 的
 # required status check**——後者是 repo 設定，要另外設，前提見下面「升 required 的前提」。
@@ -485,7 +486,7 @@
 #     code span 裡的示範）鎖住這一邊。srcset 已知會誤擋的寫法見上面「刻意的政策」的後兩條。
 #     **不宣稱「不存在假陽性」**。
 #
-# ── v7 為什麼先是建議（issue #150）──────────────────────────────────────
+# ── v7 為什麼可以是關卡（issue #150）────────────────────────────────────
 # `V7`（WORKFLOW.md 1.5.0.0，#147）：PR 動到 `devflow/**`（`devflow/VERSION` 自身除外）時，
 # 同一 PR 須使 `devflow/VERSION` 進位。安裝器只報 VERSION、kit tag 只打在 main 已含的
 # commit（`V5`），所以 main 上「同版號不同內容」只能靠這一關擋。
@@ -497,11 +498,14 @@
 #       不另寫一份——同 `i5` 不另寫一份 AC-7 判定的理由：兩份判定就有第三個可漂移的東西。
 #   不判位數對不對：`a`／`b`／`c`／`d` 該進哪一位是 `V1`／`V2` 的語意判斷，`V2` 明文不許
 #       機械自判，留給審查者。本項只判「有沒有進位」（四碼數值元組嚴格遞增）。
-#   為什麼還是 False：定義域封得住，但 README「升 required 的判定方式」要的正反兩個
-#       **真實 run** 還沒取得（issue #150 AC-3；本 PR 自己不動 `devflow/**`，只產得出
-#       「不觸發」那一路）。取得後由 AC-4 另一個 commit 改 True，順序同前面各項：
-#       本地正反 → 設 True → CI 正反。本地正反在 tests/smoke_devflow_checks.py 的
-#       三個 `v7:*` 正向案例與四個 `v7:*` 應擋案例。
+#   升關卡的順序（同 `i5`：本地正反 → 設 True → CI 正反）：本地正反在
+#       tests/smoke_devflow_checks.py 的三個 `v7:*` 正向、四個 `v7:*` 應擋、兩個 `v7:*`
+#       環境錯誤案例（PR #152）。設 True 之前另取了一個 advisory 期間的真實 CI 反向
+#       run（PR #153 probe，run 35585351635，blob e067a13：`📝 動到 devflow/ 卻沒有進位`、
+#       exit 0），證明 CI 上的 base 取得（`origin/<GITHUB_BASE_REF>`，需 `fetch-depth: 0`）
+#       與 diff 路徑過濾在真實 `pull_request` 事件下行為與本地一致。
+#       設 True 之後 README「升 required 的判定方式」要的同 blob 正反兩個真實 run
+#       記在 issue #150（AC-3）。
 #
 # ── 不發明規則：`i1` 的 slug 為什麼不限字元集 ─────────────────────────────
 # `I1` 的原文只有「分支名 `<N>-<slug>`」，沒有規定 slug 的字元集。
@@ -781,7 +785,7 @@ if _drift and os.environ.get("DEVFLOW_ALLOW_PIN_DRIFT") != "1":
 
 # ── 關卡開關 ──────────────────────────────────────────────────────
 # True＝必需關卡（失敗就擋）；False＝建議（只報告）。
-# 十三項裡十一項是 True，兩項是 False。分界是定義域封不封閉，理由見檔頭。
+# 十三項裡十二項是 True，一項是 False。分界是定義域封不封閉，理由見檔頭。
 # 驗證用：DEVFLOW_GATE_<KEY>=1 可單獨打開一項，環境變數只能加嚴不能放寬。
 # 順序＝執行順序：`encoding` 在讀檔當下就判，排在最前面。
 GATES = {
@@ -797,8 +801,8 @@ GATES = {
     "dupid":   True,    # 規則 ID 唯一定義（定義域＝節前綴判準；issue #96）
     "refs":    False,   # 規則 ID 無懸空引用（會誤擋非規則代號，見檔頭）
     "r9":      True,    # R9 對照表狀態欄三值（issue #94：64 格已換成條文原文）
-    "v7":      False,   # V7 動到 devflow/** 須進位 devflow/VERSION（第 3 節，ST1 起生效；
-                        # issue #150。定義域封閉，但 AC-3 的正反真實 run 未齊，先是建議）
+    "v7":      True,    # V7 動到 devflow/** 須進位 devflow/VERSION（第 3 節，ST1 起生效；
+                        # issue #150，定義域見檔頭「v7 為什麼可以是關卡」）
 }
 for _k in GATES:
     if os.environ.get("DEVFLOW_GATE_" + _k.upper()) == "1":
@@ -2444,7 +2448,7 @@ if r9_clean:
 
 print()
 print("── V7：devflow/** 改動須進位 kit VERSION（%s）" % tag("v7"))
-# 判定逐條照 `V7` 第一句，理由見檔頭「v7 為什麼先是建議」。
+# 判定逐條照 `V7` 第一句，理由見檔頭「v7 為什麼可以是關卡」。
 #
 # **「版本」的定義只有一份**：直接用安裝器的 VERSION_RE（kit-install 規格「名詞定義」：
 # 四碼十進位非負整數、除單獨的 0 外無前導零、恰一個 `\n`、無 BOM，整檔 bytes fullmatch）。
