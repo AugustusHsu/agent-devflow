@@ -16,7 +16,15 @@ jobs:
   devflow-checks:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0（完整歷史）是 `v7` 要的：它算 `git merge-base origin/<base> HEAD`，
+      # 而 pull_request 事件 checkout 的是 GitHub 生成的 merge commit，預設深度 1——
+      # 連自己的父 commit 都沒有，遑論 base 分支的歷史，merge-base 會失敗成 exit 2。
+      # 選 fetch-depth 而不是在檢查器前 `git fetch origin <base>`：檢查器要的是「兩個 git
+      # 物件都在本地」這一個前提，由 checkout 一次滿足，不必再維護一個 fetch step 與它的
+      # 失敗分類（issue #150 AC-1）。其餘 step 與 `i1`／既有各項的行為不受影響。
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
 
       # README「Phase 1 第三出口的判定方式」把升 required 的前提定為：log 要印得出
       # 「這次實際 checkout 的 commit」與「該 commit 上**那份檢查器**的 blob id」。
