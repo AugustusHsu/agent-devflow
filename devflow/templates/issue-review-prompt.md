@@ -6,7 +6,7 @@
 ## 材料
 
 - issue 本體：`gh issue view <N>` 的輸出，附 `gh issue view <N> --json updatedAt` 的值 <updatedAt>
-- issue 全部留言：`gh issue view <N> --comments` 的輸出，其中 T ＝ 留言 <T 留言 id>
+- issue 全部留言：`gh issue view <N> --comments` 的輸出；T ＝ <T 識別：留言 id，或規格檔路徑 @ commit sha>
 - 治理基準 G：`devflow/WORKFLOW.md @ <sha>`
 - repo 在 base 的 checkout：`<path>`（base sha `<base sha>`）
 - 上一輪的讀審留言與協調者的處置留言（重讀審時才有）：<URL 或「首輪」>
@@ -43,7 +43,7 @@
 
 ```
 Verdict: READY | REVISE
-Issue @ <T 留言 id> + <本體 updatedAt>
+Issue @ <T 識別> + <本體 updatedAt>
 讀審者：<工具／session 識別>
 BLOCK <k>:
   Blocker: <一句：缺陷是什麼>
@@ -54,4 +54,4 @@ Non-blocking: none | <觀察或建議，逐條；不影響 verdict>
 清單缺口: none | <本輪自己想到、上列檢查項未涵蓋的角度，逐條>
 ```
 
-`READY` 時 BLOCK 為零；`REVISE` 時至少一條，每條四欄齊。`Issue @` 一行寫明本次 verdict 所綁的 issue 狀態：issue 本體或 T 留言在 `READY` 之後變更，該 `READY` 失效（`L7`）。
+`READY` 時 BLOCK 為零；`REVISE` 時至少一條，每條四欄齊。`Issue @` 一行寫明本次 verdict 所綁的 issue 狀態：`READY` 之後，T 變更、或本體在「派工紀錄」「審查處置」兩段以外變更，該 `READY` 失效；兩段內的填寫不使失效（`L7`）。
