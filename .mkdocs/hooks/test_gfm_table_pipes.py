@@ -1,63 +1,72 @@
-"""最小測試：python .mkdocs/hooks/test_gfm_table_pipes.py（exit 0 即過）。"""
+"""最小測試：python .mkdocs/hooks/test_gfm_table_pipes.py（exit 0 即過）。
+每案走真實管線：markdown.markdown(src, extensions=["tables", "fenced_code", GfmTablePipes()])，
+與 .mkdocs/mkdocs.yml 的 markdown_extensions 相同（toc 不影響本題）。"""
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from gfm_table_pipes import unescape_table_code_pipes as fix  # noqa: E402
+import markdown
 
-T = "<table><tr>%s</tr></table>"
+sys.path.insert(0, str(Path(__file__).parent))
+from gfm_table_pipes import GfmTablePipes  # noqa: E402
+
+
+def render(src):
+    return markdown.markdown(src, extensions=["tables", "fenced_code", GfmTablePipes()])
+
+
+def render_plain(src):
+    return markdown.markdown(src, extensions=["tables", "fenced_code"])
+
+
+TABLE = "| a | b |\n|---|---|\n| %s | z |\n"
+# (src, needle, expect)：expect=True 產出須含 needle；False 須不含；None 表示「hook 不得改變 Python-Markdown
+# 的產出」（render == render_plain）——原始 HTML／表格外內容一律用這條，不猜 Python-Markdown 自己怎麼渲。
 cases = [
-    # 表格內 code：還原
-    (T % "<td><code>a \\| b</code></td>", T % "<td><code>a | b</code></td>"),
-    (T % "<th class=\"x\"><code>--jq '.a \\| .b'</code></th>", T % "<th class=\"x\"><code>--jq '.a | .b'</code></th>"),
-    # 同格多個 code、code 外的文字不動
-    (T % "<td>看 <code>x \\| y</code> 與 <code>p \\| q</code> \\| 文字</td>",
-     T % "<td>看 <code>x | y</code> 與 <code>p | q</code> \\| 文字</td>"),
-    # 表格外的 code：不動
-    ("<p><code>a \\| b</code></p>", "<p><code>a \\| b</code></p>"),
-    # fenced block（<pre><code>）不在表格內：不動
-    ("<pre><code>a \\| b</code></pre>", "<pre><code>a \\| b</code></pre>"),
-    # 跨行儲存格
-    (T % "<td>\n<code>a \\| b</code>\n</td>", T % "<td>\n<code>a | b</code>\n</td>"),
-    # 審查反例 1：儲存格內的 <pre><code> 是作者原文，不動
-    (T % "<td><pre><code>x \\| y</code></pre></td>", T % "<td><pre><code>x \\| y</code></pre></td>"),
-    # 審查反例 2：巢狀表格，內外層 code 都要改
-    (T % "<td>outer<table><tr><td><code>inner \\| x</code></td></tr></table><code>outer \\| y</code></td>",
-     T % "<td>outer<table><tr><td><code>inner | x</code></td></tr></table><code>outer | y</code></td>"),
-    # 審查反例 3：沒有 <table> 祖先的 <td>（畸形）不動
-    ("<td><code>x \\| y</code></td>", "<td><code>x \\| y</code></td>"),
-    # 儲存格關閉後的 code 不動（深度歸零）
-    (T % "<td><code>a \\| b</code></td>" + "<code>c \\| d</code>", T % "<td><code>a | b</code></td>" + "<code>c \\| d</code>"),
-    # 標籤帶屬性、大小寫混用
-    ("<TABLE><TR><TD align=\"left\"><CODE>a \\| b</CODE></TD></TR></TABLE>",
-     "<TABLE><TR><TD align=\"left\"><CODE>a | b</CODE></TD></TR></TABLE>"),
-    # 儲存格內 pre 之後的 code 仍要改（pre 深度已歸零）
-    (T % "<td><pre><code>x \\| y</code></pre><code>p \\| q</code></td>",
-     T % "<td><pre><code>x \\| y</code></pre><code>p | q</code></td>"),
-    # 審查 R2 反例：HTML 註解裡的假標籤不計深度
-    ("<!-- <table><td><code> --><p>outside \\| text</p><!-- </code></td></table> -->",
-     "<!-- <table><td><code> --><p>outside \\| text</p><!-- </code></td></table> -->"),
-    # 審查 R2 反例：<script> 內的字串不計深度
-    ("<script>const s=\"<table><td><code>\";</script><p>outside \\| text</p>",
-     "<script>const s=\"<table><td><code>\";</script><p>outside \\| text</p>"),
-    # 註解在真表格內：註解本身不動，旁邊的 code 照改
-    (T % "<td><!-- a \\| b --><code>a \\| b</code></td>", T % "<td><!-- a \\| b --><code>a | b</code></td>"),
-    # <style> 內容整段跳過
-    ("<style>td::after{content:\"<code>\"}</style>" + T % "<td><code>a \\| b</code></td>",
-     "<style>td::after{content:\"<code>\"}</style>" + T % "<td><code>a | b</code></td>"),
-    # <th> 內 <pre>：不動
-    (T % "<th><pre><code>x \\| y</code></pre></th>", T % "<th><pre><code>x \\| y</code></pre></th>"),
-    # 未閉合的 <td>：到 </table> 為止都算格內（深度不會因缺 </td> 而錯位到表格外）
-    (T % "<td><code>a \\| b</code>" + "<code>c \\| d</code>", T % "<td><code>a | b</code>" + "<code>c \\| d</code>"),
-    # 未閉合的 <td> 不得延續到下一個表格的格外區域（caption 不是格）
-    (T % "<td><code>a \\| b</code>" + "<table><caption><code>c \\| d</code></caption></table>",
-     T % "<td><code>a | b</code>" + "<table><caption><code>c \\| d</code></caption></table>"),
-    # code 內的轉義 '<'（&lt;）不是標籤
-    (T % "<td><code>gh pr review &lt;N&gt; --approve\\|--request</code></td>",
-     T % "<td><code>gh pr review &lt;N&gt; --approve|--request</code></td>"),
+    # 表格儲存格內 code span：還原
+    (TABLE % "`x \\| y`", "<code>x | y</code>", True),
+    # 標題列（th）也算
+    ("| `p \\| q` |\n|---|\n| z |\n", "<code>p | q</code>", True),
+    # 同格多個 code、code 外的 \| 由 tables 擴充自己處理（變成 |），與 GitHub 相同
+    (TABLE % "看 `x \\| y` 與 `p \\| q`", "<code>x | y</code> 與 <code>p | q</code>", True),
+    # code 內的 < 仍是 &lt;（不破壞既有轉義）
+    (TABLE % "`gh pr review <N> --approve\\|--x`", "<code>gh pr review &lt;N&gt; --approve|--x</code>", True),
+    # 兩個反斜線＋管線：只吃掉一個反斜線——與 GitHub /markdown API 對 github.md 第 16 行的渲染相同
+    (TABLE % "`--approve\\\\|--request`", "<code>--approve\\|--request</code>", True),
+    # 表格外的 code span：不動（GitHub 也不動）
+    ("段落 `a \\| b` 結束\n", None, None),
+    # fenced block：不動
+    ("```\n| a \\| b |\n```\n", None, None),
+    # 審查反例（R3-A）：<textarea> RCDATA 內的假標籤——原始 HTML 不在樹裡，外面的 <p> 不動
+    ("<textarea><table><td><code></textarea><p>outside \\| text</p>\n", None, None),
+    # 審查反例（R3-B）：SVG CDATA
+    ("<div>\n<svg><![CDATA[<table><td><code>]]></svg>\n</div>\n<p>outside \\| text</p>\n", None, None),
+    # <title> raw text
+    ("<title><table><td><code></title><p>outside \\| text</p>\n", None, None),
+    # 審查反例（R2）：HTML 註解裡的假標籤、<script> 內的字串
+    ("<!-- <table><td><code> --><p>outside \\| text</p><!-- </code></td></table> -->\n", None, None),
+    ("<script>const s=\"<table><td><code>\";</script><p>outside \\| text</p>\n", None, None),
+    # 審查反例（R1）：手寫 HTML 表格內的 <pre><code>——原始 HTML，整段不動
+    ("<table><tr><td><pre><code>x \\| y</code></pre></td></tr></table>\n", None, None),
+    # 手寫 HTML 表格內的 <code>：原始 HTML，不動（GitHub 對原始 HTML 也不做 markdown 跳脫）
+    ("<table><tr><td><code>x \\| y</code></td></tr></table>\n", None, None),
+    # 原始 HTML 表格之後的 markdown 表格照常處理（狀態不互相污染）
+    ("<table><tr><td><code>raw \\| x</code></td></tr></table>\n\n" + TABLE % "`md \\| y`",
+     "<code>raw \\| x</code>", True),
+    ("<table><tr><td><code>raw \\| x</code></td></tr></table>\n\n" + TABLE % "`md \\| y`",
+     "<code>md | y</code>", True),
+    # 反向斷言：真實案例不應再含反斜線
+    (TABLE % "`x \\| y`", "\\|", False),
 ]
-bad = [(i, o, fix(i)) for i, o in cases if fix(i) != o]
-for i, o, got in bad:
-    print("FAIL\n  in : %r\n  want: %r\n  got : %r" % (i, o, got))
+bad = []
+for src, needle, expect in cases:
+    out = render(src)
+    if expect is None:
+        plain = render_plain(src)
+        if out != plain:
+            bad.append((src, "must equal plain render", plain, out))
+    elif (needle in out) != expect:
+        bad.append((src, "want" if expect else "must NOT contain", needle, out))
+for src, what, needle, out in bad:
+    print("FAIL\n  src : %r\n  %s: %r\n  out : %r" % (src, what, needle, out))
 print("%d/%d passed" % (len(cases) - len(bad), len(cases)))
 sys.exit(1 if bad else 0)

@@ -40,7 +40,7 @@ plugins:
       alias_type: redirect
 
 hooks:
-  - hooks/gfm_table_pipes.py   # 相對於本設定檔
+  - hooks/gfm_table_pipes.py   # 相對於本設定檔；on_config 把 Python-Markdown 擴充掛進 markdown_extensions
 
 markdown_extensions:
   - tables
