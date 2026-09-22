@@ -56,10 +56,10 @@ version: 1.7.0.0
   - **觸發條件**：(a) 基準欄的 T 不是「`docs/spec/**` 路徑 ＋ 已在 `origin/main` 的 commit sha」；(b) write scope 含 `devflow/**` 任一路徑。任一命中即觸發。
   - **讀審者**：fresh-context、唯讀；不得由撰寫該 issue 的 session 擔任；建議與協調位工具（`devflow.yml` 的 `seats.coordinator.filler` 值）異廠，協調位由人填時改取 `seats.implementer.filler`，只有一家可用時用同廠的全新 context。可讀檔、唯讀 git、跑不改變狀態的指令；不得寫檔、不得 commit、不得對 forge 寫。
   - **材料**：issue 本體（附 `gh issue view <N> --json updatedAt` 的值）＋全部留言、G、repo 在 base 的 checkout。模板 `templates/issue-review-prompt.md`。
-  - **回覆**：`READY` 或 `REVISE`；以 `Issue @ <T 識別> + <本體 updatedAt>`（T 識別＝T 留言 id 或 commit sha） 一行寫明所綁的 issue 狀態，並寫明讀審者的工具與 session 識別；`REVISE` 每個 block 四欄 `Blocker`／`Evidence`／`Minimum revision`／`Acceptance check`。`READY` 之後，T 變更、或本體在「派工紀錄」「審查處置」兩段以外變更，該 `READY` 失效；兩段內的填寫不使失效。
+  - **回覆**：`READY` 或 `REVISE`；以 `Issue @ <T 識別> + <本體 updatedAt>`（T 識別＝T 留言 id 或 commit sha）一行寫明所綁的 issue 狀態，並寫明讀審者的工具與 session 識別；`REVISE` 每個 block 四欄 `Blocker`／`Evidence`／`Minimum revision`／`Acceptance check`。`READY` 之後，T 變更、或本體在「派工紀錄」「審查處置」兩段以外變更，該 `READY` 失效。兩段以 `templates/issue.md` 的段標題辨識，補上缺漏的該兩段標題視為段內；段內只得追加紀錄行（留言 URL、commit sha、三態），寫入任何對 AC、write scope、T 的補充即視為段外變更。
   - **處置**：協調者對每個 block 在 issue 留言標三態之一：`FIX` 須附修改內容；`DEFER` 須附承接單號；`REJECT` 須附可重跑的反證。處置不等於放行；處置完須再跑一輪，但受下列「停損」限制。不套用 `R11` 的 PR 留言與「審查處置」段。
-  - **停損**：第二輪仍 `REVISE` → 升人，不自動第三輪；本句優先於上列「處置」的重跑要求。人可 (i) 以書面裁決代 `READY`——裁決留言須含同格式的 `Issue @` 行，失效條件同 `READY`；或 (ii) 授權再跑一輪；(ii) 的那輪仍 `REVISE` 即回到本款，由人再選。
-  - **留痕**：issue「派工紀錄」段的「派工前讀審」行，讀審結束即填；進行中可記各輪 URL，**派工當下**該行末項必為三值之一：`READY <URL>`、`人裁決 <URL>`、`未觸發 a／b 皆否`。
+  - **停損**：第二輪仍 `REVISE` → 升人，不自動第三輪；本句優先於上列「處置」的重跑要求。人可 (i) 以書面裁決代 `READY`——裁決留言須含同格式的 `Issue @` 行，其 `updatedAt` 取自裁決當下 `gh issue view <N> --json updatedAt`（或同等 forge 指令）的輸出並附該輸出；失效條件同 `READY`；或 (ii) 授權再跑一輪；(ii) 的那輪仍 `REVISE` 即回到本款，由人再選。
+  - **留痕**：issue「派工紀錄」段的「派工前讀審」行，讀審結束即填；進行中可記各輪 URL，**派工當下**該行末項（最後一個 `→` 之後、不含括號註解）必為三值之一：`READY <URL>`、`人裁決 <URL>`、`未觸發 a／b 皆否`。派工留言須附錨時點的 issue 本體全文（`gh issue view <N> --json body,updatedAt` 或同等 forge 指令的輸出，`updatedAt` 須等於 `Issue @` 行所記；不分 forge），供 PR 審查者比對錨後變更。
 
 ## 5. 審查（R）
 

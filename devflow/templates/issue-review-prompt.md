@@ -54,4 +54,4 @@ Non-blocking: none | <觀察或建議，逐條；不影響 verdict>
 清單缺口: none | <本輪自己想到、上列檢查項未涵蓋的角度，逐條>
 ```
 
-`READY` 時 BLOCK 為零；`REVISE` 時至少一條，每條四欄齊。`Issue @` 一行寫明本次 verdict 所綁的 issue 狀態：`READY` 之後，T 變更、或本體在「派工紀錄」「審查處置」兩段以外變更，該 `READY` 失效；兩段內的填寫不使失效（`L7`）。
+`READY` 時 BLOCK 為零；`REVISE` 時至少一條，每條四欄齊。`Issue @` 一行寫明本次 verdict 所綁的 issue 狀態：`READY` 之後，T 變更、或本體在「派工紀錄」「審查處置」兩段以外變更（段內只得追加紀錄行），該 `READY` 失效（`L7`）。
