@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="zh_TW" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        <link rel="canonical" href="https://augustushsu.github.io/agent-devflow/v0.4.1.0/devflow/RELEASING/">
+        <link rel="shortcut icon" href="../../img/favicon.ico">
+        <title>kit 發版程序 - agent-devflow</title>
+        <link href="../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../css/brands.min.css" rel="stylesheet">
+        <link href="../../css/solid.min.css" rel="stylesheet">
+        <link href="../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <link href="../../css/version-select.css" rel="stylesheet">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../..">agent-devflow</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../.." class="nav-link">agent-devflow</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle active" aria-current="page" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Devflow</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="./" class="dropdown-item active" aria-current="page">kit 發版程序</a>
+</li>
+                                    
+<li>
+    <a href="../WORKFLOW/" class="dropdown-item">agent-devflow WORKFLOW</a>
+</li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Coders</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../coders/claude-code/" class="dropdown-item">coder: claude-code</a>
+</li>
+            
+<li>
+    <a href="../coders/codex/" class="dropdown-item">coder: codex</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Forges</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../forges/gitea/" class="dropdown-item">forge: gitea</a>
+</li>
+            
+<li>
+    <a href="../forges/github/" class="dropdown-item">forge: github</a>
+</li>
+            
+<li>
+    <a href="../forges/gitlab/" class="dropdown-item">forge: gitlab</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Orchestrators</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../orchestrators/hermes/" class="dropdown-item">orchestrator: hermes</a>
+</li>
+            
+<li>
+    <a href="../orchestrators/none/" class="dropdown-item">orchestrator: none</a>
+</li>
+            
+<li>
+    <a href="../orchestrators/paperclip/" class="dropdown-item">orchestrator: paperclip</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Hermes</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../orchestrators/hermes/SKILL/" class="dropdown-item">devflow orchestrator（Hermes）</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Seats</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../seats/" class="dropdown-item">devflow/seats — 職位定義</a>
+</li>
+            
+<li>
+    <a href="../seats/approver/" class="dropdown-item">seat: approver（裁決位）</a>
+</li>
+            
+<li>
+    <a href="../seats/coordinator/" class="dropdown-item">seat: coordinator（協調位）</a>
+</li>
+            
+<li>
+    <a href="../seats/implementer/" class="dropdown-item">seat: implementer（實作位）</a>
+</li>
+            
+<li>
+    <a href="../seats/reviewer/" class="dropdown-item">seat: reviewer（審查位）</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Templates</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../templates/entry-block/" class="dropdown-item">Entry block</a>
+</li>
+            
+<li>
+    <a href="../templates/issue-review-prompt/" class="dropdown-item">Issue review prompt</a>
+</li>
+            
+<li>
+    <a href="../templates/issue/" class="dropdown-item">Issue</a>
+</li>
+            
+<li>
+    <a href="../templates/local-README/" class="dropdown-item">devflow.local/</a>
+</li>
+            
+<li>
+    <a href="../templates/pr/" class="dropdown-item">Pr</a>
+</li>
+            
+<li>
+    <a href="../templates/review-prompt/" class="dropdown-item">Review prompt</a>
+</li>
+            
+<li>
+    <a href="../templates/spec/" class="dropdown-item">&lt;功能名稱&gt;</a>
+</li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Docs</a>
+                                <ul class="dropdown-menu">
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Guide</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../docs/guide/" class="dropdown-item">docs/guide — 人類專用</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Spec</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../docs/spec/" class="dropdown-item">docs/spec — 本 repo 的規格集</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../docs/spec/install/spec/" class="dropdown-item">install：把入口區塊安全插入其他專案的 CLAUDE.md／AGENTS.md</a>
+</li>
+    </ul>
+  </li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Kit install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../docs/spec/kit-install/spec/" class="dropdown-item">kit-install：把 agent-devflow 完整安裝到消費者專案；升級與回復皆為重裝</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                            <li class="nav-item">
+                                <a rel="prev" href="../.." class="nav-link">
+                                    <i class="fa fa-arrow-left"></i> Previous
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a rel="next" href="../WORKFLOW/" class="nav-link">
+                                    Next <i class="fa fa-arrow-right"></i>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="https://github.com/AugustusHsu/agent-devflow" class="nav-link"><i class="fa-brands fa-github"></i> GitHub</a>
+                            </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#kit" class="nav-link">kit 發版程序</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#1" class="nav-link">1. 前置檢查</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#2-annotated-tag" class="nav-link">2. 建 annotated tag</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#3-push-tag" class="nav-link">3. push tag</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#4-docs-workflow" class="nav-link">4. 確認 docs workflow</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#5-tag" class="nav-link">5. 從 tag 重裝驗證</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#_1" class="nav-link">禁止事項</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#_2" class="nav-link">失敗處置</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="kit">kit 發版程序<a class="headerlink" href="#kit" title="Permanent link">&para;</a></h1>
+<p>本檔只適用於 <strong>agent-devflow kit 自己的發版</strong>——把 main 上的某個 commit 標成 kit release tag
+<code>v&lt;a.b.c.d&gt;</code> 並讓人類站建出對應版本；<strong>消費者專案不跑這份程序</strong>，它們消費的是已發的 tag。
+兩條前提全程不放寬：tag 名就是 <code>devflow/VERSION</code> 的值前面加 <code>v</code>（<code>V4</code>），且 tag 只打在 main
+已含的 commit、已發版本不移動、不刪、不重打（<code>V5</code>）。</p>
+<p>五個步驟依序跑。每步一個可以整段貼進終端機的區塊，<strong>步驟之間不共用 shell 變數</strong>：每步各自
+重算 <code>tag</code> 與 <code>sha</code>，所以隔一天再跑、中途換了終端機都不怕；但<strong>重跑時一律從步驟 1 起</strong>——步驟 2 的讀回只斷言 tag 指向 <code>$sha</code>、為 annotated，並比對 VERSION 與 tag 名；分支相符只在步驟 1 檢查。每個區塊第一行
+就切到 repo 根，從 repo 內哪個目錄起跑都一樣。</p>
+<p><code>V5</code> 在 GitHub 端有機械保證：tag ruleset <code>23780350</code> 擋掉對 <code>refs/tags/v*</code> 的移動與刪除。
+機制、驗證方式與受測環境見 <code>forges/github.md</code> 的「tag 保護」格，本檔不重述（<code>I5</code>）。</p>
+<h2 id="1">1. 前置檢查<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<p>四項任一不成立就停在原地，不要往下走。四項分別擋掉：發到一半的本機修改、發錯分支或發到還沒
+進 main 的 commit、tag 名與 <code>devflow/VERSION</code> 對不上、以及重發一個已經存在的版本。</p>
+<pre><code class="language-bash">set -euo pipefail
+cd &quot;$(git rev-parse --show-toplevel)&quot;
+
+tag=&quot;v$(cat devflow/VERSION)&quot;
+fail() { echo &quot;💥 $1&quot;; exit 1; }
+
+# (1) 工作樹乾淨：要發的是 main 上那份內容，不是本機還沒進 main 的東西。
+#     先把輸出接進變數再判：`[ -z &quot;$(cmd)&quot; ]` 在 cmd 自己失敗時輸出也是空的，而 set -e
+#     不攔條件位置的命令替換——工具壞掉會被讀成「乾淨」而放行（fail-open）。
+dirty=&quot;$(git status --porcelain)&quot; \
+  || fail &quot;git status --porcelain 跑不起來，無從判斷工作樹是否乾淨&quot;
+[ -z &quot;$dirty&quot; ] || fail &quot;工作樹不乾淨（git status --porcelain 有輸出）&quot;
+
+# (2) 在 main，且與 origin/main 同 sha（V5：tag 只打在 main 已含的 commit）
+git fetch --quiet origin main
+branch=&quot;$(git rev-parse --abbrev-ref HEAD)&quot;
+[ &quot;$branch&quot; = &quot;main&quot; ] || fail &quot;不在 main，目前在 $branch&quot;
+sha=&quot;$(git rev-parse origin/main)&quot;
+[ &quot;$(git rev-parse HEAD)&quot; = &quot;$sha&quot; ] \
+  || fail &quot;HEAD $(git rev-parse HEAD) 與 origin/main $sha 不同；先把該進 main 的都合進去再發&quot;
+
+# (3) devflow/VERSION 的值與將打的 tag 名一致（V4）
+printf '%s' &quot;${tag#v}&quot; | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
+  || fail &quot;devflow/VERSION 不是四碼 a.b.c.d：$(cat devflow/VERSION)&quot;
+[ &quot;$tag&quot; = &quot;v$(git show &quot;$sha:devflow/VERSION&quot;)&quot; ] \
+  || fail &quot;工作樹的 devflow/VERSION 與 origin/main 上的不同，tag 名會標到錯的版本&quot;
+
+# (4) 該 tag 尚不存在於遠端（V5：已發版本不重打）。同 (1)：ls-remote 連不上遠端時
+#     輸出一樣是空的，不先接進變數就會被讀成「遠端還沒有這個 tag」。
+remote_tag=&quot;$(git ls-remote origin &quot;refs/tags/$tag&quot;)&quot; \
+  || fail &quot;git ls-remote 連不上遠端，無從判斷 $tag 是否已存在&quot;
+[ -z &quot;$remote_tag&quot; ] || fail &quot;$tag 已存在於遠端；已發版本不移動、不刪、不重打，修正走下一版&quot;
+
+echo &quot;✅ 前置檢查四項通過：要發 $tag，指向 origin/main $sha&quot;
+</code></pre>
+<h2 id="2-annotated-tag">2. 建 annotated tag<a class="headerlink" href="#2-annotated-tag" title="Permanent link">&para;</a></h2>
+<p><code>-a</code> 是 annotated：產生一個帶訊息、作者與時間的 tag 物件；lightweight tag 沒有這些，
+<code>gh</code> 與人類站也讀不到訊息。打的位置固定是 <code>origin/main</code> 的 sha（<code>V5</code>）。</p>
+<pre><code class="language-bash">set -euo pipefail
+cd &quot;$(git rev-parse --show-toplevel)&quot;
+
+tag=&quot;v$(cat devflow/VERSION)&quot;
+git fetch --quiet origin main
+sha=&quot;$(git rev-parse origin/main)&quot;
+
+# 打之前再比一次 VERSION 與 tag 名：步驟 1 比的是當時的 origin/main，main 在兩步之間
+# 前進（別人合了一張也動 devflow/VERSION 的 PR）時，這裡的 $sha 已經換人，tag 名會標
+# 到一個 VERSION 不是它的 commit 上（V4）。這是本步驟唯一「往回看步驟 1」的檢查。
+[ &quot;$tag&quot; = &quot;v$(git show &quot;$sha:devflow/VERSION&quot;)&quot; ] \
+  || { echo &quot;💥 $tag 與 origin/main $sha 的 devflow/VERSION 不一致；main 在步驟 1 之後前進了，從步驟 1 重跑&quot;; exit 1; }
+
+# 訊息一行就夠：本版帶進來的變更逐條住 README 事實表與各 PR，tag 訊息不重述（I5）
+git tag -a &quot;$tag&quot; &quot;$sha&quot; -m &quot;kit $tag&quot;
+
+# 讀回：指到 origin/main 那個 commit，而且真的是 annotated（物件型別 tag）
+[ &quot;$(git rev-parse &quot;$tag^{commit}&quot;)&quot; = &quot;$sha&quot; ] \
+  || { echo &quot;💥 $tag 沒指向 origin/main $sha&quot;; exit 1; }
+[ &quot;$(git cat-file -t &quot;$tag&quot;)&quot; = &quot;tag&quot; ] \
+  || { echo &quot;💥 $tag 不是 annotated tag&quot;; exit 1; }
+git log -1 --format='%H %s' &quot;$tag&quot;
+</code></pre>
+<h2 id="3-push-tag">3. push tag<a class="headerlink" href="#3-push-tag" title="Permanent link">&para;</a></h2>
+<p>只推這一個 tag，refspec 寫全名。推上去的瞬間 <code>docs.yml</code> 的 <code>push: tags: ["v*"]</code> 會被觸發，
+所以推完直接接步驟 4。</p>
+<pre><code class="language-bash">set -euo pipefail
+cd &quot;$(git rev-parse --show-toplevel)&quot;
+
+tag=&quot;v$(cat devflow/VERSION)&quot;
+
+git push origin &quot;refs/tags/$tag&quot;
+
+# 讀回：遠端那個 ref 指的就是本機剛建的 tag 物件
+remote=&quot;$(git ls-remote origin &quot;refs/tags/$tag&quot; | cut -f1)&quot;
+[ &quot;$remote&quot; = &quot;$(git rev-parse &quot;$tag&quot;)&quot; ] \
+  || { echo &quot;💥 遠端 $tag 是 $remote，與本機 $(git rev-parse &quot;$tag&quot;) 不同&quot;; exit 1; }
+echo &quot;✅ 已推 $tag → $remote；docs.yml 應已被 tag push 觸發，接步驟 4&quot;
+</code></pre>
+<h2 id="4-docs-workflow">4. 確認 docs workflow<a class="headerlink" href="#4-docs-workflow" title="Permanent link">&para;</a></h2>
+<p>等該 tag 的 run 跑成功，再從<strong>站上</strong>讀回 <code>versions.json</code>——run 綠只代表 workflow 沒報錯，
+站上真的多一個版本要自己讀。本 tag 是已建版本中最高版時，<code>latest</code> 必須掛在它身上；
+回填舊 tag 時 <code>latest</code> 本來就不會動，所以只在最高版時檢查這一項。</p>
+<pre><code class="language-bash">set -euo pipefail
+cd &quot;$(git rev-parse --show-toplevel)&quot;
+
+tag=&quot;v$(cat devflow/VERSION)&quot;
+repo=&quot;$(gh repo view --json nameWithOwner --jq .nameWithOwner)&quot;
+
+# tag push 觸發的 run，headBranch 就是 tag 名；用環境變數餵 jq，省掉引號層層轉義
+run=&quot;$(TAG=&quot;$tag&quot; gh run list --workflow=docs.yml --limit 20 \
+         --json databaseId,headBranch \
+         --jq '[.[] | select(.headBranch == env.TAG)] | first | .databaseId')&quot;
+[ -n &quot;$run&quot; ] &amp;&amp; [ &quot;$run&quot; != &quot;null&quot; ] \
+  || { echo &quot;💥 找不到 $tag 的 docs run；見「失敗處置」&quot;; exit 1; }
+gh run watch &quot;$run&quot; --exit-status
+
+# 站上讀回：versions.json 要含本 tag；本 tag 是最高版時 latest 要指向它
+vj=&quot;$(mktemp)&quot;
+trap 'rm -f &quot;$vj&quot;' EXIT
+curl -fsS &quot;https://${repo%%/*}.github.io/${repo##*/}/versions.json&quot; -o &quot;$vj&quot;
+TAG=&quot;$tag&quot; python3 - &quot;$vj&quot; &lt;&lt;'PY'
+import json, os, re, sys
+vs = json.load(open(sys.argv[1], encoding=&quot;utf-8&quot;))
+tag = os.environ[&quot;TAG&quot;]
+hit = [v for v in vs if v.get(&quot;version&quot;) == tag]
+if not hit:
+    sys.exit(&quot;💥 versions.json 沒有 %s，只有 %s&quot; % (tag, [v.get(&quot;version&quot;) for v in vs]))
+four = [v for v in vs if re.fullmatch(r&quot;v\d+\.\d+\.\d+\.\d+&quot;, v.get(&quot;version&quot;, &quot;&quot;))]
+top = max(four, key=lambda v: [int(x) for x in v[&quot;version&quot;][1:].split(&quot;.&quot;)])
+if top[&quot;version&quot;] == tag and &quot;latest&quot; not in hit[0].get(&quot;aliases&quot;, []):
+    sys.exit(&quot;💥 %s 是最高版本，latest 卻不在它身上&quot; % tag)
+print(&quot;✅ versions.json 含 %s；latest 指向 %s&quot; % (tag, top[&quot;version&quot;]))
+PY
+</code></pre>
+<h2 id="5-tag">5. 從 tag 重裝驗證<a class="headerlink" href="#5-tag" title="Permanent link">&para;</a></h2>
+<p>發版的成品是「別人 clone 得到、裝得起來的那份 kit」，不是本機工作樹。所以從 tag 淺 clone
+一份出來，對一個消費者 repo 跑 <code>--dry-run</code>：安裝器會走完整個決策階段、印出會寫什麼，
+但不寫任何檔。<code>CONSUMER_REPO</code> 給已存在的消費者 repo 路徑；不給就現場 clone 一份 e2e repo。</p>
+<pre><code class="language-bash">set -euo pipefail
+cd &quot;$(git rev-parse --show-toplevel)&quot;
+
+tag=&quot;v$(cat devflow/VERSION)&quot;
+url=&quot;$(git remote get-url origin)&quot;
+
+work=&quot;$(mktemp -d)&quot;
+trap 'rm -rf &quot;$work&quot;' EXIT
+
+# 拿到的必須是 tag 上那份 kit，不是本機工作樹
+git clone --branch &quot;$tag&quot; --depth 1 &quot;$url&quot; &quot;$work/kit&quot;
+
+consumer=&quot;${CONSUMER_REPO:-}&quot;
+if [ -z &quot;$consumer&quot; ]; then
+  consumer=&quot;$work/consumer&quot;
+  gh repo clone AugustusHsu/devflow-e2e &quot;$consumer&quot; -- --depth 1
+fi
+
+python3 &quot;$work/kit/devflow/install.py&quot; &quot;$consumer&quot; --dry-run
+echo &quot;✅ $tag 可從 tag 重裝：install.py --dry-run 對 $consumer exit 0（未寫任何檔）&quot;
+</code></pre>
+<h2 id="_1">禁止事項<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p><code>V5</code> 的內容是「已發版本不移動、不刪、不重打」，對應到四件<strong>不做</strong>的事：</p>
+<ul>
+<li><code>git push --force</code>（或 <code>git push -f</code>）到任何 <code>refs/tags/v*</code>。</li>
+<li><code>git tag -d</code> 掉已發的 tag 之後重打同名。</li>
+<li><code>git push --tags</code>：它會把本機所有 tag 一起推上去，含還不該發的、含步驟 2 打壞留著的。
+  發版一次只推一個 tag，指令見步驟 3。</li>
+<li>對已發 tag 做任何移動——改指另一個 commit、或先刪再建，兩者都是移動。</li>
+</ul>
+<p>需要修正時發<strong>下一版</strong>：改內容 → 進位 <code>devflow/VERSION</code>（<code>V7</code>）→ 走一次本程序。
+tag ruleset <code>23780350</code> 擋的是對<strong>已發 tag</strong> 的<strong>遠端</strong>刪除或移動——<code>git push origin :refs/tags/v*</code>（刪）
+與 <code>git push --force &lt;commit&gt;:refs/tags/v*</code>（移動）會在 GitHub 端得到 <code>GH013</code>，連 admin 也不能繞；
+四個驗證案例（含「建新 tag 仍可」）見 <code>forges/github.md</code> 的「tag 保護」格。
+上面四條裡只有第四條、以及第一條打在<strong>已存在</strong>的 <code>v*</code> 上時走得到這條保護：<code>--force</code> 推一個
+<strong>尚不存在</strong>的 tag 是建立，ruleset 不管；第二條先刪本機 tag 再重打同名，推的時候本機 git 就以
+「tag 已存在於遠端」拒送，根本沒送到 GitHub 端。
+<strong>建立新 tag 不受 ruleset 管</strong>，所以第三條 <code>git push --tags</code> 只能靠本程序擋——而且推錯的 tag 因同一個 ruleset 刪不掉，只能燒版號。
+規則先於機械保證：不要為了繞過去而改 ruleset。</p>
+<h2 id="_2">失敗處置<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>tag 已 push，但 docs run 失敗</strong>：修 workflow（進 main 仍走 PR，<code>I3</code>），
+  再用 <code>workflow_dispatch</code> 對同一個 tag 回填：<code>gh workflow run docs.yml --ref main -f tag=&lt;tag&gt;</code>。
+  <strong>不</strong>刪 tag 重打——tag 指的內容沒有錯，錯的是建站工具鏈，而工具鏈本來就固定取 main，
+  修好的 main 直接就是回填時會用的那份。</li>
+<li><strong>步驟 1 第 (4) 項發現 tag 已存在於遠端</strong>：那一版已經發過了。確認 <code>devflow/VERSION</code>
+  是不是忘了進位（<code>V7</code> 由 CI 的 <code>v7</code> 關卡擋在 PR 階段），補進位後走下一版，不重發同名。</li>
+<li><strong>步驟 2 打錯位置，但還沒跑步驟 3</strong>：這個 tag 還沒推出去、還不是「已發版本」，
+  移除本機那個同名 tag 之後重跑步驟 2 即可。一旦跑過步驟 3 就不適用，改走下一版。</li>
+<li><strong>步驟 5 裝不起來</strong>：tag 已經發出去了，不回收。開 issue 修安裝器，走下一版；
+  同時在 README 事實表記下該版的已知問題。</li>
+</ul></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../js/base.js"></script>
+        <script src="../../search/main.js"></script>
+        <script src="../../js/version-select.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

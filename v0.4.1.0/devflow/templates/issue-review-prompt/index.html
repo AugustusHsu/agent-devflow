@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="zh_TW" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        <link rel="canonical" href="https://augustushsu.github.io/agent-devflow/v0.4.1.0/devflow/templates/issue-review-prompt/">
+        <link rel="shortcut icon" href="../../../img/favicon.ico">
+        <title>Issue review prompt - agent-devflow</title>
+        <link href="../../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../../css/brands.min.css" rel="stylesheet">
+        <link href="../../../css/solid.min.css" rel="stylesheet">
+        <link href="../../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <link href="../../../css/version-select.css" rel="stylesheet">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../../..">agent-devflow</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../.." class="nav-link">agent-devflow</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle active" aria-current="page" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Devflow</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../RELEASING/" class="dropdown-item">kit 發版程序</a>
+</li>
+                                    
+<li>
+    <a href="../../WORKFLOW/" class="dropdown-item">agent-devflow WORKFLOW</a>
+</li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Coders</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../coders/claude-code/" class="dropdown-item">coder: claude-code</a>
+</li>
+            
+<li>
+    <a href="../../coders/codex/" class="dropdown-item">coder: codex</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Forges</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../forges/gitea/" class="dropdown-item">forge: gitea</a>
+</li>
+            
+<li>
+    <a href="../../forges/github/" class="dropdown-item">forge: github</a>
+</li>
+            
+<li>
+    <a href="../../forges/gitlab/" class="dropdown-item">forge: gitlab</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Orchestrators</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../orchestrators/hermes/" class="dropdown-item">orchestrator: hermes</a>
+</li>
+            
+<li>
+    <a href="../../orchestrators/none/" class="dropdown-item">orchestrator: none</a>
+</li>
+            
+<li>
+    <a href="../../orchestrators/paperclip/" class="dropdown-item">orchestrator: paperclip</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Hermes</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../orchestrators/hermes/SKILL/" class="dropdown-item">devflow orchestrator（Hermes）</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Seats</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../seats/" class="dropdown-item">devflow/seats — 職位定義</a>
+</li>
+            
+<li>
+    <a href="../../seats/approver/" class="dropdown-item">seat: approver（裁決位）</a>
+</li>
+            
+<li>
+    <a href="../../seats/coordinator/" class="dropdown-item">seat: coordinator（協調位）</a>
+</li>
+            
+<li>
+    <a href="../../seats/implementer/" class="dropdown-item">seat: implementer（實作位）</a>
+</li>
+            
+<li>
+    <a href="../../seats/reviewer/" class="dropdown-item">seat: reviewer（審查位）</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Templates</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../entry-block/" class="dropdown-item">Entry block</a>
+</li>
+            
+<li>
+    <a href="./" class="dropdown-item active" aria-current="page">Issue review prompt</a>
+</li>
+            
+<li>
+    <a href="../issue/" class="dropdown-item">Issue</a>
+</li>
+            
+<li>
+    <a href="../local-README/" class="dropdown-item">devflow.local/</a>
+</li>
+            
+<li>
+    <a href="../pr/" class="dropdown-item">Pr</a>
+</li>
+            
+<li>
+    <a href="../review-prompt/" class="dropdown-item">Review prompt</a>
+</li>
+            
+<li>
+    <a href="../spec/" class="dropdown-item">&lt;功能名稱&gt;</a>
+</li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Docs</a>
+                                <ul class="dropdown-menu">
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Guide</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/guide/" class="dropdown-item">docs/guide — 人類專用</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Spec</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/spec/" class="dropdown-item">docs/spec — 本 repo 的規格集</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/spec/install/spec/" class="dropdown-item">install：把入口區塊安全插入其他專案的 CLAUDE.md／AGENTS.md</a>
+</li>
+    </ul>
+  </li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Kit install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/spec/kit-install/spec/" class="dropdown-item">kit-install：把 agent-devflow 完整安裝到消費者專案；升級與回復皆為重裝</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                            <li class="nav-item">
+                                <a rel="prev" href="../entry-block/" class="nav-link">
+                                    <i class="fa fa-arrow-left"></i> Previous
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a rel="next" href="../issue/" class="nav-link">
+                                    Next <i class="fa fa-arrow-right"></i>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="https://github.com/AugustusHsu/agent-devflow" class="nav-link"><i class="fa-brands fa-github"></i> GitHub</a>
+                            </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="2"><a href="#_1" class="nav-link">材料</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            
+            <li class="nav-item" data-bs-level="2"><a href="#_2" class="nav-link">你要做的事</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            
+            <li class="nav-item" data-bs-level="2"><a href="#_3" class="nav-link">輸出格式</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<!-- 給 fresh-context 讀審者的 prompt（WORKFLOW.md `L7`）。orchestrator 填 <> 後餵給讀審者的 CLI。-->
+
+<p>你是這張 issue 的派工前獨立讀審者。你沒有參與它的撰寫，不接受協調者的摘要當證據；只依下列材料判斷。
+你是唯讀的：可讀檔、唯讀 git、跑不改變狀態的指令；不得寫檔、不得 commit、不得對 forge 寫（<code>L7</code>）。</p>
+<h2 id="_1">材料<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<ul>
+<li>issue 本體：<code>gh issue view &lt;N&gt;</code> 的輸出，附 <code>gh issue view &lt;N&gt; --json updatedAt</code> 的值 <updatedAt></li>
+<li>issue 全部留言：<code>gh issue view &lt;N&gt; --comments</code> 的輸出；T ＝ <T 識別：留言 id，或規格檔路徑 @ commit sha></li>
+<li>治理基準 G：<code>devflow/WORKFLOW.md @ &lt;sha&gt;</code></li>
+<li>repo 在 base 的 checkout：<code>&lt;path&gt;</code>（base sha <code>&lt;base sha&gt;</code>）</li>
+<li>上一輪的讀審留言與協調者的處置留言（重讀審時才有）：<URL 或「首輪」></li>
+</ul>
+<p>材料不全（本體或任一則留言取不到）⇒ 不做部分判斷，直接 <code>REVISE</code>，block 一條寫明缺的是哪一項。</p>
+<h2 id="_2">你要做的事<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>判斷對象是 issue 的文字，不是 diff。逐項做，逐項留下可核對的證據。</p>
+<ol>
+<li>材料完整性：本體與全部留言都在。</li>
+<li>本體與最新裁決留言逐欄並排，列出未同步的欄位；未同步即 block（<code>L3</code>(b)）。</li>
+<li>重讀審時：逐條核對上一輪每個 block 的 <code>Acceptance check</code> 是否已被修訂後的 T 關閉——<code>FIX</code> 看文字、<code>REJECT</code> 重跑反證；處置留言的宣稱不構成證據；未關閉者沿用原編號。</li>
+<li>逐條 AC 找兩種合規結果：能不能有兩份都符合這條字面、效果卻不同的產出。</li>
+<li>AC 與 AC、AC 與正文、正文與現行 <code>WORKFLOW.md</code> 的文字矛盾。</li>
+<li>引用存在性：路徑、規則 ID、模板、章節、issue／PR 號、sha。</li>
+<li>write scope 雙向：AC 要動的檔都在 scope 內；scope 內每個檔都有 AC 動到。</li>
+<li>驗證指令：只核可執行體與路徑存在；只跑不改變狀態的指令；在 base 上不通過是預期，不構成 block。</li>
+<li>含「一律／只會／必然／全部／都」的句子是否附邊界或證據。</li>
+<li>AC 覆蓋率反查：正文宣稱的每個效果由哪條 AC 承接。</li>
+<li>每條 AC 的執行者與權限；coder 拿到會否撞 <code>L3</code>(a)。</li>
+<li>每條寫了「期望 X」的 AC，得到非 X 時的處置是什麼。</li>
+<li>機械可驗與只能人工核的 AC 分堆；人工堆過半時提示。</li>
+<li>write scope 每個檔被哪些對照表 <code>✅</code> 格引用，變更會否使其依 <code>R10</code> 降級。</li>
+<li>對照表 <code>✅</code> 格是否同時滿足 <code>R7</code>、<code>R8</code>、<code>R10</code>。</li>
+<li>新規則 ID 的編號與流程順序若脫鉤，條文是否寫明時點。</li>
+<li>寫進 <code>devflow/**</code> 的文字含「本 repo／本單／目前」或具體數字、工具名者，在消費者 repo 是否仍成立。</li>
+<li>T 若用括號、粗體、縮排等排版特徵代理「進不進產物」，列出該特徵全部出現處，逐處判規範或說明；分類不一致即 block。</li>
+<li>每條 AC 由誰判 PASS／FAIL，判定材料是否已由某條 AC 送到判定者手上。</li>
+<li>這張 issue 自己是否滿足 <code>L1</code>：「未決事項」為空、G／T 為具體 sha 而非佔位。</li>
+<li>重讀審時：本輪各 block 落在 T 哪一版引入的文字；多數來自上一輪修法時，於 <code>Non-blocking:</code> 註明（供停損判斷）。</li>
+</ol>
+<h2 id="_3">輸出格式<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<pre><code>Verdict: READY | REVISE
+Issue @ &lt;T 識別&gt; + &lt;本體 updatedAt&gt;
+讀審者：&lt;工具／session 識別&gt;
+BLOCK &lt;k&gt;:
+  Blocker: &lt;一句：缺陷是什麼&gt;
+  Evidence: &lt;本體的行或留言 id ＋原文；跑過的指令與輸出&gt;
+  Minimum revision: &lt;最小修訂：改哪一句、改成什麼&gt;
+  Acceptance check: &lt;第三者可執行的檢查：什麼文字或輸出出現即視為已關閉&gt;
+Non-blocking: none | &lt;觀察或建議，逐條；不影響 verdict&gt;
+清單缺口: none | &lt;本輪自己想到、上列檢查項未涵蓋的角度，逐條&gt;
+</code></pre>
+<p><code>READY</code> 時 BLOCK 為零；<code>REVISE</code> 時至少一條，每條四欄齊。<code>Issue @</code> 一行寫明本次 verdict 所綁的 issue 狀態：<code>READY</code> 之後 T 變更，該 <code>READY</code> 失效（<code>L7</code>；本體變更的失效判準暫未規範）。</p></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../../js/base.js"></script>
+        <script src="../../../search/main.js"></script>
+        <script src="../../../js/version-select.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

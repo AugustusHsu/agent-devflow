@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh_TW" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        <link rel="canonical" href="https://augustushsu.github.io/agent-devflow/v0.4.1.0/docs/spec/install/spec/">
+        <link rel="shortcut icon" href="../../../../img/favicon.ico">
+        <title>install：把入口區塊安全插入其他專案的 CLAUDE.md／AGENTS.md - agent-devflow</title>
+        <link href="../../../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../../../css/brands.min.css" rel="stylesheet">
+        <link href="../../../../css/solid.min.css" rel="stylesheet">
+        <link href="../../../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <link href="../../../../css/version-select.css" rel="stylesheet">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../../../..">agent-devflow</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../../.." class="nav-link">agent-devflow</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Devflow</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../../../devflow/RELEASING/" class="dropdown-item">kit 發版程序</a>
+</li>
+                                    
+<li>
+    <a href="../../../../devflow/WORKFLOW/" class="dropdown-item">agent-devflow WORKFLOW</a>
+</li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Coders</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../../devflow/coders/claude-code/" class="dropdown-item">coder: claude-code</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/coders/codex/" class="dropdown-item">coder: codex</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Forges</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../../devflow/forges/gitea/" class="dropdown-item">forge: gitea</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/forges/github/" class="dropdown-item">forge: github</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/forges/gitlab/" class="dropdown-item">forge: gitlab</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Orchestrators</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../../devflow/orchestrators/hermes/" class="dropdown-item">orchestrator: hermes</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/orchestrators/none/" class="dropdown-item">orchestrator: none</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/orchestrators/paperclip/" class="dropdown-item">orchestrator: paperclip</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Hermes</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../../devflow/orchestrators/hermes/SKILL/" class="dropdown-item">devflow orchestrator（Hermes）</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Seats</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../../devflow/seats/" class="dropdown-item">devflow/seats — 職位定義</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/seats/approver/" class="dropdown-item">seat: approver（裁決位）</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/seats/coordinator/" class="dropdown-item">seat: coordinator（協調位）</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/seats/implementer/" class="dropdown-item">seat: implementer（實作位）</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/seats/reviewer/" class="dropdown-item">seat: reviewer（審查位）</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Templates</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../../devflow/templates/entry-block/" class="dropdown-item">Entry block</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/templates/issue-review-prompt/" class="dropdown-item">Issue review prompt</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/templates/issue/" class="dropdown-item">Issue</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/templates/local-README/" class="dropdown-item">devflow.local/</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/templates/pr/" class="dropdown-item">Pr</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/templates/review-prompt/" class="dropdown-item">Review prompt</a>
+</li>
+            
+<li>
+    <a href="../../../../devflow/templates/spec/" class="dropdown-item">&lt;功能名稱&gt;</a>
+</li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle active" aria-current="page" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Docs</a>
+                                <ul class="dropdown-menu">
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Guide</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../guide/" class="dropdown-item">docs/guide — 人類專用</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Spec</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../" class="dropdown-item">docs/spec — 本 repo 的規格集</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="./" class="dropdown-item active" aria-current="page">install：把入口區塊安全插入其他專案的 CLAUDE.md／AGENTS.md</a>
+</li>
+    </ul>
+  </li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Kit install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../kit-install/spec/" class="dropdown-item">kit-install：把 agent-devflow 完整安裝到消費者專案；升級與回復皆為重裝</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                            <li class="nav-item">
+                                <a rel="prev" href="../../" class="nav-link">
+                                    <i class="fa fa-arrow-left"></i> Previous
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a rel="next" href="../../kit-install/spec/" class="nav-link">
+                                    Next <i class="fa fa-arrow-right"></i>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="https://github.com/AugustusHsu/agent-devflow" class="nav-link"><i class="fa-brands fa-github"></i> GitHub</a>
+                            </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#install-claudemdagentsmd" class="nav-link">install：把入口區塊安全插入其他專案的 CLAUDE.md／AGENTS.md</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#_1" class="nav-link">目標與範圍</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#_2" class="nav-link">驗收標準</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#_3" class="nav-link">未決事項</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="install-claudemdagentsmd">install：把入口區塊安全插入其他專案的 CLAUDE.md／AGENTS.md<a class="headerlink" href="#install-claudemdagentsmd" title="Permanent link">&para;</a></h1>
+<!-- 依 WORKFLOW.md S1。stage 1 下第 2 節不生效，本檔為 Phase 2 首單的 T 基準（草稿）。-->
+
+<h2 id="_1">目標與範圍<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>給 agent-devflow 一個安裝器，把 <code>devflow/templates/entry-block.md</code> 的入口區塊插入<strong>目標專案</strong>既有的 <code>CLAUDE.md</code>／<code>AGENTS.md</code>，遵守 <code>D2</code>：區塊外的專案內容逐 byte 不變；重跑冪等；碰撞情況報錯且<strong>不寫任何檔</strong>。</p>
+<p><strong>形式</strong>：<code>devflow/install.py</code>，Python 3 stdlib only，<code>python3 devflow/install.py &lt;目標 repo 路徑&gt; [--dry-run]</code>。</p>
+<p><strong>本檔只定義入口區塊</strong>：不建 <code>devflow.yml</code>（既有者只讀頂層 <code>implementer_filler</code> 鍵——<code>seats.implementer.filler</code> 的投影，見 AC-7、AC-13）、不碰 <code>.gitignore</code>、不 commit。<code>devflow/</code> 目錄的鏡像、<code>devflow.local/</code> 與版本由 <code>docs/spec/kit-install/spec.md</code>（kit-install 規格）定義；同一支 <code>install.py</code> 先依該規格鏡像，再依本檔處理入口檔（該規格 AC-16 的寫入序）。本檔 AC-1～AC-12 全部保留；AC-13 是本 repo CI 的 <code>i5</code>，不由安裝器執行。</p>
+<p><strong>名詞定義</strong>（全文適用）：
+- <strong>模板</strong>：<code>devflow/templates/entry-block.md</code> 的完整 bytes，以 <code>&lt;!-- devflow:begin --&gt;</code> 行起、<code>&lt;!-- devflow:end --&gt;</code> 行止，含兩標記行；正規化為 LF、無 BOM、尾端恰一個 <code>\n</code>
+- <strong>標記行</strong>：檔案 bytes 以 <code>\n</code> 切行、每行以 UTF-8 解碼（<code>errors="replace"</code>）後 <code>line.strip() == "&lt;!-- devflow:begin --&gt;"</code>（或 <code>end</code>）的行。<strong>檔首 UTF-8 BOM（<code>EF BB BF</code>）不剝除</strong>，屬第一行內容，故「BOM＋begin」的首行不是標記行——此點與 CI <code>d2</code>（<code>entry_block()</code>，以 <code>utf-8-sig</code> 讀檔）<strong>刻意不同</strong>：安裝器以 bytes 為準、不解碼整檔。差異作用在<strong>標記行的辨識</strong>：首行是標記行的檔案加上 BOM 之後，兩邊認到的標記位置不同（CI 認得首行，安裝器不認得）。<strong>認到的位置不同不等於最終走哪條 AC 不同</strong>——那取決於檔內其餘標記的排列，本檔不以散文推論（已錯三次，見「未決事項」的 BOM 對齊），權威來源是 <code>tests/install/harness.py</code>。#104 的處置：<strong>維持此差異</strong>，只依 AC-5c 改正命中該合取條件時的錯誤訊息。其餘（第一組選取、<code>strip()</code> 語意）與判準 B 一致
+- <strong>第一組</strong>：檔案第一個 begin 標記行，到其後第一個 end 標記行（含兩行）。<strong>begin 之前若有任何 end 標記行</strong>（落單 end）→ 違反 <code>D2</code>（1.0.0.0：區塊須為第一個標記組、其前無標記行），依 AC-5b 拒絕；無 begin 但有 end 標記行亦同
+- <strong>檔首插入</strong>：輸出 = 模板 bytes + <code>\n</code> + 原檔 bytes。原檔以 <code>---</code> frontmatter 開頭時<strong>同樣插在 byte 0</strong>——<code>D2</code> 說「區塊外是專案的內容」，frontmatter 也是專案內容，安裝器不解析它；原檔若以換行開頭，該換行保留（不去重）
+- <strong>兩檔</strong>：目標 repo 根目錄的 <code>CLAUDE.md</code> 與 <code>AGENTS.md</code>
+- <strong>目標檔集合</strong>：依 AC-7 先選定要處理的檔案集合（兩檔／其一／依 <code>devflow.yml</code> 二選一），<strong>再</strong>對集合內每檔做決策；不在集合內的檔案不讀、不建。「存在」以 <code>os.path.lexists</code> 判：<strong>symlink 一律視為存在</strong>；dangling symlink（<code>lexists</code> 真、<code>exists</code> 假）→ exit 2，不寫任何檔，stderr 說明——安裝器不替使用者決定該建到哪裡；集合內路徑存在但<strong>不是一般檔案</strong>（目錄、或 symlink 指向目錄）→ 同樣 exit 2，stderr <code>&lt;路徑&gt;: not a regular file</code>
+- <strong>可寫性</strong>：決策階段對集合內每個「將被寫入」的既有檔案檢查 <code>os.access(path, os.W_OK)</code>、將被建立的檔案檢查其目錄 <code>os.access(dir, os.W_OK | os.X_OK)</code>（POSIX 建檔需 write＋search 兩權限；<code>0222</code> 目錄 <code>W_OK</code> 真但建檔失敗）；任一不可寫 → exit 2，不寫任何檔。此檢查在 <code>--dry-run</code> 與實際執行<strong>皆執行</strong>，使兩者 exit code 一致（AC-10）。<strong>測試前提</strong>：可寫性案例以非 root 身分執行；harness 偵測到 <code>os.geteuid() == 0</code> 時將該類案例標為 <code>SKIP</code>（不算 FAIL），並在總計列印 skip 數——root 對 <code>0444</code> 檔 <code>os.access(W_OK)</code> 恆真，chmod 無法構造反例。檢查後仍發生的 OSError 不在原子性承諾內（可寫性檢查與寫入之間的競態）
+- <strong>原子性</strong>：先對集合內全部檔案做決策（AC-1～AC-6、AC-8 各歸哪一路），任一檔命中 exit 1／exit 2 路徑則<strong>集合內皆不寫</strong>；全部可寫才寫</p>
+<h2 id="_2">驗收標準<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<ul>
+<li>AC-1: 目標檔不存在 → 建檔，內容 bytes 恰等於模板</li>
+<li>AC-2: 目標檔存在、無任何標記行 → 檔首插入（定義見上）；原檔 bytes 逐 byte 出現在輸出的 <code>len(模板)+1</code> 位置起</li>
+<li>AC-3: 第一組存在且其 bytes（含兩標記行，行尾正規化為 LF 後）等於模板 → 不寫檔，exit 0，stdout 該檔一行 <code>&lt;路徑&gt;: unchanged</code></li>
+<li>AC-4: 第一組存在但 bytes 不等於模板 → 輸出 = 原檔[第一組 begin 行首之前] + 模板 + 原檔[第一組 end 行的行尾序列之後]；end 行有行尾序列（<code>\n</code> 或 <code>\r\n</code>）時連同其一併取代，end 行位於 EOF 且無行尾序列時 span 止於 EOF（此時輸出因模板尾端 <code>\n</code> 而多一個尾端換行，屬預期）；第一組之外逐 byte 不變（含第一組之後的任何標記——AC-6）</li>
+<li>AC-5: 有 begin 標記行、其後<strong>無</strong> end 標記行 → exit 1，不寫任何檔，stderr 一行 <code>&lt;路徑&gt;:&lt;begin 行號&gt;: devflow:begin without end</code></li>
+<li>AC-5b: 第一個 begin 標記行之前有 end 標記行、或無 begin 但有 end 標記行 → exit 1，不寫任何檔，stderr 一行 <code>&lt;路徑&gt;:&lt;該 end 行號&gt;: stray devflow:end before begin</code>（取最早的一行）。<strong>例外只有一個</strong>：同時命中 AC-5c 者改印 AC-5c 的訊息</li>
+<li>AC-5c: 命中 AC-5b，<strong>且</strong>檔首為 UTF-8 BOM（<code>EF BB BF</code>）、去掉該 BOM 後的第一行 <code>strip()</code> 等於 <code>&lt;!-- devflow:begin --&gt;</code> → exit 1、不寫任何檔（與 AC-5b 逐位元相同），stderr 改為一行 <code>&lt;路徑&gt;:1: UTF-8 BOM before devflow:begin; remove the BOM (see issue #104)</code>。<strong>行號固定 <code>1</code></strong>（BOM 所在的行），不是那個 end 的行號——此處落單 end 是後果，BOM 才是原因，訊息要指向使用者該動手的位置。<strong>本條只改訊息，不改判定</strong>：BOM 仍不剝除（見「標記行」），該檔仍裝不起來。<strong>本條不涵蓋</strong>（列舉，非概括）：① BOM＋首行 begin 但全檔無 end 標記行——那是「無任何標記行」，走 AC-2 檔首插入、exit 0、照常寫檔，不經過任何錯誤路徑，BOM 那行原樣留著成為區塊後的專案內容；② BOM＋首行 begin，其後另有 begin 而全檔無 end——走 AC-5，訊息與行號照 AC-5（去掉 BOM 仍是 AC-5，只差行號，BOM 不是停下來的原因）；③ U+FEFF 出現在檔首以外的任何位置；④ UTF-16／UTF-32 的 BOM（<code>FF FE</code>、<code>FE FF</code>、<code>FF FE 00 00</code>、<code>00 00 FE FF</code>）——不辨識、不提示，照原判定走</li>
+<li>AC-6: 第一組之後再出現任何標記行 → 忽略：不計數、不報錯、不改動那些行；第一組仍依 AC-3／AC-4 處理</li>
+<li>AC-7: 兩檔皆存在 → 各自依 AC-1～AC-6 決策後依原子性寫入；只存在其一 → 只處理該檔，<strong>不建</strong>另一個；兩者皆無 → 由目標 repo 根目錄 <code>devflow.yml</code> 的<strong>頂層鍵 <code>implementer_filler</code></strong> 決定建哪一檔：檔案通過下述<strong>信封</strong>、候選行合規、且值恰為 <code>claude-code</code> → 建 <code>CLAUDE.md</code>；<strong>其他任何情況</strong>（無 <code>devflow.yml</code>、無法讀取、無法以 UTF-8 <strong>嚴格</strong>解碼、信封不成立、無候選行、候選行不合規或重複、值為其他字串）→ 建 <code>AGENTS.md</code>（無設定時 <code>AGENTS.md</code> 是多數 agent 的通用入口）。此讀取<strong>永不報錯</strong>、不驗檔案其他內容（信封只看每個頂層行的起首，不解析任何值）、不建檔、<strong>不做 YAML 解析</strong>（stdlib only）。<code>implementer_filler</code> 是 <code>seats.implementer.filler</code>（實作位——<code>seats/implementer.md</code>——的填充工具；<code>seats:</code> 結構由 #68 引入）的<strong>衍生投影</strong>，一致性見 AC-13；安裝器只讀投影，<strong>不讀</strong> <code>seats:</code> 巢狀路徑——不解析 YAML 卻要判斷巢狀路徑等於手寫 YAML 子集 parser，PR #74 三輪審查證明攻擊面不收斂（#69 裁決）</li>
+<li><strong>行</strong>：檔案 bytes 嚴格 UTF-8 解碼後以 <code>\n</code> 切行。<strong>換行字元的封閉</strong>：<code>\r</code> 只允許緊接在 <code>\n</code> 之前（CRLF 的行尾）；<strong>任何其他位置的 <code>\r</code></strong>（bare CR——其後不是 <code>\n</code>、或位於檔尾、或 <code>\r\r\n</code> 的第一個）<strong>以及任何位置的 U+0085（NEL）、U+2028（LS）、U+2029（PS），使整檔不合規 → <code>AGENTS.md</code></strong>，不論它們出現在頂層行、縮排行、註解或值裡。理由：YAML 1.2 的換行是 CR、LF、CRLF 三種（§5.4 <code>b-break</code>），YAML 1.1／PyYAML 另把 NEL、LS、PS 當換行；本條把這些字元全部排除之後，被接受的檔案裡「以 <code>\n</code> 切出的行」恰等於兩個版本 YAML 的邏輯行——沒有任何字元能讓 YAML 看到本條看不到的行邊界，反之亦然。檔首 BOM 不剝除（同標記行），故 BOM 開頭的檔案其第一個非忽略行必不是頂層鍵行、整檔不合規。<strong>忽略行</strong>＝只含空格／tab／<code>\r</code> 的行、或去掉行首空格／tab 後以 <code>#</code> 起始的行。<strong>CRLF 的 <code>\r</code> 是行尾的一部分、不是行內容</strong>：以下所有「行尾」都指去掉這個 <code>\r</code> 之後的位置（<code>seats:\r\n</code> 是無值的頂層鍵行，與 <code>seats:\n</code> 同義；否則每一個 CRLF 的 <code>devflow.yml</code> 都會因 <code>seats:</code>／<code>docs:</code> 而不合規）。<strong>頂層行</strong>＝首字元不是空格的非忽略行。<strong>頂層鍵行</strong>＝裸鍵 ＋ <code>:</code> ＋（行尾、或一個以上空格／tab 再接任意內容）；裸鍵首字元為英文字母或 <code>_</code>，其餘為英文字母、數字、<code>_</code>、<code>-</code>、<code>.</code></li>
+<li>
+<p><strong>信封</strong>（兩條都要成立）：</p>
+<ol>
+<li><strong>根定位</strong>：檔案的<strong>第一個非忽略行——不論縮排——必須是頂層鍵行</strong>；或它是純 <code>---</code>（其後只能是空格／tab／<code>\r</code>，或空格／tab 再接 <code>#</code> 註解），且<strong>其後的第一個非忽略行是頂層鍵行</strong>。這條把根節點釘成「從第 0 欄開始的 block mapping」：一個第 0 欄的 <code>裸鍵:</code> 形狀行不可能是任何 scalar、flow node、序列的開頭或續行，所以根只能是 block mapping；根 flow／引號／block scalar 與根序列，<strong>不論外殼縮排幾格</strong>（<code>[</code>、<code>"</code>、<code>!!seq [</code>、<code>- x</code>）、不論是否藏在 <code>---</code> 之後，都在此被擋</li>
+<li><strong>全檔</strong>：其後<strong>每一個頂層行</strong>（首字元不是空格的非忽略行）<strong>都必須是頂層鍵行</strong>。任何其他頂層行——以 <code>[</code>、<code>{</code>、<code>"</code>、<code>'</code>、<code>|</code>、<code>&gt;</code>、<code>-</code>、<code>?</code>、<code>%</code>、<code>&amp;</code>、<code>!</code>、<code>*</code>、<code>&lt;</code>、tab、BOM 起始者；第二個 <code>---</code>、<code>...</code>；引號鍵、非 ASCII 鍵；flow 集合或引號 scalar 的第 0 欄續行（單獨的 <code>]</code>／<code>}</code>／<code>"</code>）——使整檔不合規 → <code>AGENTS.md</code></li>
+</ol>
+<p>信封不看頂層鍵行 <code>:</code> 之後的內容，也不看第一個非忽略行之後的任何縮排行。<strong>已知的保守誤拒</strong>（合法 YAML 1.2、根確為 block mapping、但被信封拒 → <code>AGENTS.md</code>）：compact 序列值（<code>a:</code> 之後第 0 欄的 <code>- x</code>）、<code>?</code> 複合鍵、引號鍵、冒號前有空白的鍵（<code>forge : github</code>）、<code>&lt;&lt;: *x</code>、非 ASCII 鍵、鍵前帶 <code>&amp;</code>／<code>!</code> 屬性、<code>%YAML</code> 指令行、<code>...</code> 收尾、縮排的根 mapping（<code>forge: github</code>）、BOM 開頭。代價一律是 <code>AGENTS.md</code>，方向保守；<code>devflow.yml</code> 沒有理由使用這些寫法
+  - <strong>候選行</strong>：以 <code>implementer_filler:</code> 起始的頂層行（<code>implementer_filler_x:</code> 之類只是前綴相同者不算；縮排的行——含 tab 縮排——不是頂層行，故不是候選行）。須<strong>恰一行</strong>，且整行為：<code>implementer_filler:</code> ＋ 一個以上空格或 tab ＋ <strong>值</strong> ＋〔一個以上空格或 tab ＋ <code>#</code> 至行尾〕（可省）＋ 行尾的空格／tab／<code>\r</code>（可省），此外不得有任何字元；值＝一段不含空格、tab、<code>\r</code>、<code>#</code> 的連續字元，逐 byte 比對、不去引號、不改大小寫。不合規例：<code>:</code> 後無空白（<code>implementer_filler:claude-code</code>）、無值（含只有註解）、值後接其他字元（<code>claude-code extra</code>、<code>claude-code#x</code>）、零行或兩行以上（兩行值相同亦同——重複鍵在 YAML 1.2 是錯誤、寬鬆 parser 取後者，「取第一個」會與其分歧）、值帶引號（<code>"claude-code"</code>）——一律 <code>AGENTS.md</code>
+  - <strong>保證邊界</strong>：信封的目的是——在<strong>符合 YAML 1.2 的檔案</strong>中——通過者的根節點必為 block mapping，且候選行必為該 mapping 的一個直接 entry。理由分三層，<strong>前一層是後一層的前提</strong>：（零）<strong>行模型</strong>：第 1、2 條的推理都以「本條的行 ＝ YAML 的邏輯行」為前提。YAML 能把一行變成多行的手段只有換行字元，集合有限且已知（1.2：CR／LF／CRLF；1.1：再加 NEL／LS／PS）；「行」定義把 LF、CRLF 以外的全部拒絕，於是被接受的檔案裡兩者的行邊界完全一致——<code>forge: github\r--- [</code> 這種在 <code>\n</code> 眼中是一行、在 YAML 眼中是「一個 entry ＋ 一個新 document 的 flow 開頭」的輸入，在此被擋。反方向不存在：<code>\n</code> 在任何 YAML 版本都是換行。其他控制字元（U+000B、U+000C、U+001C–U+001E）在任何 YAML 版本都不是換行、也不是可列印字元（1.2 <code>c-printable</code> 不含，PyYAML 拋 <code>ReaderError</code>），無法製造行邊界，本條<strong>不</strong>拒絕它們——拒絕對 soundness 沒有貢獻；AC-12 反而用它們測實作的切行方式（<code>str.splitlines()</code> 會切它們，<code>\n</code> 切行不會）。（一）根節點的縮排基準是 −1（YAML 1.2.2 §9.1.3 <code>l-bare-document ::= s-l+block-node(-1,block-in)</code>），根 flow node 走 <code>s-l+flow-in-block(-1)</code>＝<code>s-separate(0,flow-out) ns-flow-node(0,flow-out)</code>：開頭前可有任意空白（<code>s-separate-in-line</code>），續行只需 <code>s-indent(0)</code>——所以根 flow／引號 scalar 的<strong>外殼可以縮排、續行合法地落在第 0 欄</strong>（§7.4.2 Example 7.19：第 0 欄的 <code>[</code>、<code>foo: bar</code>、<code>]</code>；外殼縮排一格的變體同樣合法），根 block scalar 的內容也可在第 0 欄（§9.1.3 Example 9.3 的 <code>|</code> 與 <code>%!PS-Adobe-2.0</code>）。這些的共同點是：<strong>它的第一個內容行不是第 0 欄的 <code>裸鍵:</code> 行</strong>——scalar 與 flow node 的開頭是 <code>[</code>、<code>{</code>、引號、<code>|</code>、<code>&gt;</code>、屬性或 plain 文字（plain scalar 不得含 <code>:</code>，§7.3.3），序列開頭是 <code>-</code>。信封第 1 條檢查第一個非忽略行、不論縮排，把它們全部擋下；根定下來是 block mapping 之後，才有第 2 條可言。（二）根 block mapping 從第 0 欄開始（<code>l+block-mapping(-1)</code> 的 entry 在 <code>s-indent(-1+m)</code>、m＝1），其值節點的縮排基準是 0：flow 集合與引號 scalar 的續行需 ≥1 格（§8.2.3 <code>s-l+flow-in-block(0)</code> 把節點置於 n＝1，續行走 §6.1 <code>s-flow-line-prefix(1)</code>＝<code>s-indent(1)</code>）、block scalar 內容需大於父節點縮排即 ≥1 格（§8.1.1.1、§8.1.2 <code>c-l+literal(0)</code> 內容在 n＋m、m≥1）、plain 多行 scalar 續行同需 ≥1 格且不得含 <code>:</code>、implicit key 限單行（§8.2.2）——因此合法檔案的第 0 欄不會出現任何<strong>續行</strong>；第 0 欄能出現的只有下一個 entry、compact 序列項 <code>-</code>（合法但被第 2 條保守拒）、與文件標記 <code>---</code>／<code>...</code>（被第 2 條拒，多 document 一律 <code>AGENTS.md</code>）。<strong>不在保證內</strong>：違反 1.2 縮排規則、但寬鬆 parser（PyYAML 在 flow 與引號 scalar 內不檢查縮排）接受的檔案——例如 <code>x: [</code> 之後把候選行放在第 0 欄、再以<strong>縮排的</strong> <code>]</code> 收尾（第 0 欄的 <code>]</code> 會被信封擋下）：PyYAML 把候選行讀成 list 元素，本規格判 <code>CLAUDE.md</code>。只有無效 YAML 才會踩到；這是「不做 YAML 解析」的代價，本 repo 自己的檔案另由 AC-13 用真 parser 兜底
+  - <strong>advisory</strong>：存在以 <code>seats:</code> 起始的頂層行、而本條讀不到合規的值（信封不成立、候選行缺失、不合規或重複）時，仍建 <code>AGENTS.md</code>、exit code 不變，另在 stderr 印一行 <code>devflow.yml: seats: present but implementer_filler unreadable (missing, malformed, duplicated, or file is not a plain top-level mapping); defaulting to AGENTS.md</code>（<code>--dry-run</code> 同印，AC-10）。這是 AC-13 在無 parser 環境的弱化版：只能偵測「投影缺失或壞掉」，偵測不了「兩處值不同」。讀到合規值時、或無 <code>seats:</code> 頂層行時不印
+- AC-8: 模板行數（含兩標記行）&gt;30 → exit 2，不寫任何檔，stderr 說明模板行數與 <code>D2</code> 上限
+- AC-9: 連續執行兩次，第二次每個目標檔皆走 AC-3；判定：第一次執行後對兩檔各取 bytes 快照，第二次執行後 bytes 與快照相同且 stdout 每檔 <code>unchanged</code>
+- AC-10: <code>--dry-run</code> → 不寫任何檔；exit code 與 stderr 與實際執行相同。exit 0 時對集合內每檔 stdout 印 unified diff（<strong>恰為</strong> <code>difflib.diff_bytes(difflib.unified_diff, old_lines, new_lines, b"a/&lt;檔&gt;", b"b/&lt;檔&gt;")</code> 的輸出逐行 join，不增不減——無尾端換行時<strong>不</strong>加 <code>\ No newline at end of file</code>）或 <code>&lt;路徑&gt;: unchanged</code>；exit 1／2 時 <strong>stdout 全部抑制</strong>（原子性：既然不會寫，也不印「預計」diff）
+- AC-11: 目標路徑不存在、或不是目錄 → exit 2，stderr 說明；不讀模板、不做任何決策
+- AC-12: 測試 harness（位置與執行方式寫進 <code>install.py</code> 檔頭）在 <code>/tmp</code> 建假專案，<strong>每條 AC 的每個分支</strong>至少一案（AC-5：begin 無 end；AC-5b：落單 end 在 begin 前／只有 end／落單 end 在 begin 前且 begin 後也有 end；AC-5c：BOM ＋首行 begin ＋其後有 end（改印 BOM 訊息、行號 <code>1</code>、不寫檔，dry-run 與實跑一致）／首行 begin 前後帶空白（<code>strip()</code> 語意，仍命中）＋界線六案——無 BOM 的真正落單 end（仍印 <code>stray devflow:end before begin</code>、行號為該 end）／無 BOM 的同一內容（＝一組完整區塊 → AC-3 <code>unchanged</code>、exit 0，指出唯一的差別就是那 3 個 byte）／BOM 在但首行不是 begin 且有落單 end（仍印 <code>stray …</code>）／BOM ＋首行是普通文字、全檔無標記行（AC-2 插入、exit 0）／BOM ＋首行 begin 但全檔無 end（AC-2 插入、exit 0）／BOM ＋首行 begin ＋其後另有 begin 而無 end（AC-5，訊息與行號不變）；AC-7：兩檔／只 CLAUDE／只 AGENTS／皆無＋<code>implementer_filler: claude-code</code>（行尾 <code># …</code> 註解、全檔 CRLF、<strong>全檔 CRLF 且含無值頂層鍵</strong>——<code>x:\r\n</code> ＋ 候選行，以及本 repo 實際 <code>devflow.yml</code>（含 <code>seats:</code>、<code>docs:</code>）轉 CRLF 各一——、LF 與 CRLF 混用、末行無換行、首行 <code>---</code>、首行 <code>--- # 註解</code>、與完整 <code>seats:</code> 區塊並存各一）→ <code>CLAUDE.md</code>（CRLF 的 <code>\r</code> 屬行尾；此組抓的是把 <code>\r</code> 當行內容、使 <code>seats:\r</code> 不算鍵行的實作）／皆無＋<code>implementer_filler: codex</code>／皆無＋無 <code>devflow.yml</code>／皆無＋信封成立但值層有非法 YAML（<code>x: [</code> 未閉合、<code>y: "</code> 未閉合、縮排行內任意雜訊）→ <code>CLAUDE.md</code>（信封不看值、不看縮排行）／皆無＋<strong>切行一致性</strong>：<code>forge: github&lt;c&gt;--- [</code> / 候選行 / <code>]</code>，<code>&lt;c&gt;</code> 依序為 U+000B、U+000C、U+001C、U+001D、U+001E <strong>五個碼位各一案</strong> → 皆 <code>CLAUDE.md</code>——這五個是 Python <code>str.splitlines()</code> 在 <code>\n</code>、<code>\r</code>、NEL／LS／PS 之外還會切的<strong>全部</strong>碼位（3.11 全碼位枚舉），在任何 YAML 版本都不是換行；誤用 <code>str.splitlines()</code> 的實作會把 <code>--- [</code> 切成頂層行而得 <code>AGENTS.md</code>，正確以 <code>\n</code> 切行者得 <code>CLAUDE.md</code>。五個都列是為了不讓實作對 VT／FF 與 FS／GS／RS 差別對待；PyYAML 對這些輸入拋 <code>ReaderError</code>（非可列印字元），故此組是純實作一致性測試，不是 YAML 語意測試／皆無＋不合規者每類至少一案、皆須得 <code>AGENTS.md</code>——候選行：<code>implementer_filler:claude-code</code>、無值（<code>implementer_filler:</code>、<code>implementer_filler:  # c</code>）、值後多餘 token（<code>claude-code extra</code>、<code>claude-code#x</code>）、重複（兩值相同、兩值不同各一）、<code>"claude-code"</code> 帶引號、<code>Claude-Code</code> 大小寫、<code>implementer_filler_x: claude-code</code> 前綴相同、空格縮排、tab 縮排；行模型：<strong>bare CR 藏第二 document</strong>（<code>forge: github\r--- [</code> / 候選行 / <code>]</code>——PR #74 第六輪反例）、bare CR 在註解內（<code># c\r--- [</code>）、bare CR 在縮排行內（<code>model: x\r- [</code>）、<code>\r\r\n</code>、檔尾單獨 <code>\r</code>、NEL／LS／PS 各一（<code>forge: github\x85--- [</code> …）；信封第 1 條（根定位）：根 flow sequence（<code>[</code>＋第 0 欄候選行＋<code>]</code>，Example 7.19 形式）、<strong>縮排的根 flow 外殼</strong>（<code>[</code> / <code>seats: {},</code> / 候選行 / <code>]</code>——PR #74 第五輪反例）、縮排 tag＋flow（<code>!!seq [</code> … <code>]</code>）、縮排引號外殼（<code>"</code> / 候選行 / <code>"</code>）、根 flow mapping（<code>{</code>＋候選行＋<code>}</code>）、根多行雙引號與單引號 scalar、根 block scalar（<code>|</code>＋候選行）、<code>--- [</code>＋候選行＋<code>]</code>、<code>--- |</code>、<code>---</code> / <code>[</code> / 候選行 / <code>]</code>（<code>---</code> 例外不放行縮排外殼）、<code>---</code> / <code>---</code> / 候選行、首行 <code>&amp;a</code> 或 <code>!!map</code> 屬性行、首行縮排的根 mapping <code>forge: github</code> ＋ 第 0 欄候選行、<strong>BOM 緊接鍵名</strong>（首行 BOM＋合規候選行——抓誤用 <code>utf-8-sig</code>）、BOM＋<code># 註解</code> 首行、<code>%YAML 1.2</code> 指令行；信封第 2 條（全檔）：第二個 <code>---</code>（候選行在第二個 document）、<code>...</code> 收尾、他行引號鍵 <code>"forge": github</code>、<code>? key</code> 複合鍵、第 0 欄 <code>- item</code>、compact 序列值（<code>a:</code> / <code>- x</code> / 候選行）、<code>x: [</code>＋候選行＋第 0 欄 <code>]</code>（信封擋 <code>]</code>）；其他：無法 UTF-8 解碼、只有 <code>seats.implementer.filler: claude-code</code> 巢狀寫法而無頂層鍵（含 PR #74 第三輪的三個 flow 包裹反例）／advisory：<code>seats:</code> 頂層行存在且讀不到合規值（候選行缺失、信封不成立各一）→ <code>AGENTS.md</code> ＋ stderr 恰一行 advisory、exit 0（dry-run 同）；讀到合規值、或無 <code>seats:</code> 行 → 無 advisory；AC-4：end 在 EOF 無換行；AC-11：不存在／是檔案），可寫性：唯讀既有檔（dry-run 與實跑 exit 皆 2）／目錄不可寫（非 root 前提）；dangling symlink；symlink 指向目錄；AC-10：無尾端換行的 diff 逐 byte 等於 difflib 輸出；含原子性案（一檔可寫、另一檔 exit 1 → 兩檔皆未寫）；可獨立重跑。AC-13 不在本 harness 範圍（它的執行者是 CI，驗證方式見該條）
+- AC-13（<code>I5</code> 投影一致性）: <code>implementer_filler</code> 是 <code>seats.implementer.filler</code> 的<strong>衍生投影</strong>——同一個事實住兩處，<code>I5</code> 要求投影是產物、不手抄、不靠人記得同步。兩者的一致性由<strong>機械檢查</strong>保證：
+  - <strong>執行者與對象</strong>：本 repo 的 CI 檢查器（<code>scripts/devflow_checks.py</code>，已載入 PyYAML）新增一項，key <code>i5</code>；對象是本 repo 根目錄的 <code>devflow.yml</code>；每個 PR 執行，與其他項同一個 job
+  - <strong>判定</strong>：以 PyYAML <code>yaml.compose</code> 取<strong>節點樹</strong>，<strong>不經 <code>safe_load</code>／construct</strong>——construct 會把重複鍵 last-wins 合併、把引號鍵與裸鍵合併、把 <code>&lt;&lt;</code> 展開，被吞掉的正是本條要抓的東西；本檔 CI 檢查器對 frontmatter <code>version</code> 的重複偵測已用同一機制（<code>duplicate_version_key</code>），沿用。<strong>結構要求</strong>（任一不成立 → ❌）：恰一個 document（<code>compose</code> 對多 document 拋錯即 ❌）；沿兩條路徑——根層的 <code>implementer_filler</code>，與 <code>seats</code> → <code>implementer</code> → <code>filler</code>——所經的每一個節點（根、<code>seats</code> 的值、<code>seats.implementer</code> 的值；後兩者若不存在則略過）須為 tag <code>tag:yaml.org,2002:map</code> 的 <code>MappingNode</code>（<code>!!set</code>、<code>!!omap</code>、自訂 tag 一律 ❌）；這三個 mapping 內<strong>每一個 key 都須為 tag <code>tag:yaml.org,2002:str</code> 的 <code>ScalarNode</code></strong>——非字串鍵（<code>true</code>、<code>True</code>、<code>1</code>、<code>~</code>、<code>&lt;&lt;</code> 的 merge tag）與複合鍵一律 ❌；且<strong>任何鍵名都不得重複</strong>——不限路徑上的鍵，以 key <code>.value</code> 比對（引號鍵與裸鍵、Unicode escape、<code>!!str</code> 顯式標籤、alias 指向的 key 一視同仁）。<strong>不做 tag 正規化，邊界如下</strong>：對 <code>!!str</code> 鍵，<code>.value</code> 就是 canonical 值（compose 已消除引號與 escape 差異；PyYAML 自己的 dict 鍵也是這個字串），故 <code>.value</code> 相等 ⇔ 同一鍵，比對精確；正規化只對非字串 tag 有意義（<code>true</code>／<code>True</code> 皆為 bool、<code>1</code>／<code>0x1</code> 皆為 int），而非字串鍵已被前一項整個拒絕，沒有留下需要正規化的鍵。路徑上的四個鍵名皆為 ASCII 字串，不同 tag 的鍵在 YAML 語意下也不可能與它們相等。取 <strong>S</strong>＝<code>seats.implementer.filler</code> 的值節點（任一層鍵不存在 → 無）、<strong>P</strong>＝根層 <code>implementer_filler</code> 的值節點（不存在 → 無）；S、P 存在時須為 tag <code>tag:yaml.org,2002:str</code> 的 <code>ScalarNode</code>（<code>yes</code> 之類被解析為 bool 者 → ❌），取其 <code>.value</code>——alias 值（<code>*f</code>）、引號值（<code>"claude-code"</code>）、顯式標籤值（<code>!!str claude-code</code>）在 compose 後都是合法的 str 節點、P 取得到，但安裝器讀不到（L＝無）→ P≠L → ❌：投影必須寫成安裝器讀得到的裸字面值。<strong>L</strong>＝安裝器依 AC-7 讀到的值（讀不到 → 無）——CI 直接載入 <code>devflow/install.py</code> 呼叫其讀取函式取得，<strong>不得</strong>另寫一份 AC-7 判定（兩份判定就有第三個可漂移的東西）。<strong>通過 ⇔ 結構要求成立，且 S、P、L 三者皆為「無」，或三者皆為字串且逐字相等</strong>。❌ 時 log 印出違反的結構要求、或三者的值。三者缺一不可：S＝P 保證投影沒漂移，P＝L 保證安裝器實際讀到的就是 YAML 語意（AC-7 的信封不是 YAML parser）；結構要求保證「同一事實在檔內只住一處」——<code>"implementer_filler": codex</code> ＋ <code>implementer_filler: claude-code</code> 這種 <code>safe_load</code> 後三者相等的過期投影，正是 <code>I5</code> 違規
+  - <strong>嚴重度</strong>：本項是<strong>關卡</strong>——<code>GATES["i5"]</code> 最終須為 True。<code>devflow-checks</code> 已是 main 的 required status check（README「required 現況」），advisory 只寫 log 不擋合併，等於「靠人記得看」，與「機械保證」矛盾。定義域封閉（單一檔案、兩條固定路徑、真 parser、無散文判讀），符合 README 升關卡的判準；正反兩個 run（見驗證）是上線前的必要程序，不是要不要關卡的裁量。實作單在 <code>scripts/devflow_checks.py</code> 檔頭記錄理由
+  - <strong>為什麼不是 <code>install.py</code> 自檢</strong>：安裝器受 stdlib-only 約束、無法讀巢狀路徑——那正是本條與 AC-7 現行寫法的成因；自檢只能做到 AC-7 的 advisory（偵測「有 <code>seats:</code> 而無合規投影」），偵測不了「兩處值不同」。安裝器也<strong>不得</strong>在 PyYAML 可用時改走解析路徑：兩套解析＝兩種行為，實際跑到的會是比較弱的那套
+  - <strong>為什麼不是 <code>devflow/</code> 下的獨立腳本</strong>：沒有執行者的腳本不是機械檢查；若日後要給消費者 repo 用，可從 CI 檢查器抽出，本檔不定義
+  - <strong>驗證</strong>：依 README 既有程序取正反兩個 run——正向 run 為本 repo 現行設定 ✅；反向 run 的 blob 至少涵蓋：<code>implementer_filler</code> 與 S 不同、<code>implementer_filler</code> 刪除、<strong><code>"implementer_filler": codex</code> ＋ <code>implementer_filler: claude-code</code></strong>（引號鍵＋裸鍵重複，<code>safe_load</code> 後三者相等）、<code>seats:</code> 下兩個 <code>implementer:</code>（巢狀來源重複）、<code>implementer:</code> 下兩個 <code>filler:</code>、<code>seats:</code> 下 <code>true:</code> 與 <code>True:</code> 並存（非字串鍵，不靠正規化）、根層 <code>&lt;&lt;: *x</code> merge 鍵、<code>!!set</code> 標籤的根、<code>implementer_filler: *f</code> alias 值、<code>implementer_filler: "claude-code"</code> 引號值（P≠L）、兩個 document——每一個都須 ❌；兩個 run 的 sha 記錄在實作 PR</p>
+</li>
+</ul>
+<h2 id="_3">未決事項<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>消費者 repo 的投影一致性</strong>（<strong>已決，非未決</strong>，kit-install 0.0.0.1）：安裝器<strong>不建、不改</strong> <code>devflow.yml</code>（kit-install 規格「不做」第一條），故不生成投影、不帶 YAML parser。消費者 repo 的一致性保證只有 AC-7 的 advisory 與 kit-install AC-9 的 advisory（無 <code>devflow.yml</code> 時提示複製模板）；「兩處值不同」在消費者端仍無人攔——這是<strong>刻意的</strong>：<code>devflow.yml</code> 是消費者的檔，安裝器不替人改；消費者要機械保證得自帶 CI（kit-install 規格「不做」第三條：v0.0.0.1 不安裝 CI，另立 issue）。</li>
+<li><strong>BOM 對齊</strong>：安裝器不剝檔首 UTF-8 BOM、CI <code>d2</code> 以 <code>utf-8-sig</code> 讀檔會剝。差異作用在<strong>標記行的辨識</strong>：首行是標記行的檔案加上 BOM 之後，兩邊認到的標記位置不同（CI 認得首行，安裝器不認得）。</li>
+<li><strong>本項不描述「哪些輸入會走哪條 AC」。</strong> 那取決於 BOM、首行標記種類、其餘標記排列三者的組合，是一張多維對照表；本段的散文描述已經寫錯三次（PR #105 兩輪審查各抓到一組反例：<code>BOM ＋begin ＋begin</code>（全檔無 end）走 AC-5 而非 AC-2；<code>BOM ＋begin ＋begin ＋end</code> 走 AC-3／4、exit 0 而非拒絕）。<strong>權威來源是 <code>tests/install/harness.py</code> 的案例集</strong>——要知道某個輸入走哪一路，加一案跑它。</li>
+<li><strong>AC-5c 的觸發條件是合取</strong>，不是一類輸入的描述：命中 AC-5b（落單 end）<strong>且</strong> 檔首為 UTF-8 BOM、去掉該 BOM 後首行 <code>strip()</code> 等於 begin 標記。兩者皆真才改訊息。</li>
+<li><strong>#104 的處置</strong>（<strong>刻意的政策</strong>，不是待補的缺口）：維持差異，只依 AC-5c 改正錯誤訊息——讓命中該合取的使用者看到的原因從「一個不存在的落單 end」換成 BOM。安裝器不剝 BOM、也不替使用者改檔（<code>D2</code>：區塊外是專案的內容）。</li>
+<li><strong>刻意不改的一處</strong>（實測）：合取的前半不成立而走 AC-5（begin without end）時，訊息與行號照 AC-5——去掉 BOM 仍是 AC-5，BOM 不是停下來的原因。</li>
+<li><strong>推論、未實測</strong>：安裝器對 UTF-16／UTF-32 BOM 檔案的整體行為（不在 AC-5c 定義域內）沒有測過；<code>d2</code> 那一側只驗到 <code>entry_block()</code> 函式層，沒有以 BOM 檔跑過真正的 CI job。</li>
+<li><strong>仍然沒做的</strong>：真正的對齊（安裝器改為剝 BOM，或 CI 改為不剝）。#104 只改訊息、隨本單結案，<strong>目前沒有開著的追蹤單</strong>；要做得另開 issue。</li>
+</ul></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../../../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../../../js/base.js"></script>
+        <script src="../../../../search/main.js"></script>
+        <script src="../../../../js/version-select.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>
