@@ -6,7 +6,7 @@
 已含的 commit、已發版本不移動、不刪、不重打（`V5`）。
 
 五個步驟依序跑。每步一個可以整段貼進終端機的區塊，**步驟之間不共用 shell 變數**：每步各自
-重算 `tag` 與 `sha`，所以隔一天再跑、中途換了終端機都不怕；但**重跑時一律從步驟 1 起**——步驟 2 的讀回只斷言 tag 指向 `$sha` 且為 annotated，分支、VERSION 與 tag 名相符這三項只在步驟 1 檢查。每個區塊第一行
+重算 `tag` 與 `sha`，所以隔一天再跑、中途換了終端機都不怕；但**重跑時一律從步驟 1 起**——步驟 2 的讀回只斷言 tag 指向 `$sha`、為 annotated，並比對 VERSION 與 tag 名；分支相符只在步驟 1 檢查。每個區塊第一行
 就切到 repo 根，從 repo 內哪個目錄起跑都一樣。
 
 `V5` 在 GitHub 端有機械保證：tag ruleset `23780350` 擋掉對 `refs/tags/v*` 的移動與刪除。
@@ -24,8 +24,12 @@ cd "$(git rev-parse --show-toplevel)"
 tag="v$(cat devflow/VERSION)"
 fail() { echo "💥 $1"; exit 1; }
 
-# (1) 工作樹乾淨：要發的是 main 上那份內容，不是本機還沒進 main 的東西
-[ -z "$(git status --porcelain)" ] || fail "工作樹不乾淨（git status --porcelain 有輸出）"
+# (1) 工作樹乾淨：要發的是 main 上那份內容，不是本機還沒進 main 的東西。
+#     先把輸出接進變數再判：`[ -z "$(cmd)" ]` 在 cmd 自己失敗時輸出也是空的，而 set -e
+#     不攔條件位置的命令替換——工具壞掉會被讀成「乾淨」而放行（fail-open）。
+dirty="$(git status --porcelain)" \
+  || fail "git status --porcelain 跑不起來，無從判斷工作樹是否乾淨"
+[ -z "$dirty" ] || fail "工作樹不乾淨（git status --porcelain 有輸出）"
 
 # (2) 在 main，且與 origin/main 同 sha（V5：tag 只打在 main 已含的 commit）
 git fetch --quiet origin main
@@ -41,9 +45,11 @@ printf '%s' "${tag#v}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
 [ "$tag" = "v$(git show "$sha:devflow/VERSION")" ] \
   || fail "工作樹的 devflow/VERSION 與 origin/main 上的不同，tag 名會標到錯的版本"
 
-# (4) 該 tag 尚不存在於遠端（V5：已發版本不重打）
-[ -z "$(git ls-remote origin "refs/tags/$tag")" ] \
-  || fail "$tag 已存在於遠端；已發版本不移動、不刪、不重打，修正走下一版"
+# (4) 該 tag 尚不存在於遠端（V5：已發版本不重打）。同 (1)：ls-remote 連不上遠端時
+#     輸出一樣是空的，不先接進變數就會被讀成「遠端還沒有這個 tag」。
+remote_tag="$(git ls-remote origin "refs/tags/$tag")" \
+  || fail "git ls-remote 連不上遠端，無從判斷 $tag 是否已存在"
+[ -z "$remote_tag" ] || fail "$tag 已存在於遠端；已發版本不移動、不刪、不重打，修正走下一版"
 
 echo "✅ 前置檢查四項通過：要發 $tag，指向 origin/main $sha"
 ```
@@ -60,6 +66,12 @@ cd "$(git rev-parse --show-toplevel)"
 tag="v$(cat devflow/VERSION)"
 git fetch --quiet origin main
 sha="$(git rev-parse origin/main)"
+
+# 打之前再比一次 VERSION 與 tag 名：步驟 1 比的是當時的 origin/main，main 在兩步之間
+# 前進（別人合了一張也動 devflow/VERSION 的 PR）時，這裡的 $sha 已經換人，tag 名會標
+# 到一個 VERSION 不是它的 commit 上（V4）。這是本步驟唯一「往回看步驟 1」的檢查。
+[ "$tag" = "v$(git show "$sha:devflow/VERSION")" ] \
+  || { echo "💥 $tag 與 origin/main $sha 的 devflow/VERSION 不一致；main 在步驟 1 之後前進了，從步驟 1 重跑"; exit 1; }
 
 # 訊息一行就夠：本版帶進來的變更逐條住 README 事實表與各 PR，tag 訊息不重述（I5）
 git tag -a "$tag" "$sha" -m "kit $tag"
@@ -172,7 +184,12 @@ echo "✅ $tag 可從 tag 重裝：install.py --dry-run 對 $consumer exit 0（�
 - 對已發 tag 做任何移動——改指另一個 commit、或先刪再建，兩者都是移動。
 
 需要修正時發**下一版**：改內容 → 進位 `devflow/VERSION`（`V7`）→ 走一次本程序。
-tag ruleset `23780350` 只擋**移動與刪除**（第一、二、四條會在 GitHub 端得到 `GH013`，連 admin 也不能繞）；
+tag ruleset `23780350` 擋的是對**已發 tag** 的**遠端**刪除或移動——`git push origin :refs/tags/v*`（刪）
+與 `git push --force <commit>:refs/tags/v*`（移動）會在 GitHub 端得到 `GH013`，連 admin 也不能繞；
+四個驗證案例（含「建新 tag 仍可」）見 `forges/github.md` 的「tag 保護」格。
+上面四條裡只有第四條、以及第一條打在**已存在**的 `v*` 上時走得到這條保護：`--force` 推一個
+**尚不存在**的 tag 是建立，ruleset 不管；第二條先刪本機 tag 再重打同名，推的時候本機 git 就以
+「tag 已存在於遠端」拒送，根本沒送到 GitHub 端。
 **建立新 tag 不受 ruleset 管**，所以第三條 `git push --tags` 只能靠本程序擋——而且推錯的 tag 因同一個 ruleset 刪不掉，只能燒版號。
 規則先於機械保證：不要為了繞過去而改 ruleset。
 

@@ -104,7 +104,9 @@ jobs:
       # 不要套「準備檢查器相依」那個 EXIT 守衛——那一步把任何非零一律收成 2，
       # 意思是「檢查器無法執行」＝環境問題；把內容問題也收成 2，就等於把這兩項
       # 從關卡降成雜訊，而且和 runner 壞掉撞同一個號碼（見 scripts/devflow_checks.py
-      # 檔頭「exit code 的分類守則」）。
+      # 檔頭「exit code 的分類守則」）。兩支測試自己分得出來（issue #173 R1-5）：
+      # 未預期例外由各自的 sys.excepthook 收成 2，內容違規仍是 1——這裡不套守衛，
+      # 1 才傳得出來。
       #
       # 第一行的 fetch 不能省：README 的 Phase 1 判定表引了負向取證用的 probe commit
       # （PR #42 的 11d0fba），那條分支已刪、PR 已關不合併，物件只活在 refs/pull/42/head。

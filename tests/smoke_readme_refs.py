@@ -6,7 +6,7 @@
 
     python3 tests/smoke_readme_refs.py
 
-只用標準庫，exit 0（全部存在）／1（有缺）。
+只用標準庫，exit 0（全部存在）／1（有缺）／2（跑不起來）。
 
 為什麼有這個檔：README 的事實表與「Phase 1 第三出口的判定方式」把證據記成 7 位 hex
 （「證據欄只記能用 gh／git 讀回的識別碼」）。這些 hash 打錯一個字元、或指向一個後來
@@ -20,16 +20,36 @@
 **排除 code fence 內的行**：fence 裡是範例與佈局圖，裡面的 hash 不是本 repo 的證據。
 
 不斷言「恰 N 個」：README 每加一筆證據就會多一個 hash，把數字寫死只會讓無關的 PR 變紅。
-數量印在輸出裡供人核對（本檔寫成時是 25 個唯一值）。
+數量印在輸出裡供人核對（本檔寫成時是 25 個唯一值，收窄誤抓面後是 24 個）。
 """
 import re
 import subprocess
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 README = REPO / "README.md"
+
+
+# ── exit code：0 全部存在／1 有缺／2 跑不起來（issue #173 R1-5） ────────────────
+# 和 scripts/devflow_checks.py 檔頭同一套守則：1 只有一個意思——被檢查的**內容**違規
+# （README 引了不存在的 hash）；2 是「這支測試本身跑不起來」。Python 對未攔截的例外
+# 預設以 1 結束，會和內容違規撞號，而這兩件事的處置相反：前者改 README，後者修環境。
+# SystemExit 不經 hook，所以 main() 的 return 0／1 不受影響。
+def _uncaught(exc_type, exc, tb):
+    try:
+        sys.stdout.flush()
+        traceback.print_exception(exc_type, exc, tb)
+        print("💥 README 引用檢查無法執行：未預期的 %s: %s（未分類的例外一律 exit 2，不是內容違規）"
+              % (exc_type.__name__, exc))
+        sys.stdout.flush()
+    finally:
+        sys.exit(2)               # 連印訊息都失敗也要是 2，不能退回 Python 預設的 1
+
+
+sys.excepthook = _uncaught
 
 # 反引號包住的 7 位小寫 hex。前後要是反引號，所以 `8029dfa12092…`（全長 sha）不會被切成 7 碼。
 HEX_RE = re.compile(r"`([0-9a-f]{7})`")
@@ -40,9 +60,26 @@ HINT = ("若缺的是 PR 的 probe commit，先 "
         "git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*'")
 
 
+def looks_like_sha(h):
+    """7 位 hex 字面上是不是一個短 sha。
+
+    收窄誤抓面（issue #173 R1-6）：`[0-9a-f]{7}` 同時吃下兩種不是 sha 的東西——7 位
+    純數字的 id（run id、留言 id 的片段）與 7 個字母剛好都落在 a-f 的英文字（`defaced`、
+    `acceded`）。判準是「至少一個數字，且至少一個 a-f 字母」；`11d0fba`（README 引的
+    PR #42 probe commit）兩邊都有，仍在射程內——它是這條判準的反向要求。
+
+    代價寫在這裡，不藏著：真的短 sha 也可能剛好全是數字，README:79 的 `6717944`
+    （PR #151 的 merge commit）就是，本判準之後它不再被檢查。字面上分不出它和一個
+    7 位 id，正如分不出「別的 repo 的短 sha」（issue #173「不做」段同一個理由）。
+    被略過的候選會印在輸出裡，讓這個代價看得見，而不是默默消失。"""
+    return any(c.isdigit() for c in h) and any(c in "abcdef" for c in h)
+
+
 def extract(text):
-    """回傳 {hex: [行號, …]}，跳過 code fence 內的行。"""
-    found = {}
+    """回傳 (found, skipped)：兩者都是 {hex: [行號, …]}，跳過 code fence 內的行。
+
+    skipped 是「長得像 hex、但不像短 sha」的那些——只印出來供人核對，不進判定。"""
+    found, skipped = {}, {}
     in_fence = False
     for n, line in enumerate(text.split("\n"), 1):
         if line.strip().startswith("```"):
@@ -51,8 +88,9 @@ def extract(text):
         if in_fence:
             continue
         for m in HEX_RE.finditer(line):
-            found.setdefault(m.group(1), []).append(n)
-    return found
+            bucket = found if looks_like_sha(m.group(1)) else skipped
+            bucket.setdefault(m.group(1), []).append(n)
+    return found, skipped
 
 
 def git(args):
@@ -63,17 +101,17 @@ def git(args):
 
 
 def check(text):
-    """回傳 (found, missing)：found 是 {hex: [行號]}，missing 是缺的 [(hex, [行號])]。
+    """回傳 (found, missing, skipped)：found 是 {hex: [行號]}，missing 是缺的 [(hex, [行號])]。
 
     正負案例共用這一個函式：負向案例餵的是暫存目錄裡的突變副本，不另外 subprocess
     自己，正反兩邊跑的才保證是同一套判準。"""
-    found = extract(text)
+    found, skipped = extract(text)
     missing = [(h, lines) for h, lines in sorted(found.items())
                if git(["cat-file", "-e", h])[0] != 0]
-    return found, missing
+    return found, missing, skipped
 
 
-def report(label, found, missing):
+def report(label, found, missing, skipped):
     """印出這一輪的明細；回傳 True＝全部存在。"""
     for h, lines in sorted(found.items()):
         where = "、".join("%s:%d" % (label, n) for n in lines)
@@ -81,7 +119,17 @@ def report(label, found, missing):
             print("        ✗ %s  缺（%s）" % (h, where))
         else:
             print("        · %s  %-6s %s" % (h, git(["cat-file", "-t", h])[1], where))
+    for h, lines in sorted(skipped.items()):
+        print("        ~ %s  略過   %s（全數字或全字母，不當短 sha 看；見 looks_like_sha）"
+              % (h, "、".join("%s:%d" % (label, n) for n in lines)))
     return not missing
+
+
+# 探針：四種形狀各一個，名字說明它是哪一面。
+PROBE_MISSING = "deadb33"      # 合短 sha 形狀（有數字也有 a-f 字母），repo 裡不存在
+PROBE_NUMERIC = "1234567"      # 7 位純數字：run id／留言 id 的形狀
+PROBE_ALPHA = "defaced"        # 7 個字母剛好都落在 a-f 的英文字
+PROBE_REAL = "11d0fba"         # 真的短 sha（PR #42 的 probe commit，只在 refs/pull/42/head）
 
 
 def main():
@@ -94,44 +142,50 @@ def main():
     text = README.read_text(encoding="utf-8")
 
     # 正向：真的那一份 README
-    found, missing = check(text)
+    found, missing, skipped = check(text)
     good = not missing
-    print("正向  %-34s 應過    %d 個唯一 hex、%d 個缺（期望 0）  %s"
-          % (label, len(found), len(missing), "PASS" if good else "FAIL"))
-    report(label, found, missing)
+    print("正向  %-34s 應過    %d 個唯一 hex、%d 個缺（期望 0）、略過 %d 個  %s"
+          % (label, len(found), len(missing), len(skipped), "PASS" if good else "FAIL"))
+    report(label, found, missing, skipped)
     if not good:
         failures.append("%s：%d 個 hex 在 repo 裡找不到（%s）"
                         % (label, len(missing), "、".join(h for h, _ in missing)))
     print()
 
-    # 負向與「fence 內不該被抓」的反向保證：突變副本放進暫存目錄，讀回來餵同一個 check()
-    fake = "deadbee"
+    # 負向、誤抓面與反向保證：突變副本放進暫存目錄，讀回來餵同一個 check()。
+    # (名稱, 文字, 探針, 期望抓到, 期望缺)
     with tempfile.TemporaryDirectory() as tmp:
         cases = [
             ("散文裡塞一個不存在的 hex",
-             text + "\n\n假的證據：`%s`。\n" % fake,
-             True),
-            ("同一個 hex 放進 code fence 內（不該被抓）",
-             text + "\n\n```\n假的證據：`%s`。\n```\n" % fake,
-             False),
+             text + "\n\n假的證據：`%s`。\n" % PROBE_MISSING, PROBE_MISSING, True, True),
+            ("同一個 hex 放進 code fence 內",
+             text + "\n\n```\n假的證據：`%s`。\n```\n" % PROBE_MISSING, PROBE_MISSING, False, False),
+            ("散文裡塞一個 7 位純數字 id",
+             text + "\n\n那個 run 是 `%s`。\n" % PROBE_NUMERIC, PROBE_NUMERIC, False, False),
+            ("散文裡塞一個 7 個 a-f 字母的英文字",
+             text + "\n\n那句話被 `%s` 了。\n" % PROBE_ALPHA, PROBE_ALPHA, False, False),
+            ("真的短 sha 仍要被抓到且判為存在",
+             "證據：`%s`。\n" % PROBE_REAL, PROBE_REAL, True, False),
         ]
-        for n, (name, mutated, want_fail) in enumerate(cases):
+        for n, (name, mutated, probe, want_caught, want_missing) in enumerate(cases):
             path = Path(tmp) / ("mutant-%02d.md" % n)
             path.write_text(mutated, encoding="utf-8")
-            mfound, mmissing = check(path.read_text(encoding="utf-8"))
-            caught = fake in mfound
-            failed = bool(mmissing)
-            good = (failed == want_fail) and (caught == want_fail)
-            print("%s  %-34s %s  抓到 %s＝%s、缺 %d 個  %s"
-                  % ("負向" if want_fail else "正向", name,
-                     "應擋" if want_fail else "應過", fake, caught, len(mmissing),
+            mfound, mmissing, mskipped = check(path.read_text(encoding="utf-8"))
+            caught = probe in mfound
+            missed = any(h == probe for h, _ in mmissing)
+            good = (caught == want_caught) and (missed == want_missing)
+            print("%s  %-34s %s  抓到 %s＝%s（期望 %s）、判缺＝%s（期望 %s）  %s"
+                  % ("負向" if want_missing else "正向", name,
+                     "應擋" if want_missing else "應過",
+                     probe, caught, want_caught, missed, want_missing,
                      "PASS" if good else "FAIL"))
             for h, _ in mmissing:
                 print("        ✗ %s" % h)
+            for h in sorted(mskipped):
+                print("        ~ %s 略過" % h)
             if not good:
-                failures.append("%s：抓到=%s、缺 %d 個，期望%s"
-                                % (name, caught, len(mmissing),
-                                   "抓到且缺" if want_fail else "不抓也不缺"))
+                failures.append("%s：抓到=%s（期望 %s）、判缺=%s（期望 %s）"
+                                % (name, caught, want_caught, missed, want_missing))
             print()
 
     print("=" * 60)
@@ -141,8 +195,8 @@ def main():
             print("  - %s" % f)
         print("  提示：%s" % HINT)
         return 1
-    print("README 引用檢查通過：%d 個唯一 hex 全部存在於 repo（不 peel，型別不限）"
-          % len(found))
+    print("README 引用檢查通過：%d 個唯一 hex 全部存在於 repo（不 peel，型別不限）；"
+          "另略過 %d 個不像短 sha 的候選" % (len(found), len(skipped)))
     return 0
 
 
