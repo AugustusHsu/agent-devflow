@@ -7,7 +7,7 @@
 ## 基準
 
 - 治理基準 G：`devflow/WORKFLOW.md @ <commit sha>`
-- 開發目標 T：`docs/spec/<feature>/spec.md @ <commit sha>`（version <a.b.c.d>）
+- 開發目標 T：`docs/spec/<feature>/spec.md @ <commit sha>`（version <a.b.c.d>）；或本 issue 留言 <留言 id>（治理／流程類，`G2`）
 
 ## 平行前提（P1；stage < 3 時仍要填，供之後判斷）
 
@@ -22,9 +22,10 @@
 <測試或檢查指令；審查者也會跑>
 ```
 
-## 派工紀錄（orchestrator 派工後補）
+## 派工紀錄（讀審結束與派工後補）
 
-<留言 URL；或「本單無派工」>
+- 派工前讀審（`L7`）：讀審結束即填；進行中可記各輪 URL，派工當下該行末項（最後一個 `→` 之後；無 `→` 時為冒號之後整段；不含括號註解）必為三值之一：`READY <URL>`、`人裁決 <URL>`、`未觸發 a／b 皆否`
+- 派工：<留言 URL；或「本單無派工」>
 
 ## 審查處置（每輪 `REQUEST_CHANGES` 後補；`R11`）
 
