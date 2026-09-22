@@ -200,4 +200,4 @@ gh issue view <N> --json state --jq .state
 - `ps | grep 'claude -p'` 對多行 prompt 不可靠——用 `pstree -p`／`/proc/<pid>/cmdline`（`hermes.md` 「派工（`L2`）」格）。
 - `systemctl --user is-active <unit>.scope` 對從未存在的 unit 也回 `inactive`——先證 scope 曾 `active`（`hermes.md` 「中斷交接」格）。
 - 對照表引用行號會漂移——引用格用「面向」名稱，不用 `file:line`。
-- Codex 配額耗盡：`codex exec` 以 `turn.failed` 收尾（稍早一則同句 `error`，為倒數第三則）、exit 1、`-o` 不寫，恢復點只在訊息的 `try again at …`（`coders/codex.md` 「配額中斷」格，`📝`、兩次觀測）。配額綁帳號（訊息把恢復點與購買額度都指向 `chatgpt.com/codex/settings/usage`，非 thread 層級），換 context 不會繞過。日上限（訊息給當日時刻）：依第六節 sleep 到恢復再派；週上限（訊息帶日期）：不等——審查位由仍可用的那家以全新 context 填（`R2` 後半）；被擋的是 implementer 位時 `R2` 不適用，改派異廠或依第六節等恢復。
+- Codex 配額耗盡：`codex exec` 以 `turn.failed` 收尾（稍早一則同句 `error`；三次觀測中為倒數第三則兩次、倒數第二則一次，差別在其後有無一則 `item.completed`）、exit 1、`-o` 不寫，恢復點只在訊息的 `try again at …`（`coders/codex.md` 「配額中斷」格，`📝`、三次觀測）。配額綁帳號（訊息把恢復點與購買額度都指向 `chatgpt.com/codex/settings/usage`，非 thread 層級），換 context 不會繞過。日上限（訊息給當日時刻）：依第六節 sleep 到恢復再派；週上限（訊息帶日期）：不等——審查位依 `R2` 後半處理（只有一家可用時，用同廠的全新 context）；被擋的是 implementer 位時 `R2` 不適用，改派異廠或依第六節等恢復。
