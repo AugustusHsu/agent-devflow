@@ -182,10 +182,10 @@ gh issue view <N> --json state --jq .state
 
 ## 六、無人值守
 
-- 事先授權由人寫進 issue 或授權檔，逐項列：`APPROVE` 即按合併（仍依 `M1`、`M2`）、輪次上限（第三節）、停止條件、Codex 額度撞到時 sleep 到恢復再派。
+- 事先授權由人寫進 issue 或授權檔，逐項列：`APPROVE` 即按合併（仍依 `M1`、`M2`）、輪次上限（第三節）、停止條件、Codex 額度撞到時 sleep 到恢復再派（日上限；週上限依第七節「Codex 配額耗盡」）。
 - 每步邊界（派工、撞 turns、verdict、合併、收尾）在 issue 留狀態（`L3`）。
 - forge 回錯或逾時依 `F3`。
-- Codex 額度撞到：一次性 cron 於恢復時間重派＋watchdog 每 3 分鐘看 verdict 檔。Claude 額度撞到：Hermes 自身靜默，人隔日看 issue 接手。
+- Codex 額度撞到（日上限）：一次性 cron 於恢復時間重派＋watchdog 每 3 分鐘看 verdict 檔；週上限依第七節「Codex 配額耗盡」。Claude 額度撞到：Hermes 自身靜默，人隔日看 issue 接手。
 - 全用 Hermes 追蹤的 background 進程（`terminal(background=true)` ＋ `systemd-run --scope`）；不用 `setsid`——會無聲死亡且無法讀回。
 
 ## 七、已知陷阱
@@ -200,3 +200,4 @@ gh issue view <N> --json state --jq .state
 - `ps | grep 'claude -p'` 對多行 prompt 不可靠——用 `pstree -p`／`/proc/<pid>/cmdline`（`hermes.md` 「派工（`L2`）」格）。
 - `systemctl --user is-active <unit>.scope` 對從未存在的 unit 也回 `inactive`——先證 scope 曾 `active`（`hermes.md` 「中斷交接」格）。
 - 對照表引用行號會漂移——引用格用「面向」名稱，不用 `file:line`。
+- Codex 配額耗盡：`codex exec` 以 `turn.failed` 收尾（稍早一則同句 `error`，為倒數第三則）、exit 1、`-o` 不寫，恢復點只在訊息的 `try again at …`（`coders/codex.md` 「配額中斷」格，`📝`、兩次觀測）。配額綁帳號（訊息把恢復點與購買額度都指向 `chatgpt.com/codex/settings/usage`，非 thread 層級），換 context 不會繞過。日上限（訊息給當日時刻）：依第六節 sleep 到恢復再派；週上限（訊息帶日期）：不等——審查位由仍可用的那家以全新 context 填（`R2` 後半）；被擋的是 implementer 位時 `R2` 不適用，改派異廠或依第六節等恢復。
