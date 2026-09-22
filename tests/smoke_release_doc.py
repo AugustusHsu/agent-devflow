@@ -41,6 +41,11 @@ DOC = REPO / "devflow" / "RELEASING.md"
 # （發版程序被改壞）；2 是「這支測試本身跑不起來」。Python 對未攔截的例外預設以 1 結束，
 # 會和內容違規撞號，讀 CI 的人分不出「文件寫錯」與「測試壞了」，而這兩件事的處置相反。
 # SystemExit 不經 hook，所以 main() 的 return 0／1 不受影響。
+#
+# 邊界（issue #173 審查 R1 BLOCK 2）：突變工具在文件上定位不到目標，**不**走這個 hook。
+# 那代表文件已偏離預期形狀，是內容的問題，由 main() 記成一條 failure → 1（見
+# MutationTargetMissing）。否則「把步驟 1 的檢查從 `|| fail` 降成 `|| echo`」——正是本檔要擋的
+# 那個洞——會紅在 2，和 runner 壞掉撞號。
 def _uncaught(exc_type, exc, tb):
     try:
         sys.stdout.flush()
@@ -291,20 +296,37 @@ def check(text, label):
 
 # ── 突變工具：都以 parse() 定位，不寫死文件的字面內容 ────────────────────────
 
+class MutationTargetMissing(Exception):
+    """突變工具在目標文件上定位不到要改的東西。
+
+    這不是「測試跑不起來」，而是**內容**已偏離預期形狀：文件被改成某個樣子之後，
+    某條負向案例想再改壞的那個位置已經不存在了（例如 `|| fail` 早就被降成 `|| echo`）。
+    由 main() 記成一條 failure、走既有失敗路徑 → exit 1，不讓 excepthook 收成 2
+    （issue #173 審查 R1 BLOCK 2）。"""
+
+
+def step_line(text, step):
+    """步驟 step 標題行的 0-indexed 行號。"""
+    _, steps, _, _ = parse(text)
+    idx = {n: ln - 1 for n, ln, _ in steps}
+    if step not in idx:
+        raise MutationTargetMissing(
+            "突變找不到步驟 %d 的標題行——文件已偏離預期形狀" % step)
+    return idx[step]
+
+
 def swap_headings(text, a, b):
     """對調兩個步驟的標題行（順序壞掉，內容不動）。"""
     lines = text.split("\n")
-    _, steps, _, _ = parse(text)
-    idx = {n: ln - 1 for n, ln, _ in steps}
-    lines[idx[a]], lines[idx[b]] = lines[idx[b]], lines[idx[a]]
+    ia, ib = step_line(text, a), step_line(text, b)
+    lines[ia], lines[ib] = lines[ib], lines[ia]
     return "\n".join(lines)
 
 
 def break_heading(text, step):
     """把 `## N.` 改成 `## N)`：看起來像步驟標題，解析器不認。"""
     lines = text.split("\n")
-    _, steps, _, _ = parse(text)
-    i = {n: ln - 1 for n, ln, _ in steps}[step]
+    i = step_line(text, step)
     lines[i] = lines[i].replace("%d." % step, "%d)" % step, 1)
     return "\n".join(lines)
 
@@ -321,7 +343,8 @@ def retag_fence(text, step, lang):
 def block_by_step(fences, step):
     own = [b for b in bash_blocks(fences) if b.step == step]
     if not own:
-        raise AssertionError("突變找不到步驟 %d 的 bash 區塊" % step)
+        raise MutationTargetMissing(
+            "突變找不到步驟 %d 的 bash 區塊——文件已偏離預期形狀" % step)
     return own[0]
 
 
@@ -338,7 +361,8 @@ def edit_block_line(text, step, needle, transform):
             else:
                 lines[i] = new
             return "\n".join(lines)
-    raise AssertionError("突變找不到目標行：步驟 %d 的區塊裡沒有含 %r 的行" % (step, needle))
+    raise MutationTargetMissing(
+        "突變找不到步驟 %d 的區塊裡含 %r 的行——文件已偏離預期形狀" % (step, needle))
 
 
 def find_checks(text, step, needle):
@@ -352,7 +376,9 @@ def find_checks(text, step, needle):
     hits = [(blk, idx) for idx, txt in statements(blk.body)
             if needle in txt and FAIL_TAIL_RE.search(txt)]
     if not hits:
-        raise AssertionError("突變找不到步驟 %d 裡含 %r 的 `|| fail` 檢查" % (step, needle))
+        raise MutationTargetMissing(
+            "突變找不到步驟 %d 裡含 %r 的 `|| fail` 檢查——文件已偏離預期形狀"
+            % (step, needle))
     return hits
 
 
@@ -522,8 +548,16 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         # 正向突變：合法的改法不准被擋
         for n, (name, mutate) in enumerate(POSITIVE):
+            try:
+                mutated = mutate(text)
+            except MutationTargetMissing as exc:
+                print("正向突變 %-27s 應過    突變套不上去  FAIL" % name)
+                print("          %s" % exc)
+                failures.append("%s：突變套不上去——%s" % (name, exc))
+                print()
+                continue
             path = Path(tmp) / ("positive-%02d.md" % n)
-            path.write_text(mutate(text), encoding="utf-8")
+            path.write_text(mutated, encoding="utf-8")
             fails = check(path.read_text(encoding="utf-8"), str(path))
             good = not fails
             print("正向突變 %-27s 應過    %d 條失敗（期望 0）  %s"
@@ -535,8 +569,18 @@ def main():
 
         # 負向：突變後的副本放進暫存目錄，讀回來餵同一個 check()
         for n, (name, mutate, expect) in enumerate(NEGATIVE):
+            # 定位不到要改壞的位置＝文件已偏離預期形狀。記成一條 failure（exit 1），
+            # 不讓它冒成未攔截的例外被 excepthook 收成 2（issue #173 審查 R1 BLOCK 2）。
+            try:
+                mutated = mutate(text)
+            except MutationTargetMissing as exc:
+                print("負向  %-30s 應擋    突變套不上去  FAIL" % name)
+                print("          %s" % exc)
+                failures.append("%s：突變套不上去——%s" % (name, exc))
+                print()
+                continue
             path = Path(tmp) / ("mutant-%02d.md" % n)
-            path.write_text(mutate(text), encoding="utf-8")
+            path.write_text(mutated, encoding="utf-8")
             fails = check(path.read_text(encoding="utf-8"), str(path))
             fired = {aid for aid, _ in fails}
             good = bool(fails) and fired == expect
