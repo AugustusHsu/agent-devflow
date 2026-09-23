@@ -134,8 +134,10 @@ PROBE_REAL = "11d0fba"         # 真的短 sha（PR #42 的 probe commit，只�
 
 def main():
     if not README.exists():
-        print("💥 找不到 %s" % README)
-        return 1
+        # 讀不到受版控的檔＝這支檢查跑不起來，不是 README 引錯 hash：和 scripts/devflow_checks.py
+        # 「工作樹讀不到受版控檔 → 2」同一套守則，處置也相反（修環境，不是改 README）。
+        print("💥 找不到 %s（repo 佈局與本檔假設不符；exit 2，不是內容違規）" % README)
+        return 2
 
     failures = []
     label = "README.md"

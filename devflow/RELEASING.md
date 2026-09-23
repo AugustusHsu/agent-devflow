@@ -36,7 +36,7 @@ git fetch --quiet origin main
 branch="$(git rev-parse --abbrev-ref HEAD)"
 [ "$branch" = "main" ] || fail "不在 main，目前在 $branch"
 sha="$(git rev-parse origin/main)"
-[ "$(git rev-parse HEAD)" = "$sha" ] \
+[ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] \
   || fail "HEAD $(git rev-parse HEAD) 與 origin/main $sha 不同；先把該進 main 的都合進去再發"
 
 # (3) devflow/VERSION 的值與將打的 tag 名一致（V4）
@@ -106,7 +106,7 @@ echo "✅ 已推 $tag → $remote；docs.yml 應已被 tag push 觸發，接步�
 
 ## 4. 確認 docs workflow
 
-等該 tag 的 run 跑成功，再從**站上**讀回 `versions.json`——run 綠只代表 workflow 沒報錯，
+等該 tag 的 run 跑成功，再從**站上**讀回 `versions.json`——run 綠只代表 workflow 沒報錯，站上內容還要等 GitHub 自己的 `pages build and deployment` run（mike 推 `gh-pages` 觸發；首發實測相隔約 25 秒），所以讀回是輪詢、不是讀一次；
 站上真的多一個版本要自己讀。本 tag 是已建版本中最高版時，`latest` 必須掛在它身上；
 回填舊 tag 時 `latest` 本來就不會動，所以只在最高版時檢查這一項。
 
@@ -128,7 +128,14 @@ gh run watch "$run" --exit-status
 # 站上讀回：versions.json 要含本 tag；本 tag 是最高版時 latest 要指向它
 vj="$(mktemp)"
 trap 'rm -f "$vj"' EXIT
-curl -fsS "https://${repo%%/*}.github.io/${repo##*/}/versions.json" -o "$vj"
+# docs.yml 綠 ≠ 站上已更新：mike 推 gh-pages 之後還有 GitHub 的 pages build and deployment run
+# （首發實測相隔約 25 秒）。輪詢到 versions.json 含本 tag 為止，上限 12 次、間隔 10 秒（約 2 分鐘）；逾時 fail-closed。
+url="https://${repo%%/*}.github.io/${repo##*/}/versions.json"
+for i in $(seq 1 12); do
+  curl -fsS "$url" -o "$vj" && grep -q "\"$tag\"" "$vj" && break
+  [ "$i" -lt 12 ] || { echo "💥 輪詢 12 次（約 2 分鐘）後站上 versions.json 仍無 $tag；見「失敗處置」"; exit 1; }
+  sleep 10
+done
 TAG="$tag" python3 - "$vj" <<'PY'
 import json, os, re, sys
 vs = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -189,7 +196,7 @@ tag ruleset `23780350` 擋的是對**已發 tag** 的**遠端**刪除或移動�
 四個驗證案例（含「建新 tag 仍可」）見 `forges/github.md` 的「tag 保護」格。
 上面四條裡只有第四條、以及第一條打在**已存在**的 `v*` 上時走得到這條保護：`--force` 推一個
 **尚不存在**的 tag 是建立，ruleset 不管；第二條先刪本機 tag 再重打同名，推的時候本機 git 就以
-「tag 已存在於遠端」拒送，根本沒送到 GitHub 端。
+「tag 已存在於遠端」拒送，根本沒送到 GitHub 端——不帶 force 時如此；帶 `--force` 本機不擋、送得出去，到 GitHub 端就是第一條的移動，同樣被 ruleset 擋下。
 **建立新 tag 不受 ruleset 管**，所以第三條 `git push --tags` 只能靠本程序擋——而且推錯的 tag 因同一個 ruleset 刪不掉，只能燒版號。
 規則先於機械保證：不要為了繞過去而改 ruleset。
 
@@ -203,5 +210,8 @@ tag ruleset `23780350` 擋的是對**已發 tag** 的**遠端**刪除或移動�
   是不是忘了進位（`V7` 由 CI 的 `v7` 關卡擋在 PR 階段），補進位後走下一版，不重發同名。
 - **步驟 2 打錯位置，但還沒跑步驟 3**：這個 tag 還沒推出去、還不是「已發版本」，
   移除本機那個同名 tag 之後重跑步驟 2 即可。一旦跑過步驟 3 就不適用，改走下一版。
+- **步驟 4 docs run 已綠、站上 `versions.json` 輪詢逾時**：tag 與站的 workflow 都沒錯，是 GitHub 的
+  `pages build and deployment` run 還沒完成或失敗了。到 repo 的 Actions 頁看該 run：仍在跑就等它綠後
+  從步驟 4 重跑；失敗則修 Pages 設定（不動 tag、不動 docs.yml 的產物），修好後同樣從步驟 4 重跑。
 - **步驟 5 裝不起來**：tag 已經發出去了，不回收。開 issue 修安裝器，走下一版；
   同時在 README 事實表記下該版的已知問題。
