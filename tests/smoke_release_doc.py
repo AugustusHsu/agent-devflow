@@ -103,16 +103,27 @@ PRECHECK_NEEDLES = [
 # `:refs/` 的引號改成可以落在冒號前或後——`git push origin :"refs/tags/$tag"` 與
 # `git push origin ":refs/tags/$tag"` 是同一件事。`+refs/` 要放行步驟 1 合法的
 # `git fetch … '+refs/heads/main:refs/remotes/origin/main'`（T #173 的驗證指令與 CI 逐字在用
-# 這個形狀）——只有 push 會動到遠端；fetch 的強制 refspec 覆寫的是本機的 remote-tracking ref。
+# 這個形狀）——只有 push 會動到遠端；fetch 的強制 refspec 在**目的地為 remote-tracking ref
+# 時**覆寫的是本機的那個 ref（目的地寫成 `refs/heads/*` 時覆寫的是本機分支）。
 #
 # 三次補洞（PR #184 R1 BLOCK 2）：上面那個放行原本寫成「同段要有相鄰的 `git push`」，
 # 這是正向列舉，擋不住寫得出來的其他寫入形狀（見 `ForcedRefspec`）。改成反向列舉：
-# 只放行看得出是讀取類指令的段，其餘一律報。
+# 只放行看得出是讀取類指令的段，其餘一律報——「其餘一律報」的射程由下面的豁免比對決定：
+# 豁免只看段首的指令本體，註解、引數裡的 `git fetch` 字樣不算。
 #
-# 讀取類指令：`git fetch`／`git ls-remote`。`git` 與子指令之間容許夾 `-C <dir>`、`-c <k=v>`、
-# `--<長旗標>`（可帶 `=值`），這些是 git 自己的前置選項，不改變它是讀還是寫。
+# 四次補洞（PR #184 R2 BLOCK 1）：豁免原本在段內**任意位置**成立，於是
+# `git push origin '+refs/tags/$tag:refs/tags/$tag'  # 不是 git fetch`（行尾註解）與
+# `--receive-pack='git fetch'`（引數字串）都能讓整段放過——被放過的正是「移動已發 tag」
+# （`V5`）。改成錨在段首：讀取類指令必須是該指令段的指令本體。
+#
+# 讀取類指令：`git fetch`／`git ls-remote`，而且要是該段的指令本體——`^\s*` 錨段首，段首只
+# 容許前置的 `VAR=val` 環境賦值（`GIT_TRACE=1 git fetch …` 仍是讀取）。`git` 與子指令之間
+# 容許夾 `-C <dir>`、`-c <k=v>`、`--<長旗標>`（可帶 `=值`），這些是 git 自己的前置選項，
+# 不改變它是讀還是寫。段的切法見 `SEGMENT_RE`：`|`、`;`、`&` 之後算新的一段，所以
+# `echo '見 git fetch'; git push origin '+refs/…'` 的 push 那段照報。
 READ_ONLY_GIT_RE = re.compile(
-    r"\bgit\b(?:\s+(?:-C\s+\S+|-c\s+\S+|--[A-Za-z][A-Za-z0-9-]*(?:=\S+)?))*"
+    r"^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*"
+    r"git\b(?:\s+(?:-C\s+\S+|-c\s+\S+|--[A-Za-z][A-Za-z0-9-]*(?:=\S+)?))*"
     r"\s+(?:fetch|ls-remote)\b")
 # 指令段分隔，與 FORBIDDEN 各條的 `[^|;&]*` 同一把尺。
 SEGMENT_RE = re.compile(r"[|;&]")
@@ -128,7 +139,11 @@ class ForcedRefspec:
     `rs='+refs/…'` ＋ `git push origin "$rs"`（變數間接），也擋不住 `git -C . push origin
     '+refs/…'`（`git` 與 `push` 不相鄰），而這兩個在綁定之前的 substring 比對下都擋得住
     ——是淨退步。放行與否的列舉方向決定漏抓的方向：正向列舉寫入形狀，沒列到的就漏；
-    反向列舉讀取形狀，沒列到的只是被多報一次。這裡要的是後者。"""
+    反向列舉讀取形狀，沒列到的只是被多報一次。這裡要的是後者。
+
+    「沒列到的只是被多報一次」的邊界是豁免比對的射程（PR #184 R2 BLOCK 1）：這句只在豁免
+    限於**段首的指令本體**時成立（`READ_ONLY_GIT_RE` 錨在段首）。射程若及於整段，註解或
+    引數裡的 `git fetch` 字樣就會讓一個寫入段整段放過——那是少報，不是多報。"""
 
     def search(self, txt):
         for seg in SEGMENT_RE.split(txt):
@@ -360,7 +375,9 @@ def check(text, label):
     # 而 (e) 已經把續行併成一條語句、旗標又被 `not t.startswith("-")` 濾掉。旗標放到第二列
     # 就同時穿過兩道斷言——`git push origin \` ／ `  --delete "refs/tags/$tag"` 全綠。
     # 訊息的位置用語句首列。
-    # 邊界：`statements()` 先丟掉整行註解，所以註解掉的禁止寫法不再報。文件要講「不要做
+    # 邊界：`statements()` 先丟掉以 `^\s*#` 起頭的行（含 heredoc／多列字串內的同形行——
+    # `COMMENT_RE` 不看上下文），所以寫在這些位置的禁止寫法不再報。後兩者在 bash 裡不是
+    # 註解，但那些文字在產出的腳本或字串裡仍是註解，照抄也不會執行。文件要講「不要做
     # 什麼」本來就寫在散文的行內 code span 裡，不擺進 bash 區塊（見上面 FORBIDDEN 的說明）。
     for blk in blocks:
         for idx, txt in statements(blk.body):
@@ -615,12 +632,16 @@ NEGATIVE = [
     ("步驟 2 補一行 git tag --delete（長旗標）",
      lambda t: append_to_block(t, 2, 'git tag --delete "$tag"'),
      {"d"}),
-    ("步驟 2 補兩行強制 refspec 走變數（rs='+refs/…' ＋ push \"$rs\"）",
+    ("步驟 2 補強制 refspec 走變數（rs='+refs/…' ＋ push \"$rs\"；被判的是賦值行）",
      lambda t: append_to_block(
          t, 2, "rs='+refs/heads/main:refs/heads/main'\ngit push origin \"$rs\""),
      {"d"}),
     ("步驟 2 補一行 git -C . push 的強制 refspec（git 與 push 不相鄰）",
      lambda t: append_to_block(t, 2, "git -C . push origin '+refs/heads/main:refs/heads/main'"),
+     {"d"}),
+    ("步驟 2 補一行強制 refspec ＋ 行尾註解寫 `# 不是 git fetch`（豁免只看段首指令本體）",
+     lambda t: append_to_block(
+         t, 2, "git push origin '+refs/tags/$tag:refs/tags/$tag'  # 不是 git fetch"),
      {"d"}),
     ("步驟 3 的 push 多掛一個 refspec（… main）",
      lambda t: edit_block_line(t, 3, "git push", lambda l: l.rstrip() + " main"),
