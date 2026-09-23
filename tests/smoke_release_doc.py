@@ -101,9 +101,43 @@ PRECHECK_NEEDLES = [
 # 二次補洞（issue #179 A1／A2）：長旗標與短旗標是兩條路，`--delete` 不會被 `-[A-Za-z]*d` 命中
 # （第二個字元是 `-`），`--force-if-includes` 也不會被 `--force` 命中，所以各自顯式立條。
 # `:refs/` 的引號改成可以落在冒號前或後——`git push origin :"refs/tags/$tag"` 與
-# `git push origin ":refs/tags/$tag"` 是同一件事。`+refs/` 綁到 `git push`：強制 refspec 只有
-# push 才具破壞性，步驟 1 合法的 `git fetch … '+refs/heads/main:refs/remotes/origin/main'`
-# 不該被擋（T #173 的驗證指令與 CI 逐字在用這個形狀）。
+# `git push origin ":refs/tags/$tag"` 是同一件事。`+refs/` 要放行步驟 1 合法的
+# `git fetch … '+refs/heads/main:refs/remotes/origin/main'`（T #173 的驗證指令與 CI 逐字在用
+# 這個形狀）——只有 push 會動到遠端；fetch 的強制 refspec 覆寫的是本機的 remote-tracking ref。
+#
+# 三次補洞（PR #184 R1 BLOCK 2）：上面那個放行原本寫成「同段要有相鄰的 `git push`」，
+# 這是正向列舉，擋不住寫得出來的其他寫入形狀（見 `ForcedRefspec`）。改成反向列舉：
+# 只放行看得出是讀取類指令的段，其餘一律報。
+#
+# 讀取類指令：`git fetch`／`git ls-remote`。`git` 與子指令之間容許夾 `-C <dir>`、`-c <k=v>`、
+# `--<長旗標>`（可帶 `=值`），這些是 git 自己的前置選項，不改變它是讀還是寫。
+READ_ONLY_GIT_RE = re.compile(
+    r"\bgit\b(?:\s+(?:-C\s+\S+|-c\s+\S+|--[A-Za-z][A-Za-z0-9-]*(?:=\S+)?))*"
+    r"\s+(?:fetch|ls-remote)\b")
+# 指令段分隔，與 FORBIDDEN 各條的 `[^|;&]*` 同一把尺。
+SEGMENT_RE = re.compile(r"[|;&]")
+PLUS_REFS_RE = re.compile(r"\+refs/")
+
+
+class ForcedRefspec:
+    """`+refs/` 的比對器：切成指令段，放行讀取類指令段，其餘含 `+refs/` 者命中。
+
+    只用到 `search(txt) -> match or None`，介面與 `re.Pattern` 對齊，放得進 `FORBIDDEN`。
+
+    為什麼不綁 `git push`（PR #184 R1 BLOCK 2）：綁「同段要有相鄰的 `git push`」擋不住
+    `rs='+refs/…'` ＋ `git push origin "$rs"`（變數間接），也擋不住 `git -C . push origin
+    '+refs/…'`（`git` 與 `push` 不相鄰），而這兩個在綁定之前的 substring 比對下都擋得住
+    ——是淨退步。放行與否的列舉方向決定漏抓的方向：正向列舉寫入形狀，沒列到的就漏；
+    反向列舉讀取形狀，沒列到的只是被多報一次。這裡要的是後者。"""
+
+    def search(self, txt):
+        for seg in SEGMENT_RE.split(txt):
+            m = PLUS_REFS_RE.search(seg)
+            if m and not READ_ONLY_GIT_RE.search(seg):
+                return m
+        return None
+
+
 FORBIDDEN = [
     ("`--force`", re.compile(r"(?<![\w-])--force(?![\w-])")),
     ("`--force-with-lease`", re.compile(r"(?<![\w-])--force-with-lease\b")),
@@ -115,8 +149,7 @@ FORBIDDEN = [
     ("push 的 `-f` 旗標", re.compile(r"\bgit\s+push\b[^|;&]*(?<![\w-])-[A-Za-z]*f[A-Za-z]*(?![\w-])")),
     ("push 的 `-d` 旗標", re.compile(r"\bgit\s+push\b[^|;&]*(?<![\w-])-[A-Za-z]*d[A-Za-z]*(?![\w-])")),
     ("`git push --delete`", re.compile(r"\bgit\s+push\b[^|;&]*(?<![\w-])--delete(?![\w-])")),
-    ("push 的強制 refspec `+refs/`",
-     re.compile(r"\bgit\s+push\b[^|;&]*\s[\"']?\+refs/")),
+    ("push 的強制 refspec `+refs/`（fetch／ls-remote 以外）", ForcedRefspec()),
     ("遠端刪除的空 refspec `:refs/`",
      re.compile(r"\bgit\s+push\b[^|;&]*\s[\"']?:[\"']?refs/")),
 ]
@@ -188,8 +221,9 @@ def statements(body):
 def check_head(txt):
     """一條檢查語句的「檢查位置」：收尾的 `|| fail`／`|| { …; exit 1; }` 之前那一段。
 
-    不是檢查語句就回傳 None。同一條語句有多個 `||` 時以收尾的那個為界——`FAIL_TAIL_RE`
-    從左往右找，但只有收尾那個 `||` 後面接得上 `fail …` 或 `{ …; exit 1; }` 並抵到行尾。
+    不是檢查語句就回傳 None。同一條語句有多個 `||` 時，切在 `FAIL_TAIL_RE` 的**最左**命中
+    （PR #184 R1 NB 4；行為不變，只是措辭訂正）——`foo || fail "a" || fail "b"` 切在第一個
+    `||`，不是收尾那個。現行文件每條檢查只有一個 `|| fail`，兩者同位。
 
     為什麼要分（issue #179 A3）：`|| fail "…"` 的訊息裡通常會把被檢查的東西再寫一次，
     substring 比對分不出「檢查真的在比對它」與「只是訊息提到它」。把檢查掏空成
@@ -321,12 +355,18 @@ def check(text, label):
     elif not any("git tag -a" in l for l in b2.body):
         bad("c", "步驟 2 的區塊（%s:%d 起）沒有 `git tag -a`" % (label, b2.fence_line + 1))
 
-    # (d) 全文 bash 區塊不含禁止寫法
+    # (d) 全文 bash 區塊不含禁止寫法。以語句為單位，與 (e) 同一把尺（PR #184 R1 BLOCK 1）：
+    # 逐行比對時，`\` 續行的第二列沒有 `git push` 字樣，綁指令的那幾條一律看不見它；
+    # 而 (e) 已經把續行併成一條語句、旗標又被 `not t.startswith("-")` 濾掉。旗標放到第二列
+    # 就同時穿過兩道斷言——`git push origin \` ／ `  --delete "refs/tags/$tag"` 全綠。
+    # 訊息的位置用語句首列。
+    # 邊界：`statements()` 先丟掉整行註解，所以註解掉的禁止寫法不再報。文件要講「不要做
+    # 什麼」本來就寫在散文的行內 code span 裡，不擺進 bash 區塊（見上面 FORBIDDEN 的說明）。
     for blk in blocks:
-        for k, line in enumerate(blk.body):
+        for idx, txt in statements(blk.body):
             for name, pat in FORBIDDEN:
-                if pat.search(line):
-                    bad("d", "%s 出現禁止寫法 %s：%s" % (at(blk, k), name, line.strip()))
+                if pat.search(txt):
+                    bad("d", "%s 出現禁止寫法 %s：%s" % (at(blk, idx[0]), name, txt))
 
     # (e) 步驟 3 的 push refspec 逐字 `"refs/tags/$tag"`，而且只有這一個
     b3 = block_of(3)
@@ -546,6 +586,14 @@ NEGATIVE = [
      lambda t: edit_block_line(t, 3, "git push",
                                lambda l: "git push origin '+refs/tags/$tag:refs/tags/$tag'"),
      {"d", "e"}),
+    ("步驟 3 的 push 拆成 `\\` 續行、`--delete` 放第二列",
+     lambda t: edit_block_line(t, 3, "git push",
+                               lambda l: 'git push origin \\\n  --delete "refs/tags/$tag"'),
+     {"d"}),
+    ("步驟 3 的 push 拆成 `\\` 續行、`-f` 放第二列",
+     lambda t: edit_block_line(t, 3, "git push",
+                               lambda l: 'git push origin \\\n  -f "refs/tags/$tag"'),
+     {"d"}),
     ("步驟 2 補一行遠端刪除（push origin :refs/tags/）",
      lambda t: append_to_block(t, 2, 'git push origin ":refs/tags/$tag"'),
      {"d"}),
@@ -566,6 +614,13 @@ NEGATIVE = [
      {"d"}),
     ("步驟 2 補一行 git tag --delete（長旗標）",
      lambda t: append_to_block(t, 2, 'git tag --delete "$tag"'),
+     {"d"}),
+    ("步驟 2 補兩行強制 refspec 走變數（rs='+refs/…' ＋ push \"$rs\"）",
+     lambda t: append_to_block(
+         t, 2, "rs='+refs/heads/main:refs/heads/main'\ngit push origin \"$rs\""),
+     {"d"}),
+    ("步驟 2 補一行 git -C . push 的強制 refspec（git 與 push 不相鄰）",
+     lambda t: append_to_block(t, 2, "git -C . push origin '+refs/heads/main:refs/heads/main'"),
      {"d"}),
     ("步驟 3 的 push 多掛一個 refspec（… main）",
      lambda t: edit_block_line(t, 3, "git push", lambda l: l.rstrip() + " main"),
