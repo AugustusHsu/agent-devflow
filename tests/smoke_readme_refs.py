@@ -75,17 +75,50 @@ def looks_like_sha(h):
     return any(c.isdigit() for c in h) and any(c in "abcdef" for c in h)
 
 
+# ── fence 辨識（issue #185 A4）：依 CommonMark，與 tests/smoke_release_doc.py 同一份定義 ──
+# `strip().startswith("```")` ＋ 開關對調有三個方向都錯：縮排 ≥4 格的 ``` 是 indented code、
+# 不是 fence（於是散文裡真的證據被當成範例，漏抓）；`~~~` 也是 fence 卻不被認（誤抓）；
+# 關閉只認「開頭是 ```」，於是 ```` 區塊裡的一行 ``` 會把它關掉、`` ``` x `` 也會
+# （都是誤抓）（PR #172 audit BLOCK 3／4）。
+# 開啟：縮排 0–3 格 ＋ 三個以上的同種字元（`` ` `` 或 `~`）＋ info string；反引號 fence 的
+# info string 不得含反引號。關閉：同種字元、根數 ≥ 開啟、其後只有空白、縮排 0–3 格。
+FENCE_RE = re.compile(r"^( {0,3})(`{3,}|~{3,})(.*)$")
+
+
+def fence_open(line):
+    """fence 開啟行 → (字元, 根數, info string)；不是開啟行回 None。"""
+    m = FENCE_RE.match(line)
+    if not m:
+        return None
+    marker, info = m.group(2), m.group(3)
+    if marker[0] == "`" and "`" in info:
+        return None
+    return marker[0], len(marker), info.strip()
+
+
+def fence_close(line, char, size):
+    """這一行關不關得掉「以 char × size 開啟」的那個 fence。"""
+    m = FENCE_RE.match(line)
+    if not m:
+        return False
+    marker = m.group(2)
+    return marker[0] == char and len(marker) >= size and not m.group(3).strip()
+
+
 def extract(text):
     """回傳 (found, skipped)：兩者都是 {hex: [行號, …]}，跳過 code fence 內的行。
 
     skipped 是「長得像 hex、但不像短 sha」的那些——只印出來供人核對，不進判定。"""
     found, skipped = {}, {}
-    in_fence = False
+    fence = None                      # 不在 fence 內時是 None，否則是 (字元, 根數)
     for n, line in enumerate(text.split("\n"), 1):
-        if line.strip().startswith("```"):
-            in_fence = not in_fence
+        if fence is not None:
+            if fence_close(line, fence[0], fence[1]):
+                fence = None
             continue
-        if in_fence:
+        opened = fence_open(line)
+        if opened:
+            fence = (opened[0], opened[1])
             continue
         for m in HEX_RE.finditer(line):
             bucket = found if looks_like_sha(m.group(1)) else skipped
@@ -142,6 +175,17 @@ def main():
     failures = []
     label = "README.md"
     text = README.read_text(encoding="utf-8")
+
+    # 不是 git 版本庫＝這支檢查跑不起來，不是 README 引錯 hash（issue #185 A6；PR #178
+    # audit BLOCK 3）。沒有這一關的話，`git cat-file -e` 對每一個 hex 都回 128，全部報成
+    # 「缺」而 exit 1——把環境錯誤說成內容違規，處置剛好相反。
+    # 為什麼要前置一條 `rev-parse`：`cat-file -e` 對「物件不存在」與「根本不在 repo 裡」
+    # 回的都是 128，rc 分不出這兩件事，只能在逐個查之前先問一次環境。
+    # 位置在讀 README **之後**：README 不在時該報的是缺檔（上面那條），搬到前面會讓
+    # 「沒有 README 又不是 git repo」印成 git 環境錯誤，指錯要修的東西。
+    if git(["rev-parse", "--git-dir"])[0] != 0:
+        print("💥 %s 不是 git 版本庫，無從查證 README 引的 hash（exit 2，不是內容違規）" % REPO)
+        return 2
 
     # 正向：真的那一份 README
     found, missing, skipped = check(text)
