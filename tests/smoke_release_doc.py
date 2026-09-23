@@ -94,9 +94,12 @@ PRECHECK_NEEDLES = [
 # 比對以 token／regex 為準而不是 substring，因為兩個方向都會錯：
 #   * 漏抓——`-f`、`+refs/`、`:refs/tags/` 和 `--force` 等價，substring 清單全放行。
 #   * 誤抓——步驟 4 的 `trap 'rm -f "$vj"' EXIT` 裡也有 `-f`，那不是 push 旗標。
-# 所以 `-f`／`-d` 這種短旗標一律綁在它所屬的指令上（`git push`／`git tag`），`[^|;&]*`
-# 讓比對不跨過 `|`、`;`、`&` 到下一個指令去。`--force-with-lease` 另立一條：token 比對
-# 之後它不再被 `--force` 命中（後面接的是 `-`），要顯式保留才擋得住。
+# 所以 `-f`／`-d` 這種短旗標綁在它所屬的指令上（`git push`／`git tag`，`git` 與子指令之間
+# 容許 `GIT_OPTS` 的前置選項），`[^|;&]*` 讓比對不跨過 `|`、`;`、`&` 到下一個指令去。
+# 引號字串裡的同形字樣（`printf '%s' 'git tag -f'`）照報：字面比對不解析引號，這是已知的
+# 多報面（PR #178 audit BLOCK 1），文件的 bash 區塊本來就不該把禁止寫法擺成字串。
+# `--force-with-lease` 另立一條：token 比對之後它不再被 `--force` 命中（後面接的是 `-`），
+# 要顯式保留才擋得住。
 #
 # 二次補洞（issue #179 A1／A2）：長旗標與短旗標是兩條路，`--delete` 不會被 `-[A-Za-z]*d` 命中
 # （第二個字元是 `-`），`--force-if-includes` 也不會被 `--force` 命中，所以各自顯式立條。
@@ -108,8 +111,8 @@ PRECHECK_NEEDLES = [
 #
 # 三次補洞（PR #184 R1 BLOCK 2）：上面那個放行原本寫成「同段要有相鄰的 `git push`」，
 # 這是正向列舉，擋不住寫得出來的其他寫入形狀（見 `ForcedRefspec`）。改成反向列舉：
-# 只放行看得出是讀取類指令的段，其餘一律報——「其餘一律報」的射程由下面的豁免比對決定：
-# 豁免只看段首的指令本體，註解、引數裡的 `git fetch` 字樣不算。
+# 只放行看得出是讀取類指令的段，其餘都報——「其餘都報」的射程由下面的豁免比對決定：
+# 豁免只看段首的指令本體，註解、引數裡的 `git fetch` 字樣不算；段內有命令替換也不算。
 #
 # 四次補洞（PR #184 R2 BLOCK 1）：豁免原本在段內**任意位置**成立，於是
 # `git push origin '+refs/tags/$tag:refs/tags/$tag'  # 不是 git fetch`（行尾註解）與
@@ -118,16 +121,47 @@ PRECHECK_NEEDLES = [
 #
 # 讀取類指令：`git fetch`／`git ls-remote`，而且要是該段的指令本體——`^\s*` 錨段首，段首只
 # 容許前置的 `VAR=val` 環境賦值（`GIT_TRACE=1 git fetch …` 仍是讀取）。`git` 與子指令之間
-# 容許夾 `-C <dir>`、`-c <k=v>`、`--<長旗標>`（可帶 `=值`），這些是 git 自己的前置選項，
-# 不改變它是讀還是寫。段的切法見 `SEGMENT_RE`：`|`、`;`、`&` 之後算新的一段，所以
-# `echo '見 git fetch'; git push origin '+refs/…'` 的 push 那段照報。
+# 容許夾 git 自己的前置選項（`GIT_OPTS`），這些不改變它是讀還是寫。段的切法見 `SEGMENT_RE`：
+# `|`、`;`、`&` 之後算新的一段，所以 `echo '見 git fetch'; git push origin '+refs/…'` 的
+# push 那段照報。
+#
+# 五次補洞（PR #184 R3 BLOCK 1，issue #185 A1／A2）：
+#   * 子指令要是**整個** shell token：`(?:fetch|ls-remote)\b` 的 `\b` 在 `-`／`.` 前也成立，
+#     `git fetch-pack …`／`git fetch.x …` 因此被當成 `git fetch` 豁免。改成其後只能接空白、
+#     行尾或重導向記號（`git fetch>/dev/null …` 的 token 在 `>` 前就結束了，仍是 fetch）。
+#     `fetch-pack` 是 plumbing、本文件不用，改後被擋是多報，不另列白名單。
+#   * 段內有命令替換／行程替換或 `push` token 就不豁免（見 `ForcedRefspec.search`）：
+#     `P=$(git${IFS}push${IFS}origin${IFS}+refs/…) git fetch origin` 的賦值會真的跑那個
+#     push，段首卻是字面的 `git fetch`。前置賦值的值域**不**收窄——`GIT_DIR="$d" git fetch …`
+#     是合法讀取，收窄會把它擋掉；命令替換改由整段的判斷擋。
+#
+# `GIT_OPTS`（issue #185 A3）：`git` 與子指令之間容許的前置選項，FORBIDDEN 各條與這裡共用
+# 同一份定義——兩邊各寫各的就會補一邊漏另一邊（`git -C . push -f …` 一度不報，PR #178
+# audit BLOCK 1）。封閉清單，照 `git --help` 的用法行：
+#   * `-C <path>`、`-c <k=v>`：值在下一個 token。
+#   * `-p`／`-P`：不帶值。
+#   * `--git-dir`／`--work-tree`／`--namespace`／`--config-env`：帶值，`=` 或空白接值都合法
+#     （git 2.43 實測）。
+#   * 其餘 `--<旗標>[=<值>]`：不帶值，**不**把下一個 token 當成值吞掉——吞掉的話
+#     `git --no-pager push fetch '+refs/…'`（遠端就叫 `fetch`）會被讀成 `git … fetch` 而豁免。
+GIT_OPTS = (r"(?:-C\s+\S+|-c\s+\S+|-[pP](?![\w-])"
+            r"|--(?:git-dir|work-tree|namespace|config-env)(?:=\S+|\s+\S+)"
+            r"|--[A-Za-z][A-Za-z0-9-]*(?:=\S+)?)")
+# `git` ＋ 零個以上前置選項 ＋ 空白：接在後面的那個 token 就是子指令。
+GIT_PREFIX = r"\bgit\b(?:\s+" + GIT_OPTS + r")*\s+"
 READ_ONLY_GIT_RE = re.compile(
     r"^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*"
-    r"git\b(?:\s+(?:-C\s+\S+|-c\s+\S+|--[A-Za-z][A-Za-z0-9-]*(?:=\S+)?))*"
-    r"\s+(?:fetch|ls-remote)\b")
+    + GIT_PREFIX + r"(?:fetch|ls-remote)(?=[\s<>]|$)")
 # 指令段分隔，與 FORBIDDEN 各條的 `[^|;&]*` 同一把尺。
 SEGMENT_RE = re.compile(r"[|;&]")
 PLUS_REFS_RE = re.compile(r"\+refs/")
+# 命令替換與行程替換：`$(…)`、反引號、`<(…)`、`>(…)`。只要段內有，就算段首是讀取類指令，
+# 那一段也可能在別處跑寫入——字面比對看不進替換裡面，只能整段不豁免。
+CMD_SUBST_RE = re.compile(r"\$\(|`|<\(|>\(")
+# 獨立的 `push` token：前後都不是 `[\w-]`，所以 `pushed`、`--receive-pack` 不算。
+# 邊界：含 `+refs/` 的讀取段連行尾註解都不能寫 `push` 字樣（`git fetch origin '+refs/…'
+# # 不是 push` 會被多報一次，改註解即可）。先剝註解再比對就分不出 N9 那一形。
+PUSH_TOKEN_RE = re.compile(r"(?<![\w-])push(?![\w-])")
 
 
 class ForcedRefspec:
@@ -139,16 +173,25 @@ class ForcedRefspec:
     `rs='+refs/…'` ＋ `git push origin "$rs"`（變數間接），也擋不住 `git -C . push origin
     '+refs/…'`（`git` 與 `push` 不相鄰），而這兩個在綁定之前的 substring 比對下都擋得住
     ——是淨退步。放行與否的列舉方向決定漏抓的方向：正向列舉寫入形狀，沒列到的就漏；
-    反向列舉讀取形狀，沒列到的只是被多報一次。這裡要的是後者。
+    反向列舉讀取形狀，沒列到的只是被多報一次——前提是豁免比對本身不放過寫入段（見下）。
+    這裡要的是後者。
 
     「沒列到的只是被多報一次」的邊界是豁免比對的射程（PR #184 R2 BLOCK 1）：這句只在豁免
     限於**段首的指令本體**時成立（`READ_ONLY_GIT_RE` 錨在段首）。射程若及於整段，註解或
-    引數裡的 `git fetch` 字樣就會讓一個寫入段整段放過——那是少報，不是多報。"""
+    引數裡的 `git fetch` 字樣就會讓一個寫入段整段放過——那是少報，不是多報。
+
+    段首的指令本體也不夠（PR #184 R3 BLOCK 1，issue #185 A2）：命令替換與行程替換會在
+    段首那個指令之外再跑一個指令，`push` 字樣則表示這一段本來就在談寫入。含 `+refs/` 的段
+    只要有這兩者之一，就不看段首是什麼，照報。"""
 
     def search(self, txt):
         for seg in SEGMENT_RE.split(txt):
             m = PLUS_REFS_RE.search(seg)
-            if m and not READ_ONLY_GIT_RE.search(seg):
+            if not m:
+                continue
+            if CMD_SUBST_RE.search(seg) or PUSH_TOKEN_RE.search(seg):
+                return m
+            if not READ_ONLY_GIT_RE.search(seg):
                 return m
         return None
 
@@ -158,15 +201,21 @@ FORBIDDEN = [
     ("`--force-with-lease`", re.compile(r"(?<![\w-])--force-with-lease\b")),
     ("`--force-if-includes`", re.compile(r"(?<![\w-])--force-if-includes\b")),
     ("`--tags`", re.compile(r"(?<![\w-])--tags(?![\w-])")),
-    ("`git tag -d`", re.compile(r"\bgit\s+tag\b[^|;&]*(?<![\w-])-[A-Za-z]*d[A-Za-z]*(?![\w-])")),
-    ("`git tag --delete`", re.compile(r"\bgit\s+tag\b[^|;&]*(?<![\w-])--delete(?![\w-])")),
-    ("`git tag -f`", re.compile(r"\bgit\s+tag\b[^|;&]*(?<![\w-])-[A-Za-z]*f[A-Za-z]*(?![\w-])")),
-    ("push 的 `-f` 旗標", re.compile(r"\bgit\s+push\b[^|;&]*(?<![\w-])-[A-Za-z]*f[A-Za-z]*(?![\w-])")),
-    ("push 的 `-d` 旗標", re.compile(r"\bgit\s+push\b[^|;&]*(?<![\w-])-[A-Za-z]*d[A-Za-z]*(?![\w-])")),
-    ("`git push --delete`", re.compile(r"\bgit\s+push\b[^|;&]*(?<![\w-])--delete(?![\w-])")),
+    ("`git tag -d`",
+     re.compile(GIT_PREFIX + r"tag\b[^|;&]*(?<![\w-])-[A-Za-z]*d[A-Za-z]*(?![\w-])")),
+    ("`git tag --delete`",
+     re.compile(GIT_PREFIX + r"tag\b[^|;&]*(?<![\w-])--delete(?![\w-])")),
+    ("`git tag -f`",
+     re.compile(GIT_PREFIX + r"tag\b[^|;&]*(?<![\w-])-[A-Za-z]*f[A-Za-z]*(?![\w-])")),
+    ("push 的 `-f` 旗標",
+     re.compile(GIT_PREFIX + r"push\b[^|;&]*(?<![\w-])-[A-Za-z]*f[A-Za-z]*(?![\w-])")),
+    ("push 的 `-d` 旗標",
+     re.compile(GIT_PREFIX + r"push\b[^|;&]*(?<![\w-])-[A-Za-z]*d[A-Za-z]*(?![\w-])")),
+    ("`git push --delete`",
+     re.compile(GIT_PREFIX + r"push\b[^|;&]*(?<![\w-])--delete(?![\w-])")),
     ("push 的強制 refspec `+refs/`（fetch／ls-remote 以外）", ForcedRefspec()),
     ("遠端刪除的空 refspec `:refs/`",
-     re.compile(r"\bgit\s+push\b[^|;&]*\s[\"']?:[\"']?refs/")),
+     re.compile(GIT_PREFIX + r"push\b[^|;&]*\s[\"']?:[\"']?refs/")),
 ]
 
 # 步驟 3 唯一該出現的 refspec，逐字（issue #173 R2-4(e)）。推到別的 tag 名、或在後面
@@ -206,6 +255,35 @@ ASSERTIONS = {
 # fence_line + 1 + k 行。lang：fence 的 info string 原文（``` 後面整串，可能是空字串、
 # `bash`、`sh`、`bash title=x`）。step：該區塊隸屬的步驟號（不在任何步驟內者為 None）。
 Fence = namedtuple("Fence", "fence_line lang body step")
+
+# ── fence 辨識（issue #185 A4）：依 CommonMark，兩支煙霧測試同一份定義 ─────────────
+# `strip().startswith("```")` 有三個方向都錯：縮排 ≥4 格的 ``` 是 indented code、不是 fence；
+# `~~~` 也是 fence 卻不被認；關閉只認「恰好是 ```」，於是 ```` 區塊裡的一行 ``` 會把它關掉、
+# 五個反引號的關閉行反而關不掉（PR #172 audit BLOCK 3／4）。
+# 開啟：縮排 0–3 格 ＋ 三個以上的同種字元（`` ` `` 或 `~`）＋ info string；反引號 fence 的
+# info string 不得含反引號（CommonMark：那一行是行內 code，不是 fence）。
+# 關閉：同種字元、根數 ≥ 開啟、其後只有空白、縮排 0–3 格。
+FENCE_RE = re.compile(r"^( {0,3})(`{3,}|~{3,})(.*)$")
+
+
+def fence_open(line):
+    """fence 開啟行 → (字元, 根數, info string)；不是開啟行回 None。"""
+    m = FENCE_RE.match(line)
+    if not m:
+        return None
+    marker, info = m.group(2), m.group(3)
+    if marker[0] == "`" and "`" in info:
+        return None
+    return marker[0], len(marker), info.strip()
+
+
+def fence_close(line, char, size):
+    """這一行關不關得掉「以 char × size 開啟」的那個 fence。"""
+    m = FENCE_RE.match(line)
+    if not m:
+        return False
+    marker = m.group(2)
+    return marker[0] == char and len(marker) >= size and not m.group(3).strip()
 
 
 def bash_blocks(fences):
@@ -277,13 +355,13 @@ def parse(text):
     cur_step = None
     i = 0
     while i < len(lines):
-        stripped = lines[i].strip()
-        if stripped.startswith("```"):
-            lang = stripped[3:].strip()
+        opened = fence_open(lines[i])
+        if opened:
+            char, size, lang = opened
             fence_line = i + 1
             body = []
             i += 1
-            while i < len(lines) and lines[i].strip() != "```":
+            while i < len(lines) and not fence_close(lines[i], char, size):
                 body.append(lines[i])
                 i += 1
             fences.append(Fence(fence_line, lang, body, cur_step))
@@ -371,7 +449,7 @@ def check(text, label):
         bad("c", "步驟 2 的區塊（%s:%d 起）沒有 `git tag -a`" % (label, b2.fence_line + 1))
 
     # (d) 全文 bash 區塊不含禁止寫法。以語句為單位，與 (e) 同一把尺（PR #184 R1 BLOCK 1）：
-    # 逐行比對時，`\` 續行的第二列沒有 `git push` 字樣，綁指令的那幾條一律看不見它；
+    # 逐行比對時，`\` 續行的第二列沒有 `git push` 字樣，綁指令的那幾條看不見它；
     # 而 (e) 已經把續行併成一條語句、旗標又被 `not t.startswith("-")` 濾掉。旗標放到第二列
     # 就同時穿過兩道斷言——`git push origin \` ／ `  --delete "refs/tags/$tag"` 全綠。
     # 訊息的位置用語句首列。
@@ -467,6 +545,31 @@ def block_by_step(fences, step):
         raise MutationTargetMissing(
             "突變找不到步驟 %d 的 bash 區塊——文件已偏離預期形狀" % step)
     return own[0]
+
+
+def edit_fence(text, step, opener=None, closer=None):
+    """換掉某一步 bash 區塊的開啟／關閉 fence 行（body 一個字都不動）。
+
+    `retag_fence` 只改 info string，改不出「這一行還算不算 fence」那一類形狀
+    ——fence 字元的種類與根數、fence 行的縮排都在 `retag_fence` 的射程外（issue #185 A4）。"""
+    lines = text.split("\n")
+    _, _, _, fences = parse(text)
+    blk = block_by_step(fences, step)
+    if closer is not None:
+        lines[blk.fence_line + len(blk.body)] = closer
+    if opener is not None:
+        lines[blk.fence_line - 1] = opener
+    return "\n".join(lines)
+
+
+def indent_block(text, step, pad):
+    """把某一步 bash 區塊的開閉 fence 與內容整段前置 pad（縮排 ≥4 格就不是 fence）。"""
+    lines = text.split("\n")
+    _, _, _, fences = parse(text)
+    blk = block_by_step(fences, step)
+    for i in range(blk.fence_line - 1, blk.fence_line + len(blk.body) + 1):
+        lines[i] = pad + lines[i]
+    return "\n".join(lines)
 
 
 def edit_block_line(text, step, needle, transform):
@@ -666,6 +769,81 @@ NEGATIVE = [
      lambda t: edit_block_line(t, 2, "git tag -a",
                                lambda l: l.replace("git tag -a", "git tag")),
      {"c"}),
+    # ── 豁免的子指令要是整個 shell token（issue #185 A1；PR #184 R3 BLOCK 1 前半） ──
+    ("步驟 2 補一行 git fetch-pack 的強制 refspec（子指令後面接 `-`）",
+     lambda t: append_to_block(t, 2, "git fetch-pack origin '+refs/heads/main:refs/heads/main'"),
+     {"d"}),
+    ("步驟 2 補一行 git fetch.x 的強制 refspec（子指令後面接 `.`）",
+     lambda t: append_to_block(t, 2, "git fetch.x origin '+refs/heads/main:refs/heads/main'"),
+     {"d"}),
+    # ── 讀取段內有命令／行程替換或 push token 就不豁免（issue #185 A2；R3 BLOCK 1 後半） ──
+    ("步驟 2 補前置賦值藏 $(git push …)、同段再放字面 git fetch",
+     lambda t: append_to_block(
+         t, 2, "P=$(git${IFS}push${IFS}origin${IFS}+refs/heads/x) git fetch origin"),
+     {"d"}),
+    ("步驟 2 補前置賦值藏反引號的 git push、同段再放字面 git fetch",
+     lambda t: append_to_block(
+         t, 2, "P=`git${IFS}push${IFS}origin${IFS}+refs/heads/x` git fetch origin"),
+     {"d"}),
+    ("步驟 2 補 git fetch 的引數裡夾 $(git push …)",
+     lambda t: append_to_block(t, 2, "git fetch origin $(git push origin '+refs/heads/x')"),
+     {"d"}),
+    ("步驟 2 補 git fetch 的引數裡夾 <(git push …)（行程替換）",
+     lambda t: append_to_block(t, 2, "git fetch origin <(git push origin '+refs/heads/x')"),
+     {"d"}),
+    ("步驟 2 補 git fetch 的引數裡夾 >(git push …)（行程替換）",
+     lambda t: append_to_block(t, 2, "git fetch origin >(git push origin '+refs/heads/x')"),
+     {"d"}),
+    ("步驟 2 補 git fetch 的引數字串裡有 push token（--upload-pack=…）",
+     lambda t: append_to_block(
+         t, 2, "git fetch --upload-pack='git push origin +refs/heads/x' ."),
+     {"d"}),
+    ("步驟 2 補讀取段的行尾註解寫 push（連註解都算）",
+     lambda t: append_to_block(
+         t, 2,
+         "git fetch origin '+refs/heads/main:refs/remotes/origin/main' # do not push"),
+     {"d"}),
+    # ── FORBIDDEN 七條與豁免共用 git 前置選項類別（issue #185 A3；PR #178 audit BLOCK 1） ──
+    ("步驟 2 補一行 git --no-pager push fetch（遠端名叫 fetch，不是子指令）",
+     lambda t: append_to_block(t, 2, "git --no-pager push fetch '+refs/heads/x'"),
+     {"d"}),
+    ("步驟 2 補一行 git --git-dir <值> push -f（前置選項帶值）",
+     lambda t: append_to_block(t, 2, 'git --git-dir .git push -f origin "refs/tags/$tag"'),
+     {"d"}),
+    ("步驟 2 補一行 git -P push --delete",
+     lambda t: append_to_block(t, 2, 'git -P push --delete origin "refs/tags/$tag"'),
+     {"d"}),
+    ("步驟 2 補一行 git -C . tag -d",
+     lambda t: append_to_block(t, 2, 'git -C . tag -d "$tag"'),
+     {"d"}),
+    ("步驟 2 補一行 git --work-tree <值> tag --delete",
+     lambda t: append_to_block(t, 2, 'git --work-tree . tag --delete "$tag"'),
+     {"d"}),
+    ("步驟 2 補一行 git -c a=b push -d",
+     lambda t: append_to_block(t, 2, 'git -c a=b push -d origin "refs/tags/$tag"'),
+     {"d"}),
+    ("步驟 2 補一行 git -C . push 的空 refspec（:refs/）",
+     lambda t: append_to_block(t, 2, 'git -C . push origin :"refs/tags/$tag"'),
+     {"d"}),
+    ("步驟 2 補一行 git -C . push -f",
+     lambda t: append_to_block(t, 2, 'git -C . push -f origin "refs/tags/$tag"'),
+     {"d"}),
+    ("步驟 2 補一行 git -c a=b tag -f",
+     lambda t: append_to_block(t, 2, 'git -c a=b tag -f "$tag"'),
+     {"d"}),
+    # ── fence 辨識依 CommonMark（issue #185 A4；PR #172 audit BLOCK 3／4） ──
+    ("步驟 1 的開啟 fence 改成四個反引號（三個的關閉行關不掉，吞到檔尾）",
+     lambda t: edit_fence(t, 1, opener="````bash"),
+     {"a", "blocks", "c", "d", "e"}),
+    ("步驟 1 的關閉 fence 改成 `~~~`（字元不同，關不掉）",
+     lambda t: edit_fence(t, 1, closer="~~~"),
+     {"a", "blocks", "c"}),
+    ("步驟 1 的關閉 fence 後面多一個字（``` x，關不掉）",
+     lambda t: edit_fence(t, 1, closer="``` x"),
+     {"a", "blocks", "c"}),
+    ("步驟 4 的區塊整段縮排四格（縮排 ≥4 格不是 fence）",
+     lambda t: indent_block(t, 4, "    "),
+     {"blocks"}),
 ]
 
 # 正向突變：改完之後**不該**被擋的形狀。誤抓也是洞——會對合法寫法報紅的關卡，
@@ -690,6 +868,41 @@ POSITIVE = [
     ("步驟 1 的工作樹檢查改寫成 `|| { …; exit 1; }` 形",
      lambda t: edit_block_line(t, 1, '|| fail "git status',
                                lambda l: '  || { echo "git status --porcelain 跑不起來"; exit 1; }')),
+    # ── fence 辨識依 CommonMark 的對稱面（issue #185 A4）：這三形是合法 Markdown，不准被擋 ──
+    ("步驟 1 的關閉 fence 用五個反引號（比開啟長，照常關閉）",
+     lambda t: edit_fence(t, 1, closer="`````")),
+    ("步驟 1 的開閉 fence 各縮排三格（0–3 格仍是 fence）",
+     lambda t: edit_fence(t, 1, opener="   ```bash", closer="   ```")),
+    ("步驟 1 的 fence 改用 `~~~bash`／`~~~`",
+     lambda t: edit_fence(t, 1, opener="~~~bash", closer="~~~")),
+    # ── 豁免面收攏之後，合法的讀取形狀仍要放行（issue #185 A1／A2／A3） ──
+    ("步驟 1 補一行 GIT_DIR=x git fetch 的強制 refspec（前置賦值）",
+     lambda t: append_to_block(
+         t, 1, "GIT_DIR=x git fetch origin '+refs/heads/main:refs/remotes/origin/main'")),
+    ("步驟 1 補一行 GIT_DIR=\"$d\" git fetch 的強制 refspec（賦值帶 $ 不收窄）",
+     lambda t: append_to_block(
+         t, 1,
+         "GIT_DIR=\"$d\" git fetch origin '+refs/heads/main:refs/remotes/origin/main'")),
+    ("步驟 1 補一行 git fetch>/dev/null（子指令的 token 在 `>` 前結束）",
+     lambda t: append_to_block(
+         t, 1, "git fetch>/dev/null origin '+refs/heads/main:refs/remotes/origin/main'")),
+    ("步驟 1 補一行 git -c a=b -C . fetch 的強制 refspec（兩個前置選項）",
+     lambda t: append_to_block(
+         t, 1,
+         "git -c a=b -C . fetch origin '+refs/heads/main:refs/remotes/origin/main'")),
+    ("步驟 1 補一行 git --git-dir <值> fetch 的強制 refspec（帶值長選項、空白接值）",
+     lambda t: append_to_block(
+         t, 1,
+         "git --git-dir .git fetch origin '+refs/heads/main:refs/remotes/origin/main'")),
+    ("步驟 1 補一行 git -P ls-remote（`-p`／`-P` 也是前置選項）",
+     lambda t: append_to_block(t, 1, "git -P ls-remote origin '+refs/tags/*'")),
+    ("步驟 1 補一行 git --exec-path=<值> ls-remote（長選項以 `=` 接值）",
+     lambda t: append_to_block(t, 1, "git --exec-path=/x ls-remote origin '+refs/tags/*'")),
+    ("步驟 1 補一行讀取段、註解寫 pushed／--receive-pack（不是 push token）",
+     lambda t: append_to_block(
+         t, 1,
+         "git fetch origin '+refs/heads/main:refs/remotes/origin/main'"
+         " # pushed via --receive-pack")),
 ]
 
 
