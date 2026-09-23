@@ -97,8 +97,9 @@ PRECHECK_NEEDLES = [
 # 所以 `-f`／`-d` 這種短旗標綁在它所屬的指令上（`git push`／`git tag`，`git` 與子指令之間
 # 容許 `GIT_OPTS` 的前置選項），`[^|;&]*` 讓比對不跨過 `|`、`;`、`&` 到下一個指令去。
 # 引號字串裡的同形字樣（`printf '%s' 'git tag -f'`）照報：字面比對不解析引號，這是已知的
-# 多報面（PR #178 audit BLOCK 1），文件的 bash 區塊本來就不該把禁止寫法擺成字串。`--force-with-lease` 另立一條：token 比對
-# 之後它不再被 `--force` 命中（後面接的是 `-`），要顯式保留才擋得住。
+# 多報面（PR #178 audit BLOCK 1），文件的 bash 區塊本來就不該把禁止寫法擺成字串。
+# `--force-with-lease` 另立一條：token 比對之後它不再被 `--force` 命中（後面接的是 `-`），
+# 要顯式保留才擋得住。
 #
 # 二次補洞（issue #179 A1／A2）：長旗標與短旗標是兩條路，`--delete` 不會被 `-[A-Za-z]*d` 命中
 # （第二個字元是 `-`），`--force-if-includes` 也不會被 `--force` 命中，所以各自顯式立條。
