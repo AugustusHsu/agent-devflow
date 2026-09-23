@@ -168,6 +168,27 @@ def main():
              text + "\n\n那句話被 `%s` 了。\n" % PROBE_ALPHA, PROBE_ALPHA, False, False),
             ("真的短 sha 仍要被抓到且判為存在",
              "證據：`%s`。\n" % PROBE_REAL, PROBE_REAL, True, False),
+            # ── fence 辨識的邊界（issue #185 A4）：與 smoke_release_doc.py 的 parse() 同一張表。
+            # 「fence 內不抓」與「fence 外要抓」是同一件事的兩面：把不是 fence 的行當成 fence
+            # 會讓真的證據不被檢查（漏抓），把關不掉的 fence 當成關掉了會讓範例裡的 hash 被檢查
+            # （誤抓）。兩個方向各三、四條。
+            ("`~~~` 也是 fence，裡面的 hex 不抓",
+             "~~~\n假的證據：`%s`。\n~~~\n" % PROBE_MISSING, PROBE_MISSING, False, False),
+            ("四個反引號的 fence 內含一行三個反引號（關不掉），其後的 hex 不抓",
+             "````\n裡面有一行 fence：\n```\n假的證據：`%s`。\n````\n" % PROBE_MISSING,
+             PROBE_MISSING, False, False),
+            ("縮排四格的三個反引號不是 fence，其後散文的 hex 要抓",
+             "    ```\n\n證據：`%s`。\n" % PROBE_REAL, PROBE_REAL, True, False),
+            ("```bash 開、`~~~` 關不掉（字元不同），其後的 hex 不抓",
+             "```bash\necho 1\n~~~\n假的證據：`%s`。\n```\n" % PROBE_MISSING,
+             PROBE_MISSING, False, False),
+            ("``` 開、`` ``` x `` 關不掉（其後有非空白），其後的 hex 不抓",
+             "```\necho 1\n``` x\n假的證據：`%s`。\n```\n" % PROBE_MISSING,
+             PROBE_MISSING, False, False),
+            ("``` 開、五個反引號關（比開啟長，照常關閉），其後散文的 hex 要抓",
+             "```\necho 1\n`````\n\n證據：`%s`。\n" % PROBE_REAL, PROBE_REAL, True, False),
+            ("開閉各縮排三格的 fence（0–3 格仍是 fence），裡面的 hex 不抓",
+             "   ```\n假的證據：`%s`。\n   ```\n" % PROBE_MISSING, PROBE_MISSING, False, False),
         ]
         for n, (name, mutated, probe, want_caught, want_missing) in enumerate(cases):
             path = Path(tmp) / ("mutant-%02d.md" % n)

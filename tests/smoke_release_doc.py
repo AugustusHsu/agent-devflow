@@ -469,6 +469,31 @@ def block_by_step(fences, step):
     return own[0]
 
 
+def edit_fence(text, step, opener=None, closer=None):
+    """換掉某一步 bash 區塊的開啟／關閉 fence 行（body 一個字都不動）。
+
+    `retag_fence` 只改 info string，改不出「這一行還算不算 fence」那一類形狀
+    ——fence 字元的種類與根數、fence 行的縮排都在 `retag_fence` 的射程外（issue #185 A4）。"""
+    lines = text.split("\n")
+    _, _, _, fences = parse(text)
+    blk = block_by_step(fences, step)
+    if closer is not None:
+        lines[blk.fence_line + len(blk.body)] = closer
+    if opener is not None:
+        lines[blk.fence_line - 1] = opener
+    return "\n".join(lines)
+
+
+def indent_block(text, step, pad):
+    """把某一步 bash 區塊的開閉 fence 與內容整段前置 pad（縮排 ≥4 格就不是 fence）。"""
+    lines = text.split("\n")
+    _, _, _, fences = parse(text)
+    blk = block_by_step(fences, step)
+    for i in range(blk.fence_line - 1, blk.fence_line + len(blk.body) + 1):
+        lines[i] = pad + lines[i]
+    return "\n".join(lines)
+
+
 def edit_block_line(text, step, needle, transform):
     """把 step 的 bash 區塊裡第一條含 needle 的行交給 transform；回傳 None 表示刪掉該行。"""
     lines = text.split("\n")
@@ -666,6 +691,81 @@ NEGATIVE = [
      lambda t: edit_block_line(t, 2, "git tag -a",
                                lambda l: l.replace("git tag -a", "git tag")),
      {"c"}),
+    # ── 豁免的子指令要是整個 shell token（issue #185 A1；PR #184 R3 BLOCK 1 前半） ──
+    ("步驟 2 補一行 git fetch-pack 的強制 refspec（子指令後面接 `-`）",
+     lambda t: append_to_block(t, 2, "git fetch-pack origin '+refs/heads/main:refs/heads/main'"),
+     {"d"}),
+    ("步驟 2 補一行 git fetch.x 的強制 refspec（子指令後面接 `.`）",
+     lambda t: append_to_block(t, 2, "git fetch.x origin '+refs/heads/main:refs/heads/main'"),
+     {"d"}),
+    # ── 讀取段內有命令／行程替換或 push token 就不豁免（issue #185 A2；R3 BLOCK 1 後半） ──
+    ("步驟 2 補前置賦值藏 $(git push …)、同段再放字面 git fetch",
+     lambda t: append_to_block(
+         t, 2, "P=$(git${IFS}push${IFS}origin${IFS}+refs/heads/x) git fetch origin"),
+     {"d"}),
+    ("步驟 2 補前置賦值藏反引號的 git push、同段再放字面 git fetch",
+     lambda t: append_to_block(
+         t, 2, "P=`git${IFS}push${IFS}origin${IFS}+refs/heads/x` git fetch origin"),
+     {"d"}),
+    ("步驟 2 補 git fetch 的引數裡夾 $(git push …)",
+     lambda t: append_to_block(t, 2, "git fetch origin $(git push origin '+refs/heads/x')"),
+     {"d"}),
+    ("步驟 2 補 git fetch 的引數裡夾 <(git push …)（行程替換）",
+     lambda t: append_to_block(t, 2, "git fetch origin <(git push origin '+refs/heads/x')"),
+     {"d"}),
+    ("步驟 2 補 git fetch 的引數裡夾 >(git push …)（行程替換）",
+     lambda t: append_to_block(t, 2, "git fetch origin >(git push origin '+refs/heads/x')"),
+     {"d"}),
+    ("步驟 2 補 git fetch 的引數字串裡有 push token（--upload-pack=…）",
+     lambda t: append_to_block(
+         t, 2, "git fetch --upload-pack='git push origin +refs/heads/x' ."),
+     {"d"}),
+    ("步驟 2 補讀取段的行尾註解寫 push（連註解都算）",
+     lambda t: append_to_block(
+         t, 2,
+         "git fetch origin '+refs/heads/main:refs/remotes/origin/main' # do not push"),
+     {"d"}),
+    # ── FORBIDDEN 七條與豁免共用 git 前置選項類別（issue #185 A3；PR #178 audit BLOCK 1） ──
+    ("步驟 2 補一行 git --no-pager push fetch（遠端名叫 fetch，不是子指令）",
+     lambda t: append_to_block(t, 2, "git --no-pager push fetch '+refs/heads/x'"),
+     {"d"}),
+    ("步驟 2 補一行 git --git-dir <值> push -f（前置選項帶值）",
+     lambda t: append_to_block(t, 2, 'git --git-dir .git push -f origin "refs/tags/$tag"'),
+     {"d"}),
+    ("步驟 2 補一行 git -P push --delete",
+     lambda t: append_to_block(t, 2, 'git -P push --delete origin "refs/tags/$tag"'),
+     {"d"}),
+    ("步驟 2 補一行 git -C . tag -d",
+     lambda t: append_to_block(t, 2, 'git -C . tag -d "$tag"'),
+     {"d"}),
+    ("步驟 2 補一行 git --work-tree <值> tag --delete",
+     lambda t: append_to_block(t, 2, 'git --work-tree . tag --delete "$tag"'),
+     {"d"}),
+    ("步驟 2 補一行 git -c a=b push -d",
+     lambda t: append_to_block(t, 2, 'git -c a=b push -d origin "refs/tags/$tag"'),
+     {"d"}),
+    ("步驟 2 補一行 git -C . push 的空 refspec（:refs/）",
+     lambda t: append_to_block(t, 2, 'git -C . push origin :"refs/tags/$tag"'),
+     {"d"}),
+    ("步驟 2 補一行 git -C . push -f",
+     lambda t: append_to_block(t, 2, 'git -C . push -f origin "refs/tags/$tag"'),
+     {"d"}),
+    ("步驟 2 補一行 git -c a=b tag -f",
+     lambda t: append_to_block(t, 2, 'git -c a=b tag -f "$tag"'),
+     {"d"}),
+    # ── fence 辨識依 CommonMark（issue #185 A4；PR #172 audit BLOCK 3／4） ──
+    ("步驟 1 的開啟 fence 改成四個反引號（三個的關閉行關不掉，吞到檔尾）",
+     lambda t: edit_fence(t, 1, opener="````bash"),
+     {"a", "blocks", "c", "d", "e"}),
+    ("步驟 1 的關閉 fence 改成 `~~~`（字元不同，關不掉）",
+     lambda t: edit_fence(t, 1, closer="~~~"),
+     {"a", "blocks", "c"}),
+    ("步驟 1 的關閉 fence 後面多一個字（``` x，關不掉）",
+     lambda t: edit_fence(t, 1, closer="``` x"),
+     {"a", "blocks", "c"}),
+    ("步驟 4 的區塊整段縮排四格（縮排 ≥4 格不是 fence）",
+     lambda t: indent_block(t, 4, "    "),
+     {"blocks"}),
 ]
 
 # 正向突變：改完之後**不該**被擋的形狀。誤抓也是洞——會對合法寫法報紅的關卡，
@@ -690,6 +790,41 @@ POSITIVE = [
     ("步驟 1 的工作樹檢查改寫成 `|| { …; exit 1; }` 形",
      lambda t: edit_block_line(t, 1, '|| fail "git status',
                                lambda l: '  || { echo "git status --porcelain 跑不起來"; exit 1; }')),
+    # ── fence 辨識依 CommonMark 的對稱面（issue #185 A4）：這三形是合法 Markdown，不准被擋 ──
+    ("步驟 1 的關閉 fence 用五個反引號（比開啟長，照常關閉）",
+     lambda t: edit_fence(t, 1, closer="`````")),
+    ("步驟 1 的開閉 fence 各縮排三格（0–3 格仍是 fence）",
+     lambda t: edit_fence(t, 1, opener="   ```bash", closer="   ```")),
+    ("步驟 1 的 fence 改用 `~~~bash`／`~~~`",
+     lambda t: edit_fence(t, 1, opener="~~~bash", closer="~~~")),
+    # ── 豁免面收攏之後，合法的讀取形狀仍要放行（issue #185 A1／A2／A3） ──
+    ("步驟 1 補一行 GIT_DIR=x git fetch 的強制 refspec（前置賦值）",
+     lambda t: append_to_block(
+         t, 1, "GIT_DIR=x git fetch origin '+refs/heads/main:refs/remotes/origin/main'")),
+    ("步驟 1 補一行 GIT_DIR=\"$d\" git fetch 的強制 refspec（賦值帶 $ 不收窄）",
+     lambda t: append_to_block(
+         t, 1,
+         "GIT_DIR=\"$d\" git fetch origin '+refs/heads/main:refs/remotes/origin/main'")),
+    ("步驟 1 補一行 git fetch>/dev/null（子指令的 token 在 `>` 前結束）",
+     lambda t: append_to_block(
+         t, 1, "git fetch>/dev/null origin '+refs/heads/main:refs/remotes/origin/main'")),
+    ("步驟 1 補一行 git -c a=b -C . fetch 的強制 refspec（兩個前置選項）",
+     lambda t: append_to_block(
+         t, 1,
+         "git -c a=b -C . fetch origin '+refs/heads/main:refs/remotes/origin/main'")),
+    ("步驟 1 補一行 git --git-dir <值> fetch 的強制 refspec（帶值長選項、空白接值）",
+     lambda t: append_to_block(
+         t, 1,
+         "git --git-dir .git fetch origin '+refs/heads/main:refs/remotes/origin/main'")),
+    ("步驟 1 補一行 git -P ls-remote（`-p`／`-P` 也是前置選項）",
+     lambda t: append_to_block(t, 1, "git -P ls-remote origin '+refs/tags/*'")),
+    ("步驟 1 補一行 git --exec-path=<值> ls-remote（長選項以 `=` 接值）",
+     lambda t: append_to_block(t, 1, "git --exec-path=/x ls-remote origin '+refs/tags/*'")),
+    ("步驟 1 補一行讀取段、註解寫 pushed／--receive-pack（不是 push token）",
+     lambda t: append_to_block(
+         t, 1,
+         "git fetch origin '+refs/heads/main:refs/remotes/origin/main'"
+         " # pushed via --receive-pack")),
 ]
 
 
