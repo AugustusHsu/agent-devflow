@@ -23,6 +23,10 @@ review 時最容易被看漏——調換兩個步驟、或在 push 後面多一�
 「突變 A 卻是斷言 B 在擋」這種歸因錯誤混過去，也擋不住「某條斷言其實永遠在響」。
 另有一組**正向突變**（`POSITIVE`）：改完之後不該被擋的形狀。誤抓和漏抓一樣是關卡的洞
 ——會對合法寫法報紅的測試，最後會被人關掉（issue #173 R1-3）。
+
+禁止寫法的比對（AC-10(d)）另有一道展開正規化：`${IFS}`、字內的 `${<名稱>}`、字內的空引號對。
+防誤寫不防對抗；只正規化本清單三形——清單外的 shell 展開照樣藏得住禁止寫法，
+定義與邊界見 `normalize_expansions()` 上方的註解（issue #189）。
 """
 import re
 import shlex
@@ -96,8 +100,9 @@ PRECHECK_NEEDLES = [
 #   * 誤抓——步驟 4 的 `trap 'rm -f "$vj"' EXIT` 裡也有 `-f`，那不是 push 旗標。
 # 所以 `-f`／`-d` 這種短旗標綁在它所屬的指令上（`git push`／`git tag`，`git` 與子指令之間
 # 容許 `GIT_OPTS` 的前置選項），`[^|;&]*` 讓比對不跨過 `|`、`;`、`&` 到下一個指令去。
-# 引號字串裡的同形字樣（`printf '%s' 'git tag -f'`）照報：字面比對不解析引號，這是已知的
-# 多報面（PR #178 audit BLOCK 1），文件的 bash 區塊本來就不該把禁止寫法擺成字串。
+# 引號字串裡的同形字樣（`printf '%s' 'git tag -f'`）照報：字面比對不解析引號（只有前置選項的
+# 值認引號，見 `GIT_VAL`），這是已知的多報面（PR #178 audit BLOCK 1），文件的 bash 區塊本來就
+# 不該把禁止寫法擺成字串。
 # `--force-with-lease` 另立一條：token 比對之後它不再被 `--force` 命中（後面接的是 `-`），
 # 要顯式保留才擋得住。
 #
@@ -111,8 +116,11 @@ PRECHECK_NEEDLES = [
 #
 # 三次補洞（PR #184 R1 BLOCK 2）：上面那個放行原本寫成「同段要有相鄰的 `git push`」，
 # 這是正向列舉，擋不住寫得出來的其他寫入形狀（見 `ForcedRefspec`）。改成反向列舉：
-# 只放行看得出是讀取類指令的段，其餘都報——「其餘都報」的射程由下面的豁免比對決定：
-# 豁免只看段首的指令本體，註解、引數裡的 `git fetch` 字樣不算；段內有命令替換也不算。
+# 只放行看得出是讀取類指令的段，其餘報出。「看得出」只到字面比對加上展開正規化
+# （`normalize_expansions()` 的三形）為止：清單外的拼法仍能讓寫入段被當成讀取段放過——
+# `--upload-pack='git p"us"h …'` 至今如此；`p${x}ush` 那一形在補上正規化之後才擋得住
+# （#188 R1 BLOCK 2，issue #189）。豁免只看段首的指令本體，註解、引數裡的 `git fetch` 字樣
+# 不算；段內有命令替換也不算。
 #
 # 四次補洞（PR #184 R2 BLOCK 1）：豁免原本在段內**任意位置**成立，於是
 # `git push origin '+refs/tags/$tag:refs/tags/$tag'  # 不是 git fetch`（行尾註解）與
@@ -135,23 +143,51 @@ PRECHECK_NEEDLES = [
 #     push，段首卻是字面的 `git fetch`。前置賦值的值域**不**收窄——`GIT_DIR="$d" git fetch …`
 #     是合法讀取，收窄會把它擋掉；命令替換改由整段的判斷擋。
 #
-# `GIT_OPTS`（issue #185 A3）：`git` 與子指令之間容許的前置選項，FORBIDDEN 各條與這裡共用
-# 同一份定義——兩邊各寫各的就會補一邊漏另一邊（`git -C . push -f …` 一度不報，PR #178
-# audit BLOCK 1）。封閉清單，照 `git --help` 的用法行：
+# `GIT_OPTS`（issue #185 A3）：`git` 與子指令之間容許的前置選項，FORBIDDEN 各條與這裡由
+# 同一個樣板 `_git_opts()` 產生——兩邊各寫各的就會補一邊漏另一邊（`git -C . push -f …` 一度
+# 不報，PR #178 audit BLOCK 1）。封閉清單，照 `git --help` 的用法行：
 #   * `-C <path>`、`-c <k=v>`：值在下一個 token。
 #   * `-p`／`-P`：不帶值。
 #   * `--git-dir`／`--work-tree`／`--namespace`／`--config-env`：帶值，`=` 或空白接值都合法
 #     （git 2.43 實測）。
 #   * 其餘 `--<旗標>[=<值>]`：不帶值，**不**把下一個 token 當成值吞掉——吞掉的話
 #     `git --no-pager push fetch '+refs/…'`（遠端就叫 `fetch`）會被讀成 `git … fetch` 而豁免。
-GIT_OPTS = (r"(?:-C\s+\S+|-c\s+\S+|-[pP](?![\w-])"
-            r"|--(?:git-dir|work-tree|namespace|config-env)(?:=\S+|\s+\S+)"
-            r"|--[A-Za-z][A-Za-z0-9-]*(?:=\S+)?)")
-# `git` ＋ 零個以上前置選項 ＋ 空白：接在後面的那個 token 就是子指令。
-GIT_PREFIX = r"\bgit\b(?:\s+" + GIT_OPTS + r")*\s+"
+#
+# 值的寫法兩邊刻意不同（issue #189 目標 1；#188 R1 BLOCK 1 前半）。FORBIDDEN 多認引號值
+# `GIT_VAL`：一個 shell word——雙引號段、單引號段、不含空白與引號的字元，三者任意串接，引號內
+# 可含空白（`-C "a b"`、`-c user.name="a b"`）。
+# 豁免維持 `\S+`，逐字同 #185：偵測面認得多，只會多報；豁免面認得多，會少報——引號配對與
+# shell 不一致時（`\"` 跳脫），引號值能把真正的子指令吞進值裡，段首就被讀成 `git … fetch`。
+# 代價是 `git -C "a b" fetch … '+refs/…'` 這種合法讀取照報（多報，不是漏報）。
+# FORBIDDEN 的前置選項整串二選一（`GIT_PREFIX`）：全照 `\S+` 比（與 #185 相同，所以只多認、
+# 不少認；`\"` 讓引號值讀錯的行由這一趟接），或全照 `GIT_VAL` 比。兩種值混在同一行時兩趟都
+# 讀錯：`git -C "a b" -C \"x push -f y\"` 前一個值要照 `GIT_VAL`、後一個要照 `\S+` 才讀得對，
+# 接不住（#185 也接不住，不是退步）。不做成每個值各自二選一：兩種比法切出的字不同
+# （`-C "a -C b"` 可以是一個選項，也可以是 `-C "a` 加 `-C b"` 兩個），比對失敗的行要把每種
+# 切法都試過，n 個這樣的選項就是 2^n 種組合；整串二選一只多一趟。
+# 同理，每一趟裡本單新增的比法不與既有的重疊：`GIT_VAL` 在引號值接得住時不退回 `\S+`；
+# 帶值長選項的 `=` 形維持 `\S+`，`--git-dir="a b"` 的引號值由其餘長選項那支的 `=<值>` 接。
+# 既有的重疊不在本單處理（#185 起如此）：不帶引號的 `--git-dir=a` 具名與其餘長選項兩支都接得住、
+# `--work-tree` 的空白形值可以是下一個長選項，同形連寫時比對時間隨個數倍增。
+def _git_opts(val):
+    """前置選項類別的樣板；`val` 是 `-C`／`-c`、帶值長選項空白形、其餘長選項 `=` 形的值。"""
+    return (r"(?:-C\s+" + val + r"|-c\s+" + val + r"|-[pP](?![\w-])"
+            r"|--(?:git-dir|work-tree|namespace|config-env)(?:=\S+|\s+" + val + r")"
+            r"|--[A-Za-z][A-Za-z0-9-]*(?:=" + val + r")?)")
+
+
+# 引號值：第一段含空白的引號段之前 ＋ 該段 ＋ 其後（任意 word 成分）。
+QUOTED_VAL = (r"""(?:[^\s"']|"[^"\s]*"|'[^'\s]*')*"""
+              r"""(?:"[^"\s]*\s[^"]*"|'[^'\s]*\s[^']*')"""
+              r"""(?:[^\s"']|"[^"]*"|'[^']*')*""")
+GIT_VAL = r"(?:" + QUOTED_VAL + r"|(?!" + QUOTED_VAL + r")\S+)"
+GIT_OPTS = _git_opts(GIT_VAL)
+# `git` ＋ 零個以上前置選項 ＋ 空白：接在後面的那個 token 就是子指令。前置選項整串二選一，
+# 理由見上。
+GIT_PREFIX = (r"\bgit\b(?:(?:\s+" + _git_opts(r"\S+") + r")*|(?:\s+" + GIT_OPTS + r")*)\s+")
 READ_ONLY_GIT_RE = re.compile(
     r"^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*"
-    + GIT_PREFIX + r"(?:fetch|ls-remote)(?=[\s<>]|$)")
+    + r"\bgit\b(?:\s+" + _git_opts(r"\S+") + r")*\s+" + r"(?:fetch|ls-remote)(?=[\s<>]|$)")
 # 指令段分隔，與 FORBIDDEN 各條的 `[^|;&]*` 同一把尺。
 SEGMENT_RE = re.compile(r"[|;&]")
 PLUS_REFS_RE = re.compile(r"\+refs/")
@@ -194,6 +230,50 @@ class ForcedRefspec:
             if not READ_ONLY_GIT_RE.search(seg):
                 return m
         return None
+
+
+# ── 展開正規化（issue #189 目標 2；#188 R1 BLOCK 1 後半、BLOCK 2） ─────────────────────
+# (d) 比對用的前處理。封閉清單，依序套用：
+#   1. `${IFS}` → 一個空白（`git${IFS}push` 在 bash 裡就是 `git push`）。
+#   2. 字內的 `${<名稱>}`（`<名稱>` 為 `[A-Za-z_][A-Za-z0-9_]*`）移除，還原被空變數拆開、
+#      或墊了前後綴的字（`p${x}ush`、`${x}push` → `push`；`git${x}` → `git`）。
+#   3. 字內的空引號對 `""`／`''` 移除（`p""ush`、`""push` → `push`；`git''` → `git`）。
+# 「字內」由 `_in_word()` 定義，2、3 共用：前一字元不是空白也不是 `=`，或後一字元不是空白。
+# 不算字內、不動的有兩種位置——
+#   (i) 前後都是空白或行首尾，自成一個字：`""`／`''` 在 bash 裡本來就是一個空引數，照留才對；
+#       `${<名稱>}` 自成一字時多半是真的值（`git -C ${d} fetch` 的路徑），當成空的拿掉會讓
+#       引數位置位移、`-C` 改吃 `fetch`，合法讀取就被報。
+#   (ii) 左鄰 `=`、右鄰空白或行尾：它是 `--opt=` 的整個值，拿掉只剩空值，前置選項的比對
+#       接不住（`--git-dir=${d} fetch`、`--git-dir="${d}" fetch`）。
+# 拿掉一個展開，新相鄰的是它左右兩個字元；這兩種位置的右鄰是空白或行尾，接不起兩段字，
+# 所以不動不會漏掉拆字。代價在 (i)：自成一字的空變數在 bash 裡整個消失
+# （`git ${x} push -f` 就是 `git push -f`），兩趟比對都接不住——列在下面的清單外。
+# 另一面是多報：正規化的前提是字內的 `${<名稱>}` 為空，`git push origin "${sha}:refs/tags/x"`
+# 拿掉 `${sha}` 就是遠端刪除的空 refspec，照報——`sha` 真的空了，這行就是刪除。確定非空的值
+# 寫 `${sha:?}`（空就中止；帶運算子，不在清單內，不動）。
+# 順序有意義：1 在 2 之前，否則 `${IFS}` 先被當成空變數拿掉，`git${IFS}push` 黏成 `gitpush`；
+# 2 在 3 之前，`p"${x}"ush` 拿掉變數後才露出 `""`。
+# 防誤寫不防對抗：不是 shell 模擬器，不分引號內外、不解析跳脫。清單外的形狀不承諾，處置是
+# 明寫不修、不另開單：自成一字的空變數（`git ${x} push -f`）、不帶大括號的 `$名稱`（含
+# `$IFS`）、帶運算子的展開（`${IFS:0:1}`）、`"p"ush`、`\push`、`eval`、`$(printf …)`、
+# 變數間接（`c=push; git $c …`）。
+# (d) 對原文與正規化後的文字各比一次，任一命中即報——只加不減。只比正規化後的文字會漏：
+# 正規化假設變數為空，`git -C '''' push -f …` 的兩個空引號對拿掉之後，`push` 被讀成 `-C` 的值。
+def _in_word(tok):
+    """`tok` 出現在字內（定義見上）的 regex。"""
+    return re.compile(r"(?<=[^\s=])" + tok + r"|" + tok + r"(?=\S)")
+
+
+EXPAND_IFS_RE = re.compile(r"\$\{IFS\}")
+EXPAND_VAR_RE = _in_word(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}")
+EXPAND_QUOTES_RE = _in_word(r"""(?:""|'')""")
+
+
+def normalize_expansions(txt):
+    """展開正規化：上面清單的三形，依 1 → 2 → 3 的順序套用。"""
+    txt = EXPAND_IFS_RE.sub(" ", txt)
+    txt = EXPAND_VAR_RE.sub("", txt)
+    return EXPAND_QUOTES_RE.sub("", txt)
 
 
 FORBIDDEN = [
@@ -459,9 +539,15 @@ def check(text, label):
     # 什麼」本來就寫在散文的行內 code span 裡，不擺進 bash 區塊（見上面 FORBIDDEN 的說明）。
     for blk in blocks:
         for idx, txt in statements(blk.body):
+            # 原文與展開正規化後各比一次（正規化沒改到就只比原文），任一命中即報
+            # （issue #189；理由見 normalize_expansions()）
+            ntxt = normalize_expansions(txt)
             for name, pat in FORBIDDEN:
                 if pat.search(txt):
                     bad("d", "%s 出現禁止寫法 %s：%s" % (at(blk, idx[0]), name, txt))
+                elif ntxt != txt and pat.search(ntxt):
+                    bad("d", "%s 出現禁止寫法 %s（展開正規化後）：%s → %s"
+                        % (at(blk, idx[0]), name, txt, ntxt))
 
     # (e) 步驟 3 的 push refspec 逐字 `"refs/tags/$tag"`，而且只有這一個
     b3 = block_of(3)
