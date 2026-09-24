@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh_TW" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        <link rel="canonical" href="https://augustushsu.github.io/agent-devflow/v0.5.0.0/devflow/seats/reviewer/">
+        <link rel="shortcut icon" href="../../../img/favicon.ico">
+        <title>seat: reviewer（審查位） - agent-devflow</title>
+        <link href="../../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../../css/brands.min.css" rel="stylesheet">
+        <link href="../../../css/solid.min.css" rel="stylesheet">
+        <link href="../../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <link href="../../../css/version-select.css" rel="stylesheet">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../../..">agent-devflow</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../.." class="nav-link">agent-devflow</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle active" aria-current="page" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Devflow</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../RELEASING/" class="dropdown-item">kit 發版程序</a>
+</li>
+                                    
+<li>
+    <a href="../../WORKFLOW/" class="dropdown-item">agent-devflow WORKFLOW</a>
+</li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Coders</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../coders/claude-code/" class="dropdown-item">coder: claude-code</a>
+</li>
+            
+<li>
+    <a href="../../coders/codex/" class="dropdown-item">coder: codex</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Forges</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../forges/gitea/" class="dropdown-item">forge: gitea</a>
+</li>
+            
+<li>
+    <a href="../../forges/github/" class="dropdown-item">forge: github</a>
+</li>
+            
+<li>
+    <a href="../../forges/gitlab/" class="dropdown-item">forge: gitlab</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Orchestrators</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../orchestrators/hermes/" class="dropdown-item">orchestrator: hermes</a>
+</li>
+            
+<li>
+    <a href="../../orchestrators/none/" class="dropdown-item">orchestrator: none</a>
+</li>
+            
+<li>
+    <a href="../../orchestrators/paperclip/" class="dropdown-item">orchestrator: paperclip</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Hermes</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../orchestrators/hermes/SKILL/" class="dropdown-item">devflow orchestrator（Hermes）</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Seats</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../" class="dropdown-item">devflow/seats — 職位定義</a>
+</li>
+            
+<li>
+    <a href="../approver/" class="dropdown-item">seat: approver（裁決位）</a>
+</li>
+            
+<li>
+    <a href="../coordinator/" class="dropdown-item">seat: coordinator（協調位）</a>
+</li>
+            
+<li>
+    <a href="../implementer/" class="dropdown-item">seat: implementer（實作位）</a>
+</li>
+            
+<li>
+    <a href="./" class="dropdown-item active" aria-current="page">seat: reviewer（審查位）</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Templates</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../templates/entry-block/" class="dropdown-item">Entry block</a>
+</li>
+            
+<li>
+    <a href="../../templates/issue-review-prompt/" class="dropdown-item">Issue review prompt</a>
+</li>
+            
+<li>
+    <a href="../../templates/issue/" class="dropdown-item">Issue</a>
+</li>
+            
+<li>
+    <a href="../../templates/local-README/" class="dropdown-item">devflow.local/</a>
+</li>
+            
+<li>
+    <a href="../../templates/pr/" class="dropdown-item">Pr</a>
+</li>
+            
+<li>
+    <a href="../../templates/review-prompt/" class="dropdown-item">Review prompt</a>
+</li>
+            
+<li>
+    <a href="../../templates/spec/" class="dropdown-item">&lt;功能名稱&gt;</a>
+</li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Docs</a>
+                                <ul class="dropdown-menu">
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Guide</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/guide/" class="dropdown-item">docs/guide — 人類專用</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Spec</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/spec/" class="dropdown-item">docs/spec — 本 repo 的規格集</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/spec/install/spec/" class="dropdown-item">install：把入口區塊安全插入其他專案的 CLAUDE.md／AGENTS.md</a>
+</li>
+    </ul>
+  </li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Kit install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/spec/kit-install/spec/" class="dropdown-item">kit-install：把 agent-devflow 完整安裝到消費者專案；升級與回復皆為重裝</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                            <li class="nav-item">
+                                <a rel="prev" href="../implementer/" class="nav-link">
+                                    <i class="fa fa-arrow-left"></i> Previous
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a rel="next" href="../../templates/entry-block/" class="nav-link">
+                                    Next <i class="fa fa-arrow-right"></i>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="https://github.com/AugustusHsu/agent-devflow" class="nav-link"><i class="fa-brands fa-github"></i> GitHub</a>
+                            </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#seat-reviewer" class="nav-link">seat: reviewer（審查位）</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#_1" class="nav-link">職責</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#_2" class="nav-link">產出物</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#_3" class="nav-link">共同要求（與工具無關）</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#context" class="nav-link">context 語意</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#_4" class="nav-link">規則義務</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#pr" class="nav-link">例外：規格 PR</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#_5" class="nav-link">填充者須具備的能力</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="seat-reviewer">seat: reviewer（審查位）<a class="headerlink" href="#seat-reviewer" title="Permanent link">&para;</a></h1>
+<p>職位定義。只寫這個位要做什麼、受哪些規則約束、填它的人或工具要會什麼。不指定填哪個工具，也不記工具的指令；前者是綁定、後者住對照表。</p>
+<h2 id="_1">職責<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<ul>
+<li>對實作 PR 依 issue 上寫的 G 審查（<code>G1</code>、<code>R1</code>）：拿到 G、T、<code>base..head</code>、完整來源、測試指令。治理變更的候選同樣依舊 G 審，候選版本不得放寬對自己的審查（<code>G2</code>）；候選分支中的入口檔、skill、CI 變更是待審產品，不是本次的治理依據（<code>G5</code>）。</li>
+<li>逐條 AC 給證據，至少嘗試一個反例；任一條 AC 未評估者不得 <code>APPROVE</code>；檢查 write scope 是否被超出、是否夾帶 <code>G5</code> 所列變更（<code>R4</code>）。用 <code>templates/review-prompt.md</code>。</li>
+<li>重審時核對上一輪阻擋項的處置：<code>FIX</code> 是否真的關閉、<code>REJECT</code> 的反證重跑是否成立（<code>R11</code>）。</li>
+<li>verdict 寫明 head sha（<code>R3</code>）；證據住 forge（<code>R5</code>）；證據能定位（<code>R6</code>）。</li>
+<li>對照表格子的狀態依 <code>R7</code>、<code>R8</code>、<code>R9</code>、<code>R10</code> 判。</li>
+<li>審查對象是最終整合候選（<code>M4</code>）；有效 verdict 是合併前提（<code>M1</code>）。</li>
+<li>審查節屬保護節，自 stage 0 起生效、不依 stage（<code>ST5</code>）。</li>
+<li>派工前讀審（<code>L7</code>）——填位基準、產出物與唯讀限制依 <code>L7</code>；不適用本檔「共同要求」的 <code>R2</code> 異廠基準、「產出物」段的 PR review 定義、「填充者須具備的能力」的「在 forge 的 PR 上留 review／comment」一項。</li>
+</ul>
+<h2 id="_2">產出物<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>PR 上的 review／comment：verdict（<code>APPROVE</code>／<code>REQUEST_CHANGES</code>）、head sha、逐條 AC 證據、反例、write scope 與 <code>G5</code> 檢查、驗證指令結果。審查報告不放 repo（<code>I4</code>）。</p>
+<h2 id="_3">共同要求（與工具無關）<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<p>以下對所有填充者成立；對照表只記各工具怎麼達成，不重述這些要求。</p>
+<ul>
+<li>全新 context：不帶實作位的脈絡；每次審查（含 <code>R3</code> 的重審）都從全新 context 開始（<code>R1</code>）。</li>
+<li>不接受作者摘要當證據；只依材料判斷（<code>R1</code>）。</li>
+<li>不得對自己的工作簽正式 verdict（<code>R1</code>）。</li>
+<li>建議填此位的工具與填實作位的工具異廠；只有一家可用時，用同廠的全新 context（<code>R2</code>）。</li>
+<li>計數式斷言不作任一條 AC 的唯一證據（<code>R6</code>）；<code>📝</code> 不當任一條 AC 的證據（<code>R9</code>）。</li>
+<li>超過 20 KB 的檔案不整份載入（<code>D4</code>）。</li>
+</ul>
+<h2 id="context">context 語意<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
+<p>必須全新。重用實作位的 context 即失去 <code>R1</code> 的獨立性。</p>
+<h2 id="_4">規則義務<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<p><code>I4</code>、<code>L7</code>、<code>R1</code>、<code>R2</code>、<code>R3</code>、<code>R4</code>、<code>R5</code>、<code>R6</code>、<code>R7</code>、<code>R8</code>、<code>R9</code>、<code>R10</code>、<code>R11</code>、<code>M1</code>、<code>M4</code>、<code>G1</code>、<code>G2</code>、<code>G5</code>、<code>S5</code>、<code>ST5</code>、<code>D4</code>。</p>
+<h2 id="pr">例外：規格 PR<a class="headerlink" href="#pr" title="Permanent link">&para;</a></h2>
+<p><code>S5</code>：規格 PR 由人審。此位的填充者依任務類型而異——實作 PR 由綁定的填充者，規格 PR 由人——單值綁定表達不了這件事。記為已知例外，不在首版解決。</p>
+<h2 id="_5">填充者須具備的能力<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<ul>
+<li>讀取 <code>base..head</code> 的完整來源（不只 diff）以及 G、T。</li>
+<li>執行 issue 上的驗證指令。</li>
+<li>在 forge 的 PR 上留 review／comment。</li>
+<li>以全新 context 啟動（例如乾淨 checkout、不帶先前對話的新 session）。</li>
+</ul></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../../js/base.js"></script>
+        <script src="../../../search/main.js"></script>
+        <script src="../../../js/version-select.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

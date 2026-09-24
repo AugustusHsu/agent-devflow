@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="zh_TW" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        <link rel="canonical" href="https://augustushsu.github.io/agent-devflow/v0.5.0.0/devflow/coders/codex/">
+        <link rel="shortcut icon" href="../../../img/favicon.ico">
+        <title>coder: codex - agent-devflow</title>
+        <link href="../../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../../css/brands.min.css" rel="stylesheet">
+        <link href="../../../css/solid.min.css" rel="stylesheet">
+        <link href="../../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <link href="../../../css/version-select.css" rel="stylesheet">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../../..">agent-devflow</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../.." class="nav-link">agent-devflow</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle active" aria-current="page" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Devflow</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../RELEASING/" class="dropdown-item">kit 發版程序</a>
+</li>
+                                    
+<li>
+    <a href="../../WORKFLOW/" class="dropdown-item">agent-devflow WORKFLOW</a>
+</li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Coders</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../claude-code/" class="dropdown-item">coder: claude-code</a>
+</li>
+            
+<li>
+    <a href="./" class="dropdown-item active" aria-current="page">coder: codex</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Forges</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../forges/gitea/" class="dropdown-item">forge: gitea</a>
+</li>
+            
+<li>
+    <a href="../../forges/github/" class="dropdown-item">forge: github</a>
+</li>
+            
+<li>
+    <a href="../../forges/gitlab/" class="dropdown-item">forge: gitlab</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Orchestrators</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../orchestrators/hermes/" class="dropdown-item">orchestrator: hermes</a>
+</li>
+            
+<li>
+    <a href="../../orchestrators/none/" class="dropdown-item">orchestrator: none</a>
+</li>
+            
+<li>
+    <a href="../../orchestrators/paperclip/" class="dropdown-item">orchestrator: paperclip</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Hermes</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../orchestrators/hermes/SKILL/" class="dropdown-item">devflow orchestrator（Hermes）</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Seats</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../seats/" class="dropdown-item">devflow/seats — 職位定義</a>
+</li>
+            
+<li>
+    <a href="../../seats/approver/" class="dropdown-item">seat: approver（裁決位）</a>
+</li>
+            
+<li>
+    <a href="../../seats/coordinator/" class="dropdown-item">seat: coordinator（協調位）</a>
+</li>
+            
+<li>
+    <a href="../../seats/implementer/" class="dropdown-item">seat: implementer（實作位）</a>
+</li>
+            
+<li>
+    <a href="../../seats/reviewer/" class="dropdown-item">seat: reviewer（審查位）</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Templates</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../templates/entry-block/" class="dropdown-item">Entry block</a>
+</li>
+            
+<li>
+    <a href="../../templates/issue-review-prompt/" class="dropdown-item">Issue review prompt</a>
+</li>
+            
+<li>
+    <a href="../../templates/issue/" class="dropdown-item">Issue</a>
+</li>
+            
+<li>
+    <a href="../../templates/local-README/" class="dropdown-item">devflow.local/</a>
+</li>
+            
+<li>
+    <a href="../../templates/pr/" class="dropdown-item">Pr</a>
+</li>
+            
+<li>
+    <a href="../../templates/review-prompt/" class="dropdown-item">Review prompt</a>
+</li>
+            
+<li>
+    <a href="../../templates/spec/" class="dropdown-item">&lt;功能名稱&gt;</a>
+</li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Docs</a>
+                                <ul class="dropdown-menu">
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Guide</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/guide/" class="dropdown-item">docs/guide — 人類專用</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Spec</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/spec/" class="dropdown-item">docs/spec — 本 repo 的規格集</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/spec/install/spec/" class="dropdown-item">install：把入口區塊安全插入其他專案的 CLAUDE.md／AGENTS.md</a>
+</li>
+    </ul>
+  </li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Kit install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/spec/kit-install/spec/" class="dropdown-item">kit-install：把 agent-devflow 完整安裝到消費者專案；升級與回復皆為重裝</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                            <li class="nav-item">
+                                <a rel="prev" href="../claude-code/" class="nav-link">
+                                    <i class="fa fa-arrow-left"></i> Previous
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a rel="next" href="../../forges/gitea/" class="nav-link">
+                                    Next <i class="fa fa-arrow-right"></i>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="https://github.com/AugustusHsu/agent-devflow" class="nav-link"><i class="fa-brands fa-github"></i> GitHub</a>
+                            </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#coder-codex" class="nav-link">coder: codex</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#_1" class="nav-link">通用</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="coder-codex">coder: codex<a class="headerlink" href="#coder-codex" title="Permanent link">&para;</a></h1>
+<p>衍生值對照表，<strong>只有通用節</strong>（值欄宣稱可重用的工具能力或程序，repo 與環境只是可替換的參數）。本機節——具名的環境 instance——住 <code>devflow.local/&lt;同路徑&gt;</code>，不隨 kit 安裝。分節與狀態欄依 <code>R9</code>。</p>
+<h2 id="_1">通用<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>面向</th>
+<th>職位</th>
+<th>值</th>
+<th>狀態</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>headless 執行（<code>L2</code>）</td>
+<td>implementer</td>
+<td><code>codex exec -C &lt;worktree&gt; -m &lt;model&gt; -c model_reasoning_effort=&lt;level&gt; --sandbox workspace-write --json -o &lt;last.md&gt; - &lt; &lt;prompt.txt&gt;</code>；<code>--json</code> 取事件流、<code>-o &lt;file&gt;</code> 取最後訊息；末尾的 <code>-</code> 表 prompt 由 <strong>stdin</strong> 餵入；不需 PTY</td>
+<td>✅ 可用（實測 2026-09-21，升自 <code>📝</code>；既有 <code>📝</code> 記載原文保留於後段。<code>✅</code> 成立條件：驗證方式已在<strong>第二個 repo</strong> 由<strong>不同任務</strong>以值欄指令<strong>逐字</strong>（無任何額外旗標）重跑，三點全部再現，三點的<strong>原文</strong>（事件流首行 JSON、<code>-o</code> 檔全文、stdin／無 PTY 說明）與完整啟動指令記在 forge 留言，受測環境（<code>R10</code>）附齊。實跑：消費者 repo <code>AugustusHsu/devflow-e2e</code> issue #5，指令 <code>codex exec -C &lt;worktree&gt; -m gpt-5.6-sol -c model_reasoning_effort=medium --sandbox workspace-write --json -o /tmp/e2e-coder5-last.md - &lt; /tmp/e2e-coder5.txt</code>：(1) 首行 <code>{"type":"thread.started","thread_id":"01a0c1da-a22c-7de0-a701-89c481684d65"}</code>；(2) <code>-o</code> 檔全文 <code>DONE / commit: e86a486… / rows: 5 ✅ / 0 📝</code>；(3) prompt 由 <code>- &lt; file</code> 重導入、程序在 <code>systemd-run --scope</code> 下無控制終端；exit 0。產物 commit <code>e86a486</code> → PR #6 合併 <code>6a3da96</code>。附帶：(a) <code>-C</code> 指向 <code>git worktree</code>（<code>.git</code> 為檔案）時 Codex 0.149.1 <strong>不需</strong> <code>--skip-git-repo-check</code>，本次即無該旗標；(b) <code>-c model_reasoning_effort=medium</code> 不加引號被接受；(c) 舊 <code>📝</code> 記的「<code>~/.codex/AGENTS.md</code> commit 前徵同意會蓋過派工 prompt」在 prompt 明寫「orchestrator 已預先同意 commit」時未再現，與該段建議一致。受測環境：2026-09-21，<code>codex-cli 0.149.1</code>、模型 <code>gpt-5.6-sol</code>／reasoning medium；執行身分為本機使用者以 Codex 訂閱登入；目標 repo 私有 <code>AugustusHsu/devflow-e2e</code>，worktree <code>devflow-e2e.worktrees/5</code>。證據：https://github.com/AugustusHsu/devflow-e2e/issues/5#issuecomment-5754746924（三點原文）、https://github.com/AugustusHsu/devflow-e2e/pull/6。—— 以下為原 <code>📝</code> 記載：驗證方式：以值欄的指令對一個既有 worktree 派任一任務，prompt 寫在 <code>&lt;prompt.txt&gt;</code> 由 stdin 餵入；看三點——(1) <code>--json</code> 的事件流第一行為 <code>thread.started</code> 且帶 <code>thread_id</code>；(2) <code>-o</code> 指定的檔案在結束後含該次的最後訊息；(3) 全程無 PTY（stdin 是重導入的檔案）。實跑：orchestrator 於 #110 以 <code>codex exec -C &lt;worktree&gt; -m gpt-5.6-sol -c model_reasoning_effort=high --sandbox workspace-write --json -o &lt;last.md&gt; - &lt; prompt.txt</code> 派 Codex 首次擔任 implementer，thread <code>01a0bdd3-bbf9-7010-9bcb-08c8d898e83b</code>，18 個指令、5 則訊息，exit 0，產物即 PR #111。<strong><code>~/.codex/AGENTS.md</code> 的「commit 前徵同意」會蓋過派工 prompt 的 commit 指示，coder 停在 commit 前</strong>；需 <code>codex exec resume &lt;id&gt;</code> 授權，或在 prompt 裡明寫「本次 orchestrator 已預先同意 commit」。這是 headless 用法的實際約束，與 <code>L3</code> 停無關（見本表 HITL 格）。受測環境：2026-09-20，<code>codex-cli 0.149.1</code>、模型 <code>gpt-5.6-sol</code>／reasoning high；執行身分為本機使用者以 Codex 訂閱登入；目標 repo <code>AugustusHsu/agent-devflow</code>，worktree <code>agent-devflow.worktrees/110</code>。<strong>為何不是 <code>✅</code></strong>：驗證由 orchestrator 執行並回報，尚無第三者獨立重跑。證據：https://github.com/AugustusHsu/agent-devflow/issues/110#issuecomment-5748564171）</td>
+</tr>
+<tr>
+<td>入口檔（<code>D2</code>）</td>
+<td>—</td>
+<td><code>AGENTS.md</code></td>
+<td>⬜ 未測（2026-09-20 嘗試驗證（#106 AC-3）：審查 prompt 刻意不提 <code>D4</code>、審查對象含 162 KB 的 <code>scripts/devflow_checks.py</code>，事後查事件流看審查者首次接觸該檔的方式——事件流裡它碰該檔只有兩次、都是執行（<code>python3 scripts/devflow_checks.py</code>、<code>python3 tests/smoke_devflow_checks.py</code>），從沒讀它，無「先 <code>grep -n</code> 還是直接讀」的信號，分不出遵從來源。要驗這格得設計一個審查對象本身就是大檔的任務，見 https://github.com/AugustusHsu/agent-devflow/issues/106#issuecomment-5748457773）</td>
+</tr>
+<tr>
+<td>權限</td>
+<td>—</td>
+<td><code>--sandbox read-only|workspace-write</code> 的隔離<strong>依賴 host 能建 user namespace</strong>（Codex 的 Linux 沙箱用 bubblewrap 實作）；建不起來時 Codex 不拒絕執行、也不停下診斷，而是印 <code>warning: Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.</code> 後<strong>照跑，等同 <code>danger-full-access</code></strong>；<code>workspace-write</code> 模式連這行 warning 都不印，靜默無隔離。host 能建 user namespace 時隔離成立：<code>read-only</code> 下 workdir 內外的寫入皆被 <code>Read-only file system</code> 拒；<code>workspace-write</code> 的可寫根<strong>預設是 workdir ＋ <code>/tmp</code> ＋ <code>$TMPDIR</code></strong>，不是只有 workdir（<code>codex exec</code> 開頭的 header 會印 <code>sandbox: workspace-write [workdir, /tmp, $TMPDIR]</code>），可寫根<strong>外</strong>的寫入被拒</td>
+<td>✅ 可用（驗證方式：<strong>先在 host 上跑 <code>bwrap --unshare-user --bind / / true</code> 確認 host 條件</strong>，失敗則本格前提不成立、以下結果不會重現。再對乾淨 <code>/tmp</code> clone 執行 <code>codex exec -C &lt;clone&gt; --sandbox read-only -o &lt;out&gt; - &lt; &lt;probe.txt&gt;</code>，probe prompt 依序要求 (1) 讀一個檔 (2) 跑 <code>git log</code> (3) 寫 clone <strong>外</strong>的 <code>/tmp/ro-probe-out.txt</code>（<strong>此路徑須與 <code>&lt;probe.txt&gt;</code> 不同</strong>——同路徑會自撞，檔案必然存在，判不出有沒有落地） (4) 寫 clone <strong>內</strong>一檔，並對 (3)(4) 各跑一次 <code>ls -l</code> 回報；隔離成立則 (3)(4) 皆被拒、兩檔皆不存在。<code>workspace-write</code> 再跑一次：因 <code>/tmp</code> 在該模式下本來就可寫，(3) 要改成寫<strong>可寫根外</strong>的路徑（例如 <code>$HOME</code> 下的一個檔）才測得到邊界，預期 (3) 拒、(4) 成功。判落地一律由派工者自己 <code>ls</code>／讀檔確認，不採信模型回報。實跑：orchestrator 於 <code>332ab9d</code> 首次跑，四步全 <code>ok</code>，<code>/tmp/ro106-probe.txt</code> 與 <code>/tmp/ro106/PROBE.md</code> 皆真的落地——<strong>隔離不成立</strong>；同一 host 直接跑 <code>bwrap</code> 即失敗：<code>setting up uid map: Permission denied</code>／<code>loopback: Failed RTM_NEWADDR: Operation not permitted</code>，故該 host 上兩模式皆無隔離。<strong>根因與修法</strong>：Ubuntu 24.04 的 <code>kernel.apparmor_restrict_unprivileged_userns=1</code> 擋掉沒有 AppArmor profile 的 <code>bwrap</code>；裝 <code>/etc/apparmor.d/bwrap</code>（<code>flags=(unconfined)</code> ＋ <code>userns</code> 授權，只給 bwrap 一個 profile 名字，沿 Ubuntu <code>lxc-usernsexec</code> 的模式）後 <code>bwrap --unshare-user --bind / / true</code> 成功。修復後於 <code>b9f985a</code> 的 <code>/tmp/ro127</code> clone 重跑：<code>read-only</code> 的 (1)(2) <code>ok</code>、(3)(4) 皆 <code>/bin/bash: …: Read-only file system</code>，派工者自查 <code>&lt;probe.txt&gt;</code> 內容原封未被覆寫、clone 內 <code>PROBE.md</code> 不存在；<code>workspace-write</code> 的 clone 內 <code>PROBE.md</code> 與 <code>/tmp</code> 下的檔皆寫成（兩者都在可寫根內），改寫 <code>$HOME</code> 下的路徑則 <code>Read-only file system</code> 且檔案不存在——兩模式邊界皆與值欄相符。受測環境（<code>R10</code>）——<strong>首次驗證</strong>：2026-09-20，<code>codex-cli 0.149.1</code>、<code>bwrap 0.9.0</code>（該次為負結果）；<strong>最近確認</strong>：2026-09-21，<code>codex-cli 0.149.1</code>、<code>bwrap 0.9.0</code>，coder session <code>2a538534</code>。兩次共同條件：模型 <code>gpt-5.6-sol</code>／reasoning low；執行身分為本機使用者以 Codex 訂閱登入；目標 repo <code>AugustusHsu/agent-devflow</code> 的 <code>/tmp</code> clone。<strong>host 條件：<code>bwrap --unshare-user --bind / / true</code> 須成功</strong>——這是本格成立的前提，host 的 AppArmor／<code>kernel.apparmor_restrict_unprivileged_userns</code>／userns 相關設定變更使該條件不再成立時，本格依 <code>R10</code> 降為 <code>📝</code>。證據：https://github.com/AugustusHsu/agent-devflow/issues/127#issuecomment-5751267413 ；負結果原始紀錄 https://github.com/AugustusHsu/agent-devflow/issues/106#issuecomment-5748372216）</td>
+</tr>
+<tr>
+<td>worktree（<code>I2</code>）</td>
+<td>coordinator（建）／implementer（不自建）</td>
+<td>由 orchestrator 建</td>
+<td>📝 已宣稱（<code>R9</code> 子類「驗證未達 <code>✅</code>」：本格附有第三者現在能執行的驗證方式，實跑結果與值欄宣稱相符，但不滿足 <code>✅</code> 的成立條件，理由見末段。驗證方式：orchestrator 先以 <code>git worktree add</code> 建好 worktree，coder 以 <code>codex exec -C &lt;該路徑&gt;</code> 進入；事後 grep 該次 <code>--json</code> 事件流裡的全部指令，<code>git worktree</code>、<code>git checkout -b</code>、<code>git switch</code> 三者皆無命中，即 coder 未自建 worktree 或分支。實跑：#110 派工的 18 個指令中三者皆 0 命中，Codex 全程在 orchestrator 預建的 worktree 內工作。受測環境：2026-09-20，<code>codex-cli 0.149.1</code>、模型 <code>gpt-5.6-sol</code>／reasoning high；執行身分為本機使用者以 Codex 訂閱登入；目標 repo <code>AugustusHsu/agent-devflow</code>，worktree <code>agent-devflow.worktrees/110</code>。<strong>為何不是 <code>✅</code></strong>：驗證由 orchestrator 執行並回報，尚無第三者獨立重跑。證據：https://github.com/AugustusHsu/agent-devflow/issues/110#issuecomment-5748564171）</td>
+</tr>
+<tr>
+<td>HITL（<code>L3</code>）</td>
+<td>implementer</td>
+<td>headless 無互動 → issue 留言後停</td>
+<td>⬜ 未測（2026-09-20 嘗試驗證（#110）：派工 prompt 未明令「留言後停」，只指向 <code>L3</code> 原文；coder 讀了 <code>L3</code>（事件流引用 23 次）、讀了三張 PR 的紀錄，自判「比對結果已足以收斂」後直接改，未留言。<strong>本任務的未決事項強度不足以區分「判斷不需停」與「不會停」</strong>——它的判斷可能是對的。需未決事項更明確（處置明顯落在 write scope 外、或 G／T 明顯衝突）的載體才能驗，見 https://github.com/AugustusHsu/agent-devflow/issues/110#issuecomment-5748564171）</td>
+</tr>
+<tr>
+<td>審查用法（<code>R1</code>）</td>
+<td>reviewer</td>
+<td>於乾淨 checkout 執行 <code>codex exec -m &lt;model&gt; -c model_reasoning_effort=&lt;level&gt; --sandbox workspace-write -o &lt;verdict.md&gt; - &lt; &lt;prompt.txt&gt;</code>；末尾的 <code>-</code> 表 prompt 由 <strong>stdin</strong> 餵入。checkout 以 <code>git clone --shared</code> 到 <code>/tmp</code> 後 <code>git checkout &lt;head sha&gt;</code>。<code>--shared</code> clone 的 origin 是本機路徑，<code>gh</code> 無法自動推導 repo（錯誤：<code>none of the git remotes … point to a known GitHub host</code>）——須 <code>git remote set-url origin</code> 成 GitHub remote（HTTPS 或 SSH），或以 <code>gh --repo &lt;owner/repo&gt;</code>／<code>GH_REPO</code> 明示。<code>--skip-git-repo-check</code> 在此<strong>非必要</strong>：它只放行「非 git 目錄」（在非 git 目錄不加它會擋：<code>Not inside a trusted directory and --skip-git-repo-check was not specified</code>），而 <code>/tmp</code> checkout 本身是 git repo</td>
+<td>📝 已宣稱（<code>R9</code> 子類「驗證未達 <code>✅</code>」：驗證方式＝照值欄指令於乾淨 checkout 實跑（本 repo #80→#105 的 Codex 審查全以此形式實跑，verdict 貼於各 PR）；不達 <code>✅</code> 的理由：受測環境記載與第三者重跑證據待 #106 第二輪補齊後再判能否升 <code>✅</code>；來源具名：orchestrator（Hermes）。原值欄並列的 <code>codex exec review</code> 依 <code>R7</code> 拆成下一列）</td>
+</tr>
+<tr>
+<td>審查用法：<code>review</code> 子命令（<code>R1</code>）</td>
+<td>reviewer</td>
+<td><code>codex exec review</code>——Codex 內建的 code review 子命令</td>
+<td>⬜ 未測（子命令存在已驗：<code>codex exec --help</code> 於 <code>codex-cli 0.149.1</code> 列出 <code>review  Run a code review against the current repository</code>。但<strong>未驗證</strong>它能否讀自訂 review prompt、能否輸出到指定檔；本 repo 至 <code>332ab9d</code> 止從未用過。依 <code>R7</code> 與上一列拆開各自標狀態，不共格，見 #106 AC-1）</td>
+</tr>
+<tr>
+<td>內容過濾</td>
+<td>reviewer／implementer</td>
+<td>OpenAI 端的內容安全過濾會中止 <code>codex exec</code>：訊息原文 <code>ERROR: This content was flagged for possible cybersecurity risk</code>，exit 1、<code>-o</code> 指定的檔案無輸出（拿不到 verdict）。已知觸發主題：<strong>重跑「symlink 越界刪除」的注入腳本</strong>——<code>#137</code> review-138b 連續兩次命中（65k tokens 後中止）。攔的是該主題本身，不是 Codex 或 sandbox 的限制；同主題的第一輪未被攔，差別在當時腳本是審查者<strong>自己逐步寫成</strong>，而非把寫好的腳本整份餵進去。處置：改由 orchestrator 代跑該腳本、把執行結果當輸入交給審查者，審查者只做靜態閱讀＋跑既有 harness（review-138c 即以此完成）</td>
+<td>📝 已宣稱（<code>R9</code> 子類「驗證未達 <code>✅</code>」：驗證方式＝把值欄所述的注入腳本整份餵進 <code>codex exec</code>，第三者不依賴他人協助即可照著做；不達 <code>✅</code> 的理由：過濾是 OpenAI 端的非確定性判定，同一份內容不保證再現、也無從由外部觸發或關閉，重跑不保證得到值欄宣稱的結果——不論先前觸發過幾次，依 <code>R9</code> 不得以回報次數升 <code>✅</code>，也不得據本格宣告「某類審查會被擋」而略過該審查。來源具名：orchestrator（Hermes）於 #137 的紀錄 https://github.com/AugustusHsu/agent-devflow/issues/137#issuecomment-5752718058 ，內含兩次中止的說明、代跑腳本 <code>/tmp/vd138_rmdir_race.py</code> 於 <code>62e77be</code> 的輸出原文（<code>exit=3</code>、<code>outside_deep_lexists=True</code>、stderr <code>devflow/zz/deep: symlink appeared under devflow/ during the write phase</code>）與 review-138c 的重派指令全文）</td>
+</tr>
+<tr>
+<td>交接</td>
+<td>implementer（context 延續）／coordinator（重派）</td>
+<td><code>codex exec resume &lt;id&gt;</code></td>
+<td>📝 已宣稱（<code>R9</code> 子類「驗證未達 <code>✅</code>」：本格附有第三者現在能執行的驗證方式，重跑結果與值欄宣稱相符，但不滿足 <code>✅</code> 的成立條件，理由見末段。驗證方式：任一 <code>codex exec --json</code> 取事件流第一行 <code>thread.started</code> 的 <code>thread_id</code>；以 <code>codex exec resume &lt;該 id&gt; --json</code> 接回，看第二次事件流第一行的 <code>thread_id</code> 是否與第一次相同；第二段 prompt 只引用第一段的內容而不重給，看回覆是否逐項對應。實跑：orchestrator 於 PR #107 第一輪審查刻意分兩段，三個獨立來源——第一段事件流第一行、審查者自報的 <code>SESSION_ID:</code>、第二段 <code>resume</code> 的事件流第一行——同一 id <code>01a0bdb9-1001-7113-b8d2-348a30e16703</code>；第二段 prompt 未重給 diff、未重列疑慮內容，產出的 verdict 逐項對應第一段的五項疑慮並各判阻擋／非阻擋，context 確實延續。受測環境：2026-09-20，<code>codex-cli 0.149.1</code>、模型 <code>gpt-5.6-sol</code>／reasoning high；執行身分為本機使用者以 Codex 訂閱登入；目標 repo <code>AugustusHsu/agent-devflow</code>，checkout <code>/tmp/rv107</code> 於 <code>f73b935</code>。<strong>為何不是 <code>✅</code></strong>：驗證由 orchestrator 執行並回報，尚無第三者獨立重跑。證據：https://github.com/AugustusHsu/agent-devflow/issues/106#issuecomment-5748457773 ；PR #107 第一輪 verdict https://github.com/AugustusHsu/agent-devflow/pull/107#pullrequestreview-5259971160 ，其內文自載 <code>SESSION:</code> 行，第三者可與該留言比對）</td>
+</tr>
+<tr>
+<td>配額中斷</td>
+<td>reviewer／implementer</td>
+<td><code>codex exec</code> 撞訂閱配額時：事件流（<code>--json</code>）以 <code>{"type":"turn.failed","error":{"message":&lt;下句&gt;}}</code> 收尾，稍早一則 <code>{"type":"error","message":"You've hit your usage limit. … try again at &lt;時刻或日期&gt;."}</code> 的 message 與之逐字相同（三次觀測中 <code>error</code> 為倒數第三則兩次、倒數第二則一次，差別在其後有無一則 <code>item.completed</code>——有的兩次為 <code>todo_list</code> 的最終快照）；process exit 1；<code>-o</code> 指定的檔不寫、無 <code>tokens used</code> 收尾。恢復點只載於訊息的 <code>try again at …</code>：日上限給當日時刻（實例 <code>12:36 AM</code>），週上限給日期＋時刻（實例 <code>Sep 26th, 2026 8:02 PM</code>）——CLI 不另給狀態碼或事件型別區分兩者。中途產出不保留（verdict、<code>-o</code> 檔皆無），只有事件流的 <code>item.completed</code> 串可讀到做到哪；配額失敗後 <code>codex exec resume &lt;thread_id&gt;</code> 能否接回：未測</td>
+<td>📝 已宣稱（<code>R9</code> 子類「驗證未達 <code>✅</code>」：驗證方式＝配額耗盡期間執行任一 <code>codex exec --json</code>，事件流最末則為 <code>turn.failed</code>、其前有同句 <code>error</code>、exit 1、<code>-o</code> 不寫；不達 <code>✅</code> 的理由：配額耗盡狀態無法由第三者隨時造成（須先耗盡自己的配額）。來源具名：orchestrator（Hermes）——日上限 2026-09-22 00:07，unit <code>review-171b</code>，thread <code>01a0c4b8-f360-74e2-81e4-964013c2a825</code>，2 個 <code>command_execution</code> 完成後中止，https://github.com/AugustusHsu/agent-devflow/issues/165#issuecomment-5763621352 ；週上限 2026-09-22 02:01，unit <code>review-172a</code>，thread <code>01a0c513-0d6c-7661-b1fb-dffb0e70ab4b</code>，29 個 <code>command_execution</code> 完成／15 分鐘後中止，https://github.com/AugustusHsu/agent-devflow/issues/166#issuecomment-5765150170 ；第三次（受控探針）2026-09-22 約 21:00，<code>codex exec --json --sandbox read-only -m gpt-5.6-sol</code>，4 則事件流、0 個 <code>command_execution</code>，<code>codex-cli 0.149.1</code>，https://github.com/AugustusHsu/agent-devflow/pull/180 body <code>## AC-4 探針</code> ；前兩次事件流的型別序列與末三則原文見 https://github.com/AugustusHsu/agent-devflow/issues/174 的 T 留言，第三次見上列 PR #180 body。受測環境（<code>R10</code>）：三次共通——codex-cli 0.149.1（host 唯一安裝版本，安裝 2026-08-24）、ChatGPT 訂閱帳號登入（非 API key）、<code>--json</code>、Linux host、<code>AugustusHsu/agent-devflow</code>；前兩次另帶 <code>-m gpt-5.6-sol -c model_reasoning_effort=high --sandbox workspace-write</code>、於審查用 checkout；第三次 <code>-C . -m gpt-5.6-sol --sandbox read-only</code>（無 <code>-c model_reasoning_effort</code>）、於 coder worktree <code>agent-devflow.worktrees/174</code>（PR #180 body「實際執行」段））</td>
+</tr>
+</tbody>
+</table></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../../js/base.js"></script>
+        <script src="../../../search/main.js"></script>
+        <script src="../../../js/version-select.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

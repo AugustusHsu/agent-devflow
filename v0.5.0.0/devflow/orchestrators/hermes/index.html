@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="zh_TW" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        <link rel="canonical" href="https://augustushsu.github.io/agent-devflow/v0.5.0.0/devflow/orchestrators/hermes/">
+        <link rel="shortcut icon" href="../../../img/favicon.ico">
+        <title>orchestrator: hermes - agent-devflow</title>
+        <link href="../../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../../css/brands.min.css" rel="stylesheet">
+        <link href="../../../css/solid.min.css" rel="stylesheet">
+        <link href="../../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <link href="../../../css/version-select.css" rel="stylesheet">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../../..">agent-devflow</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../.." class="nav-link">agent-devflow</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle active" aria-current="page" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Devflow</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../RELEASING/" class="dropdown-item">kit 發版程序</a>
+</li>
+                                    
+<li>
+    <a href="../../WORKFLOW/" class="dropdown-item">agent-devflow WORKFLOW</a>
+</li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Coders</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../coders/claude-code/" class="dropdown-item">coder: claude-code</a>
+</li>
+            
+<li>
+    <a href="../../coders/codex/" class="dropdown-item">coder: codex</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Forges</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../forges/gitea/" class="dropdown-item">forge: gitea</a>
+</li>
+            
+<li>
+    <a href="../../forges/github/" class="dropdown-item">forge: github</a>
+</li>
+            
+<li>
+    <a href="../../forges/gitlab/" class="dropdown-item">forge: gitlab</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Orchestrators</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="./" class="dropdown-item active" aria-current="page">orchestrator: hermes</a>
+</li>
+            
+<li>
+    <a href="../none/" class="dropdown-item">orchestrator: none</a>
+</li>
+            
+<li>
+    <a href="../paperclip/" class="dropdown-item">orchestrator: paperclip</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Hermes</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="SKILL/" class="dropdown-item">devflow orchestrator（Hermes）</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Seats</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../seats/" class="dropdown-item">devflow/seats — 職位定義</a>
+</li>
+            
+<li>
+    <a href="../../seats/approver/" class="dropdown-item">seat: approver（裁決位）</a>
+</li>
+            
+<li>
+    <a href="../../seats/coordinator/" class="dropdown-item">seat: coordinator（協調位）</a>
+</li>
+            
+<li>
+    <a href="../../seats/implementer/" class="dropdown-item">seat: implementer（實作位）</a>
+</li>
+            
+<li>
+    <a href="../../seats/reviewer/" class="dropdown-item">seat: reviewer（審查位）</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Templates</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../templates/entry-block/" class="dropdown-item">Entry block</a>
+</li>
+            
+<li>
+    <a href="../../templates/issue-review-prompt/" class="dropdown-item">Issue review prompt</a>
+</li>
+            
+<li>
+    <a href="../../templates/issue/" class="dropdown-item">Issue</a>
+</li>
+            
+<li>
+    <a href="../../templates/local-README/" class="dropdown-item">devflow.local/</a>
+</li>
+            
+<li>
+    <a href="../../templates/pr/" class="dropdown-item">Pr</a>
+</li>
+            
+<li>
+    <a href="../../templates/review-prompt/" class="dropdown-item">Review prompt</a>
+</li>
+            
+<li>
+    <a href="../../templates/spec/" class="dropdown-item">&lt;功能名稱&gt;</a>
+</li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Docs</a>
+                                <ul class="dropdown-menu">
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Guide</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/guide/" class="dropdown-item">docs/guide — 人類專用</a>
+</li>
+    </ul>
+  </li>
+                                    
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Spec</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/spec/" class="dropdown-item">docs/spec — 本 repo 的規格集</a>
+</li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/spec/install/spec/" class="dropdown-item">install：把入口區塊安全插入其他專案的 CLAUDE.md／AGENTS.md</a>
+</li>
+    </ul>
+  </li>
+            
+  <li class="dropdown-submenu">
+    <a href="#" class="dropdown-item">Kit install</a>
+    <ul class="dropdown-menu">
+            
+<li>
+    <a href="../../../docs/spec/kit-install/spec/" class="dropdown-item">kit-install：把 agent-devflow 完整安裝到消費者專案；升級與回復皆為重裝</a>
+</li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                            <li class="nav-item">
+                                <a rel="prev" href="../../forges/gitlab/" class="nav-link">
+                                    <i class="fa fa-arrow-left"></i> Previous
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a rel="next" href="../none/" class="nav-link">
+                                    Next <i class="fa fa-arrow-right"></i>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="https://github.com/AugustusHsu/agent-devflow" class="nav-link"><i class="fa-brands fa-github"></i> GitHub</a>
+                            </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#orchestrator-hermes" class="nav-link">orchestrator: hermes</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#_1" class="nav-link">通用</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#_2" class="nav-link">已知事實（文件推導，待實測）</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="orchestrator-hermes">orchestrator: hermes<a class="headerlink" href="#orchestrator-hermes" title="Permanent link">&para;</a></h1>
+<p>衍生值對照表，<strong>只有通用節</strong>（值欄宣稱可重用的工具能力或程序，repo 與環境只是可替換的參數）。本機節——具名的環境 instance——住 <code>devflow.local/&lt;同路徑&gt;</code>，不隨 kit 安裝。分節與狀態欄依 <code>R9</code>。</p>
+<h2 id="_1">通用<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>面向</th>
+<th>職位</th>
+<th>值</th>
+<th>狀態</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>派工（<code>L2</code>）</td>
+<td>coordinator</td>
+<td>用 <code>terminal</code> 直接啟動 coder CLI（見 <code>coders/</code>），保存程序或 session 識別。本派工路徑<strong>不使用 <code>delegate_task</code></strong></td>
+<td>✅ 可用（實測 2026-09-11，驗證方式：在 orchestrator 的頂層 session 以 <code>terminal(command="cd &lt;worktree&gt; &amp;&amp; systemd-run --user --scope --unit=coder-&lt;N&gt; --collect -q &lt;coders/ 表上的 CLI 指令&gt; &gt; &lt;stdout 檔&gt; 2&gt; &lt;stderr 檔&gt; &lt; /dev/null", background=true)</code> 啟動 coder（<code>systemd-run --scope</code> 把 coder 及其所有子孫放進專用 cgroup，<code>--unit</code> 名稱是中斷交接格的中斷把手；無 systemd 的平台另找監督邊界），記下該工具回傳的 pid；再於同一台機器讀回三項——(1) <code>pstree -p &lt;該 pid&gt; | head -1</code> 的鏈上出現 <code>claude(&lt;coder pid&gt;)</code>；(2) <code>tr '\0' ' ' &lt; /proc/&lt;coder pid&gt;/cmdline</code> 以 <code>claude -p</code> 開頭；(3) <code>readlink /proc/&lt;coder pid&gt;/cwd</code> 等於該 worktree 路徑。第 (1) 項連同完整的 <code>terminal</code> 呼叫紀錄，證明本次 coder 是由 <code>terminal</code> 啟動的外部進程；「不用 <code>delegate_task</code>」由呼叫紀錄判定（紀錄中無 <code>delegate_task</code> 呼叫），本格<strong>不宣稱</strong> <code>delegate_task</code> 的進程樹長什麼樣——那未實測。值欄「保存程序或 session 識別」兩項分別由 <code>terminal(background=true)</code> 回傳、稍後仍可用來讀回該進程的 pid，與 stdout 檔內 JSON 的 <code>session_id</code>（見 <code>coders/claude-code.md</code> 的 headless 執行格）判定。<strong>不要用 <code>ps -eo pid,args | grep 'claude -p'</code></strong>：coder 的 prompt 為多行時 <code>ps</code> 的 args 顯示不可靠，會讀到空結果而誤判進程不存在。此程序不依賴本次的 prompt 或 repo，第三者現在可獨立重跑。受測環境：2026-09-11；orchestrator 為 Hermes Agent v0.21.1（2026.9.7），coder 為 Claude Code 2.1.267 headless；程序讀回依賴 Linux 的 <code>/proc</code> 與 <code>pstree</code>（無 <code>/proc</code> 的平台須另找讀回方式）；執行身分為本機 OS 使用者，與 coder 進程同 UID；<code>readlink /proc/&lt;pid&gt;/cwd</code> 受 <code>PTRACE_MODE_READ_FSCREDS</code> 檢查（<code>proc_pid_cwd(5)</code>；同 UID 但目標 <code>PR_SET_DUMPABLE=0</code> 時讀取失敗），<code>/proc/&lt;pid&gt;/cmdline</code> 不受該檢查；本次在同 UID、預設 dumpable、無額外 LSM 限制的環境兩者皆讀取成功，其他環境（容器、不同 UID、Yama ptrace_scope）須自行確認；pstree (PSmisc) 23.7；systemd 255（255.4-1ubuntu8.17）user session、cgroup v2（<code>systemd-run --scope</code> 所需）；目標 repo <code>AugustusHsu/agent-devflow</code>；證據：issue #33 留言 https://github.com/AugustusHsu/agent-devflow/issues/33#issuecomment-5624350935（完整 <code>terminal</code> 呼叫）＋ https://github.com/AugustusHsu/agent-devflow/issues/33#issuecomment-5624355903（進程樹與 <code>/proc</code> 讀回））</td>
+</tr>
+<tr>
+<td>建 worktree（<code>I2</code>）</td>
+<td>coordinator</td>
+<td><code>git worktree add ../&lt;repo&gt;.worktrees/&lt;N&gt; &lt;N&gt;-&lt;slug&gt;</code></td>
+<td>✅ 可用（實測 2026-09-11，驗證方式同 <code>coders/claude-code.md</code> 的 worktree 格，主體換成 orchestrator：orchestrator 在主 checkout 以 <code>terminal</code> 執行 <code>git branch &lt;N&gt;-&lt;slug&gt; origin/main</code>，再執行 <code>git worktree add ../&lt;repo&gt;.worktrees/&lt;N&gt; &lt;N&gt;-&lt;slug&gt;</code>；啟動 coder 前以 <code>git worktree list</code> 確認輸出含該路徑與分支名，並以 <code>git -C ../&lt;repo&gt;.worktrees/&lt;N&gt; rev-parse HEAD</code> 確認該 worktree 的 HEAD 等於 base commit。判定點：worktree 路徑落在 repo 目錄之外（<code>I2</code>），主 checkout 那一列仍停在原分支與原 commit，且 coder 只收到該路徑。此程序不依賴本次的 issue 或 repo，第三者現在可獨立重跑。受測環境：2026-09-11；orchestrator 為 Hermes Agent v0.21.1（2026.9.7），以 <code>terminal</code> 工具執行本機 <code>git version 2.43.0</code> 的 <code>branch</code>／<code>worktree</code> 子命令；執行身分為對該 repo 工作目錄具寫入權限的本機 OS 使用者（本步驟不需 forge 權限）；目標 repo <code>AugustusHsu/agent-devflow</code>，base <code>origin/main @ 333d087</code>；證據：issue #33 留言 https://github.com/AugustusHsu/agent-devflow/issues/33#issuecomment-5624350935）</td>
+</tr>
+<tr>
+<td>HITL（<code>L3</code>）</td>
+<td>coordinator</td>
+<td>向人提問，答案寫回 issue 留言（持久紀錄）；派工前未決事項為空</td>
+<td>⬜ 未測（值欄已依 <code>R7</code> 改寫：原文「<code>clarify</code> 問人」把工具名當機制，<code>L3</code> 明文「提問通道只是通道」。迴路「coder BLOCKED 留言 → 人類裁決留言（含依據）→ 重派」在 issue #4 確實走過（留言 5622863707 → 5623110580 → 5623153788），但那是<strong>歷史紀錄</strong>——第三者現在只能讀回、不能重新執行「提問 → 裁決 → 寫回 → 重派」，依 <code>R8</code> 屬追溯讀法，不足以 <code>✅</code>。升格需要第三者現在可主動重跑的演練：派工前 issue「未決事項」為空（<code>L1</code>），coder 執行中在 issue 留言提出未決事項並停下，orchestrator 向人提問、把裁決連同依據寫回同一 issue、再以 <code>--resume</code> 重派——本格判定的是 orchestrator 側這三步是否發生；coder 是否<strong>自發</strong>停下屬 <code>coders/claude-code.md</code> 的「HITL（<code>L3</code> 遵從）」格，可共用同一場演練但分別判定）</td>
+</tr>
+<tr>
+<td>平行上限</td>
+<td>coordinator</td>
+<td>上限依 <code>stage</code>：stage 1–2 由 <code>ST</code> 定（<code>ST1</code>：同時只有一個任務），沒有可調的旋鈕；stage 3 起才由人設定，並依 <code>P1</code> 逐項確認寫進 issue（<code>P4</code>）</td>
+<td>⬜ 未測（本單依 <code>R7</code> 改寫值欄，狀態不升。理由：原值欄「人設」在今日的 stage 1 不是實際生效的機制——<code>devflow.yml</code> 為 <code>stage: 1</code>，<code>ST1</code> 已把同時活躍任務定為 1，沒有人可設定的上限；<code>P1</code>／<code>P4</code> 住第 12 節，依 <code>ST3</code> 要 stage 3 才生效。本 issue 雖已填「平行前提」四欄（write scope、阻塞依賴、共用契約、外部資源），但那是 stage &lt; 3 的預先累積：只有一張活躍任務時，<code>P1</code> 的判定（write scope 不重疊、共用契約無人同時改）無從被檢驗，依 <code>R8</code>（未執行的推測不構成 <code>✅</code>，且不得由「行為符合規則」反推機制已生效）不足以升格。待 stage 3 首次同時派兩張任務、由人實際設定上限並逐項確認 <code>P1</code> 時再測）</td>
+</tr>
+<tr>
+<td>流程指令住哪</td>
+<td>coordinator</td>
+<td><code>devflow/orchestrators/hermes/SKILL.md</code>（<code>name: devflow-orchestrator</code>、<code>version: 0.1.0</code>；stage ≥ 1 的單一任務生命週期固定列為 1→10）是<strong>規範上</strong>的流程指令住處。但 Hermes 只掃描它的 skill 發現路徑，<strong>權威來源是程式碼</strong>：<code>agent/skill_utils.py</code> 的 <code>get_all_skills_dirs()</code>（local dir、<code>skills.create_dir</code>、<code>skills.external_dirs</code>）加 <code>get_project_skills_dirs()</code>（已 trust 的 <code>&lt;project-root&gt;/.hermes/skills/</code>、<code>&lt;project-root&gt;/.agents/skills/</code>）；文件對應段在 <code>website/docs/user-guide/features/skills.md</code>「Project-local skills」與「create_dir」節（Hermes 0.21.2 為第 417–465 行）。本格不重述完整清單——路徑集合隨版本變，引用前看該版程式碼。<code>devflow/orchestrators/hermes/</code> 本身不在上述任何發現路徑內，要被讀就得把它放進（或 symlink 進）其中一條路徑，再依該路徑的規則啟用。採用 agent-devflow 的 repo 走 project-local 這條：repo 內一條受版控的 symlink <code>&lt;project-root&gt;/.hermes/skills/devflow-orchestrator → ../../devflow/orchestrators/hermes</code>（相對路徑，git 以 mode <code>120000</code> 追蹤，跨 clone 有效）把該目錄接進發現路徑，採用者在自己的 clone 內跑一次 <code>hermes skills trust</code> 後載入；不必搬檔，也不必在安裝腳本多一步。只放這一條，<strong>不加 <code>.agents/skills/</code></strong>——兩個 project-local 位置都放會重複索引同一份檔。未 trust 時不會載入；<strong>據文件推導</strong>（非原文）此時會有提示——文件記載的 banner 只針對 project-local 位置發現的未信任 skill。</td>
+<td>✅ 可用（第三者現在照本格所附的驗證方式做，能得到值欄宣稱的結果——兩條路徑都已由本格作者以外的人重跑過，見下面「第三者重跑」。驗證方式（兩條，擇一或並用）：(1) 在已 trust 的 clone 內新開一個 Hermes session，請它原文回報 <code>skills_list</code>，應含 <code>name: devflow-orchestrator</code>、<code>version: 0.1.0</code>；(2) 不開 session 的直接探針——<code>python3 -c</code> 匯入 <code>agent/skill_utils.py</code>，對該 repo 根呼叫 <code>get_project_skills_dirs()</code> 取候選目錄，再以 <code>iter_skill_index_files()</code> 取索引檔，應得 <code>&lt;project-root&gt;/.hermes/skills/devflow-orchestrator/SKILL.md</code>，其 <code>realpath</code> 落在 <code>&lt;project-root&gt;/devflow/orchestrators/hermes/SKILL.md</code>。<strong>探針陷阱</strong>：<code>find_project_root()</code> 以環境變數 <code>TERMINAL_CWD</code> 優先於 <code>Path.cwd()</code>（<code>skill_utils.py:428</code>），從 Hermes 的 <code>terminal</code> 工具跑探針會被 orchestrator 自己的 cwd 蓋掉而回 <code>[]</code>；要 <code>env -u TERMINAL_CWD</code> 或明傳 <code>start=</code>。證據：issue #119 的 spike（orchestrator 2026-09-20 於拋棄式 clone <code>/tmp/spike-pl</code> 執行探針）——<code>project root: /tmp/spike-pl | trusted: True</code>、<code>candidate dirs: [/tmp/spike-pl/.hermes/skills]</code>、<code>index files via symlink: [/tmp/spike-pl/.hermes/skills/devflow-orchestrator/SKILL.md]</code>、<code>name: devflow-orchestrator | version: 0.1.0 | realpath: /tmp/spike-pl/devflow/orchestrators/hermes/SKILL.md</code>；同一支探針把 symlink 換成實體複本當對照組，索引結果相同，故「跟隨 repo 內的 symlink」不是複本造成的假象。機制依據：<code>iter_skill_index_files()</code> 用 <code>os.walk(followlinks=True)</code>（<code>agent/skill_utils.py:745</code>）。本 repo 這端由實作位驗到檔案系統與版控狀態：<code>ls -l .hermes/skills/</code> 顯示 <code>devflow-orchestrator -&gt; ../../devflow/orchestrators/hermes</code>、<code>test -f .hermes/skills/devflow-orchestrator/SKILL.md</code> 通過、<code>git ls-files -s .hermes/</code> 回 mode <code>120000</code>。<strong>第三者重跑</strong>：(i) PR #123 的 fresh-context 審查者（<code>R1</code>、<code>R2</code>）依本格驗證方式 (2) 在自己的拋棄式 clone <code>/tmp/rv123</code> 重跑同一支探針並成功——回報 <code>root /tmp/rv123</code>、<code>/tmp/rv123/.hermes/skills/devflow-orchestrator/SKILL.md name: devflow-orchestrator version: 0.1.0</code>，並自行核到本機 <code>iter_skill_index_files()</code> 第 745 行確為 <code>os.walk(..., followlinks=True)</code>；(ii) 本 repo 這端走的是驗證方式 (1)——issue #129 由 orchestrator 在已 trust 的本機 clone <strong>新開</strong> Hermes session，<code>skills_list</code> 讀回 <code>name: devflow-orchestrator</code>／<code>version: 0.1.0</code>（那一側的受測環境、probe 指令與負結果對照記在本機節「skill 接入」列）。兩條都不依賴 #119 那次執行的一次性條件（<code>R8</code>）。受測環境（<code>R10</code>）——<strong>首次驗證</strong>：2026-09-20，Hermes 0.21.2（<code>skill_utils.py</code> 的 <code>:428</code>、<code>:745</code> 兩個行號依該版）；spike 由 orchestrator（Hermes）在拋棄式 clone <code>/tmp/spike-pl</code> 執行，symlink 與版控狀態由實作位 Claude Code 2.1.277 headless 在 worktree <code>agent-devflow.worktrees/119</code> 執行、git 2.43.0；目標 repo <code>AugustusHsu/agent-devflow</code> @ <code>9cc8634</code>。<strong>最近確認</strong>：2026-09-21——2026-09-20 由 PR #123 審查者以 Hermes 0.21.2 在 <code>/tmp/rv123</code> 重跑探針，2026-09-21 由 issue #129 以 Hermes <code>v0.21.3 (2026.9.14)</code> 在本機 clone <code>/home/augustushsu/code/Python/agent-devflow</code> 新開 session 讀回，兩次結果都與值欄相符。共同條件：執行身分為本機使用者；驗證方式 (2) 只讀該 clone 與 <code>agent/skill_utils.py</code>，驗證方式 (1) 另需該 clone 已 <code>hermes skills trust</code>，且 project-local 發現的起點是 <code>resolve_agent_cwd()</code>（session override → <code>TERMINAL_CWD</code> → <code>os.getcwd()</code>）——從 Hermes 的 terminal 工具或 gateway 子程序啟動會繼承 <code>_HERMES_GATEWAY</code>／<code>TERMINAL_CWD</code> 而蓋掉 shell 的 cwd，該情形要加 <code>--in &lt;repo&gt;</code>；乾淨終端在 repo 內不必加（見本機節「skill 接入」列）。Hermes 換版本身不改本格狀態，但發現路徑集合與 <code>followlinks</code> 都隨版本變，引用前先比對自己的版本、有差異自己重驗。最近確認的 forge 紀錄：https://github.com/AugustusHsu/agent-devflow/pull/123#pullrequestreview-5260420104 、https://github.com/AugustusHsu/agent-devflow/issues/129 。接入前本機是什麼狀態、用哪三條指令查的，記在本機節那列，不在此重述（<code>I5</code>）。證據：issue #119、#118）</td>
+</tr>
+<tr>
+<td>skill 啟用邊界（<code>G3</code>）</td>
+<td>coordinator</td>
+<td>skill 指向已核准版本，不指向編輯中的候選；驗證「載到正確內容與版本」，不只驗 symlink 存在</td>
+<td>⬜ 未測（<code>G3</code> 說新版的啟用點是合入後的下一個 session 邊界，<strong>前提是該 skill 真的被載入</strong>——接入之前本機這套 Hermes 未含 repo 的 <code>devflow/orchestrators/hermes/SKILL.md</code>（2026-09-20 的三條查證指令與結果見本機節的「skill 接入」列），沒有接入就沒有啟用邊界可驗；接入已於 <code>bee4377</code> 完成，四步驗證待下一次 SKILL.md 改版時執行。驗證設計（須含 <code>G3</code> 的「合入」條件，不是只測 session 重載）：(1) 舊 session 先載入<strong>已核准、已合入 main</strong> 的舊版，請 Hermes 原文回報 <code>name</code>／<code>version</code>；(2) 新版走完整流程——開 issue、PR、審查、<strong>合入 main</strong>（或在隔離測試 repo 模擬同一套「已核准指標切換」）；(3) 合入後，舊 session 再問同一句——應仍回報舊版（進行中任務續用舊 G）；(4) 合入後<strong>新開</strong>的 session 問同一句——應回報新版。四步都成立才算「啟用點是合入後的下一個 session 邊界」。<strong>不可</strong>在進行中的 session 直接改工作樹的 SKILL.md 來測——那會讓新 session 指向未核准的候選，違反本格值欄前半。同時要驗值欄後半：請 Hermes 回報它載到的 skill <code>name</code> 與 <code>version</code>，須逐字等於 repo 檔的第 2、4 行，僅確認 symlink 存在不算。此設計也可當「已知事實」第 23 行（改磁碟檔不會替換已載入的規則）的實測載體，但那條本單不動）</td>
+</tr>
+<tr>
+<td>中斷交接</td>
+<td>coordinator</td>
+<td>保留 issue、分支、worktree、HEAD、未提交內容、最後可信驗證；在本格所載 <code>--allowedTools</code> 限制下，確認 coder 專用 cgroup 內所有成員已停才重派；白名單放寬到可建立或遷移 unit 時不適用</td>
+<td>✅ 可用（實測 2026-09-11，驗證方式：在 coder 執行途中由 orchestrator 中斷（<code>kill</code> 該 coder 進程），中斷當下把值欄的六項保留物逐一讀回並貼成 issue 留言——(1) <code>gh issue view &lt;N&gt; --json state</code> 為 <code>OPEN</code>；(2) <code>git branch --list &lt;N&gt;-&lt;slug&gt;</code> 有該分支；(3) <code>git worktree list</code> 仍含該 worktree 路徑與分支；(4) <code>git -C &lt;worktree&gt; rev-parse HEAD</code> 的 sha；(5) <code>git -C &lt;worktree&gt; status --porcelain</code> 的未提交／未追蹤清單；(6) 中斷前最後一次驗證指令的原始輸出。再確認舊 coder 已停——coder 啟動時已放進專用 cgroup（見派工格的 <code>systemd-run --user --scope --unit=coder-&lt;N&gt;</code>），中斷用 <code>systemctl --user kill --signal=TERM coder-&lt;N&gt;.scope</code>（核心對 cgroup 當下全部成員送訊號），<strong>中斷前</strong>先確認 scope 確曾承載 coder：<code>systemctl --user is-active coder-&lt;N&gt;.scope</code> 回 <code>active</code> 且 <code>$CG/cgroup.procs</code> 含 coder pid（<code>CG=$(find /sys/fs/cgroup/user.slice -type d -name 'coder-&lt;N&gt;.scope')</code>）——從未存在的 unit 也會回 <code>inactive</code>，沒有這步的 <code>inactive</code> 不算證據。已停的判定是中斷後 <code>is-active</code> 回 <code>inactive</code>、或 <code>$CG/cgroup.events</code> 的 <code>populated 0</code>。<strong>本格判定的範圍是「coder cgroup 內的所有成員已停」</strong>：scope 內的程序若自己執行 <code>systemd-run --user --scope</code> 可遷到 sibling cgroup 逃出（審查中實證），cgroup 不納管已遷出者。因此受測條件之一是 coder 的 <code>--allowedTools</code> 白名單<strong>不含</strong> <code>systemd-run</code>／<code>systemctl</code>／<code>busctl</code> 等可建立或遷移 unit 的指令（本次白名單：<code>Read,Edit,Write,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status *),Bash(git show *),Bash(git rev-parse *),Bash(gh issue view *),Bash(gh api *),Bash(grep *),Bash(sed -n *),Bash(cat *),Bash(nl *)</code>）；白名單放寬到能執行任意指令時，本格不適用，須另納管 coder 建立的 unit。cgroup 成員資格由核心維護、fork／<code>setsid</code> 雙 fork 出的子孫自動繼承，不需要 PID 快照，沒有「快照後 fork」或「reparent 後 <code>pgrep -P</code> 漏看」的 TOCTOU 缺口（三者皆在審查中以反例實證：PID 快照＋逐一 <code>kill -0</code> 不足，cgroup 封住前兩者）——確認後才以 <code>--resume &lt;session_id&gt;</code> 重派，重派 prompt 告知「你被中斷過，先讀工作區狀態」。判定點三項皆須成立：重派後的 coder 讀到的 HEAD 與未提交內容和 (4)(5) 逐字相同；同一 worktree 沒有第二個 coder 進程；重派 stdout 的 <code>session_id</code> 與被中斷那段相同（見 <code>coders/claude-code.md</code> 的 <code>--resume</code> 交接格）。此程序不依賴本次的 issue 或 prompt，第三者現在可對任一 headless coder 重跑。受測環境：2026-09-11；orchestrator 為 Hermes Agent v0.21.1（2026.9.7），coder 為 Claude Code 2.1.267 headless（<code>--resume</code> 需被中斷段的 <code>session_id</code>；被 SIGTERM 的 headless session <strong>不會</strong>輸出 JSON，須從 <code>~/.claude/projects/&lt;cwd 路徑編碼&gt;/</code> 取最新 <code>.jsonl</code> 檔名，首行 <code>sessionId</code> 即是），git 2.43.0，gh 2.97.0；監督邊界為 systemd 255（255.4-1ubuntu8.17）user session 的 transient scope，cgroup v2；不需 root）；執行身分為本機 OS 使用者，須與 coder 進程同一使用者（<code>kill</code> 需要），且重派須由<strong>同一 OS 使用者</strong>執行（<code>--resume</code> 讀該使用者 <code>~/.claude/</code> 下的 session 紀錄，換身分即無法續接），並具 <code>AugustusHsu/agent-devflow</code> 的 <code>gh</code> 留言權限；目標 repo <code>AugustusHsu/agent-devflow</code>；證據：issue #33 cgroup 已停判定重測 https://github.com/AugustusHsu/agent-devflow/issues/33#issuecomment-5624794146 ＋ 中斷時狀態留言 https://github.com/AugustusHsu/agent-devflow/issues/33#issuecomment-5624437437 ＋ https://github.com/AugustusHsu/agent-devflow/issues/33#issuecomment-5624479141）</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_2">已知事實（文件推導，待實測）<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Hermes 的專案 context 在 session 開始載入；改磁碟檔不會替換已載入的規則（<code>G3</code> 的依據）。</li>
+<li>Hermes 子代理不能 <code>clarify</code>；提問只能由頂層 session 發出。</li>
+</ul></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../../js/base.js"></script>
+        <script src="../../../search/main.js"></script>
+        <script src="../../../js/version-select.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>
