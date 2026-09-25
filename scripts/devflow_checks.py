@@ -785,17 +785,28 @@ if "--check-pins" in _args:
 # 之後，兩個變數連寫（`A=1 B=2 python3 …`）實測仍被拒，而每新增一個變數都要再改名單。
 # 設定搬進檔案，`L4` 的指令就回到裸形式 `python3 scripts/devflow_checks.py`。
 #
-# CI 的嚴格性由「這個檔不受版控」保證，不靠檢查器判斷自己在不在 CI：CI 的 checkout 與
-# 煙霧測試用 `git archive HEAD` 造的沙箱都不會有它，讀不到就一切照舊。這和舊機制
-# （CI 不設環境變數）是同一個保證換一個載體，不是多開一條放寬路徑。
+# CI 的嚴格性由「這個檔不受版控」保證，不靠檢查器判斷自己在不在 CI。而「不受版控」
+# 這件事**由檢查器自己守**（`_local_tracked`），不是交給 `.gitignore`：`.gitignore` 擋不住
+# `git add -f`，而這個檔一旦進了版控就會跟著 CI 的 checkout 走——repo 的內容就能決定
+# `v7` 拿誰當 base，等於「改 PR 自己的內容就關掉一道必需關卡」。這是 PR #226 第一輪
+# 審查的 BLOCK-1，實測把本檔 `git add -f` 進 PR 並寫 `v7_base = HEAD` 之後，動了
+# `devflow/**` 卻不進位的分支在 CI 形狀下從 exit 1 變成 exit 0。舊機制的放寬點只在
+# 環境變數、repo 內容碰不到，本檔是第一個讓 repo 內容有機會影響判定的東西，所以這道線
+# 必須在檢查器裡。守住之後兩個既有原則才成立：base 那三個來源「只能指定比較對象，
+# 不能放寬判定」，以及 `DEVFLOW_GATE_` 的「只能加嚴不能放寬」。
+#
+# 煙霧測試的沙箱同理不會有它：`tests/smoke_devflow_checks.py` 用
+# `git ls-files --cached --others --exclude-standard` 列出要複製的檔，被 `.gitignore` 忽略的
+# 不在名單內；沙箱自己也是 git repo，真被放進去了照樣撞上上面那道版控檢查。
 #
 # 格式是**手寫解析的 `key = value`**，不用 YAML，也因此排在下面的 import 之前：
 # `allow_pin_drift` 的用途正是「import 到的 parser 不是 pin 的那一版時放行」，拿那個
 # parser 去讀這個決定，等於用受質疑的工具判自己該不該被質疑。這段只碰標準庫。
 #
 # 定義域：一個檔案、兩個已知鍵、逐行 `key = value`、`#` 開頭與空白行略過。認不得的鍵、
-# 收不了的值、缺 `=` 的行一律 exit 2 而不是略過——這是開發者自己維護的檔，打錯字若被
-# 靜默忽略，人會以為設定生效了（同 _QUERY_MODES 不默默忽略認不得的旗標的理由）。
+# 收不了的值、重複的鍵、缺 `=` 的行一律 exit 2 而不是略過——這是開發者自己維護的檔，
+# 打錯字若被靜默忽略，人會以為設定生效了（同 _QUERY_MODES 不默默忽略認不得的旗標的
+# 理由）。唯一被靜默吃掉的是 UTF-8 BOM：那不是人打的字，是編輯器加的。
 # 查詢模式（`--print-pins`／`--check-pins`）在上面就已結束，不讀本檔：它們只回報
 # 「裝了什麼」，不做任何豁免。
 LOCAL_FILE = ".devflow-local"
@@ -805,10 +816,33 @@ LOCAL_FILE = ".devflow-local"
 LOCAL_KEYS = {"allow_pin_drift": ("true", "false"), "v7_base": None}
 
 
-def _local_bad(msg):
+def _local_bad(msg, *hints):
     """本機設定檔判不了＝檢查器無法執行。die() 這裡還沒定義，自己印。"""
     print("💥 檢查器無法執行：%s" % msg)
+    for _h in hints:
+        print("    %s" % _h)
     sys.exit(2)
+
+
+def _local_tracked(path):
+    """問 git 這個檔受不受版控，回傳 True／False；問不出答案就 _local_bad。
+
+    答不出來時**不當成未追蹤**（PR #226 第一輪審查 BLOCK-1）：讀這個檔的效果一律是
+    放寬（關掉 pin 守衛、改 `v7` 的 base），放寬不能建立在一個問不到答案的前提上。
+    對本機開發者來說 exit 2 與「沒有這個檔」是同一個結果，只是會明講原因；而這支
+    檢查器本來就每一節都在用 git，git 跑不動時它也走不完。
+    """
+    try:
+        p = subprocess.run(["git", "ls-files", "--error-unmatch", "--", path],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    except OSError as e:
+        _local_bad("%s 存在，但問不到它受不受版控（git 跑不動：%s）" % (path, e))
+    if p.returncode == 0:      # 路徑規格符合 index 裡的某個檔＝受版控
+        return True
+    if p.returncode == 1:      # `--error-unmatch` 的「沒有符合的已知檔案」＝未追蹤
+        return False
+    _local_bad("%s 存在，但問不到它受不受版控（git ls-files exit %d）：%s"
+               % (path, p.returncode, p.stderr.decode("utf-8", "replace").strip()))
 
 
 def _read_local_conf(path):
@@ -820,8 +854,18 @@ def _read_local_conf(path):
         return {}
     except OSError as e:
         _local_bad("%s 存在卻讀不到：%s" % (path, e))
+    # 檔案存在才問版控——CI 與煙霧測試沙箱在上面那個 return 就結束了，不多跑一個 git。
+    if _local_tracked(path):
+        _local_bad(
+            "%s 受版控了，但它只能是本機未追蹤的檔" % path,
+            "它決定的是 pin 守衛放不放行、`v7` 拿誰當 base。受版控之後這些就成了 PR",
+            "內容改得動的東西，等於讓被檢查的人改判準（見本節開頭的註解）。",
+            "解法：`git rm --cached %s`——檔案留在本機，只是退出版控。" % path)
+    # `utf-8-sig`：編輯器自動加的 BOM 吃掉。不吃掉的話它會黏在第一行的鍵名前面，
+    # 訊息就會指著一個開頭多了 U+FEFF 的鍵名說「認不得」，而人看到的是一個
+    # 拼對了的鍵。
     try:
-        text = raw.decode("utf-8")
+        text = raw.decode("utf-8-sig")
     except UnicodeDecodeError as e:
         _local_bad("%s 的內容不是合法 UTF-8：%s" % (path, e))
     conf = {}
@@ -836,6 +880,11 @@ def _read_local_conf(path):
         if _k not in LOCAL_KEYS:
             _local_bad("%s 第 %d 行的鍵 %r 認不得（只收 %s）"
                        % (path, _no, _k, "／".join(sorted(LOCAL_KEYS))))
+        if _k in conf:
+            # 「後者勝」與「前者勝」都是猜，而兩者猜錯的方向不同：`allow_pin_drift = true`
+            # 後面跟一行 `false`，靜默取後者會讓以為設好了的人撞 exit 2；反過來則是
+            # 以為關掉了卻還在放行。同一個鍵寫兩次就是寫錯了，停在這裡。
+            _local_bad("%s 第 %d 行的鍵 %s 重複了（前面已經設過）" % (path, _no, _k))
         _allowed = LOCAL_KEYS[_k]
         if _allowed is None:
             if not _v:
@@ -887,8 +936,16 @@ if _drift and not _allow_drift:
     print("💥 檢查器無法執行：實際 import 的相依版本不符 pin")
     for _line in _drift:
         print("    %s" % _line)
-    print("    （本機開發可在 %s 放 `allow_pin_drift = true` 略過，"
-          "或設 DEVFLOW_ALLOW_PIN_DRIFT=1；CI 兩者都沒有）" % LOCAL_FILE)
+    # 這段話對著的是「剛從 main 新建 worktree 的實作位」：這個檔不受版控，`L2` 每開一個
+    # worktree 就少一份，裸跑必撞這裡。訊息因此直接給可貼的內容，而不是只說「可以設」。
+    # 印出來的兩行**不帶行末註解**：上面的 parser 只略過整行 `#`，行末的 `#` 會被當成
+    # `v7_base` 的值的一部分，照抄下去等於給自己種一個解析不了的 ref。
+    print("    本機開發：在 repo 根目錄放一個 %s，內容如下兩行" % LOCAL_FILE)
+    print("    （第二行選填，放了本機的 `v7` 才是真的判定而不是略過）：")
+    print("        allow_pin_drift = true")
+    print("        v7_base = main")
+    print("    這個檔不受版控（受版控會 exit 2），所以每個 worktree 都要自己放一份。")
+    print("    （也可改設 DEVFLOW_ALLOW_PIN_DRIFT=1；CI 兩者都沒有）")
     sys.exit(2)
 
 # ── 關卡開關 ──────────────────────────────────────────────────────
