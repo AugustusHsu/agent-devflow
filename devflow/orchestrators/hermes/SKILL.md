@@ -84,12 +84,17 @@ gh pr create --base main --head <N>-<slug> --title "<gitmoji> <type>(<scope>): <
 
 ### 7. 派審（`R1`、`R2`、`R4`、`R6`）
 
-fresh context、異廠、乾淨 checkout（`coders/codex.md` 「審查用法（`R1`）」格，引用前查狀態 `R9`）：
+fresh context、異廠、丟棄式 checkout（`coders/codex.md` 「審查與讀審用法（`R1`、`L7`）」格，引用前查狀態 `R9`）：
 
 ```bash
-git clone <remote> /tmp/review<N> && git -C /tmp/review<N> checkout <head sha>
-codex exec -C /tmp/review<N> --sandbox workspace-write -m gpt-5.6-sol -c model_reasoning_effort=<high|xhigh> \
-  -o /tmp/review<N>.verdict.md "<review prompt>"
+T=$(mktemp -d)   # 本輪專用暫存目錄，審畢即刪
+D=$(mktemp -d)   # 丟棄式 checkout，不置於 /tmp 本身（`R12`）
+git clone --shared <repo> "$D" && git -C "$D" checkout <head sha>
+env TMPDIR="$T" codex exec -C "$D" --sandbox workspace-write -m <model> -c model_reasoning_effort=<level> \
+  -c approval_policy="never" -c sandbox_workspace_write.exclude_slash_tmp=true \
+  -c sandbox_workspace_write.network_access=false \
+  -c 'sandbox_workspace_write.writable_roots=["'"$D"'","'"$T"'"]' \
+  -o "$T/verdict.md" - < "$T/prompt.txt"
 ```
 
 prompt 以 `templates/review-prompt.md` 為底，另加：

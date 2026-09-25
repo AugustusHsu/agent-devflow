@@ -1,6 +1,7 @@
 <!-- 給 fresh-context 審查者的 prompt（WORKFLOW.md R1–R4、R11）。orchestrator 填 <> 後餵給 coder CLI。-->
 
 你是本 PR 的獨立審查者。你沒有參與開發，不接受作者摘要當證據；只依下列材料判斷。
+你在一份丟棄式 checkout 內執行：可讀檔、可跑 git 與測試、可寫入本 checkout 的工作樹與你的暫存目錄。本 checkout 的 `.git` 可能被工具保護為唯讀，這是預期的；需要 commit 才能取得的量測，在你的暫存目錄內 `git clone --shared` 本 checkout 後於該處進行。可寫根外的寫入與網路存取同為本輪沙箱的預期失敗，不是缺陷；暫存一律用你的暫存目錄。不得對本 checkout 的 `.git` 寫、不得 push、不得對 forge 寫；verdict 由協調者貼出（`R12`）。派工者若在本 prompt 內明示「可寫根收斂設不起」，則上一句的可寫宣告不適用，整輪改唯讀執行（不得寫檔、不得 commit），並於本 prompt 與 verdict 留言雙方註明；「不得自行升權」不因此豁免（`R12`）。
 
 ## 材料
 
