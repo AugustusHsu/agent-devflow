@@ -50,10 +50,13 @@
 # `orphan` 規則本體定義的規則 ID 至少有一個職位檔認領（`devflow/seats/README.md`
 # 明文豁免的除外）——後兩項是 issue #213 開的，定義域封閉（見各自那一節的註解），
 # 停在建議是因為正反測試未補，不是因為判準收不住。
-# 另有 `r2`（issue #218 開的）：devflow.yml 宣告了 reviewer fallback 且與實作位同廠時，
-# 比對兩邊的 `model`——不同就每次執行都印一行 ℹ️、相同印 ⚠️（`R2` 建議同廠時換一個模型，
-# 同模型只差 context）。它依裁決是建議且不升關卡，兩級輸出都不進 errors 也不進 advisories，
-# 不影響 exit code；未宣告 fallback（它是選填）或異廠 fallback 都是「不適用」，印 ✅。
+# 另有 `r2`（issue #218 開的）：devflow.yml 裡審查的兩個宣告位置——主 pin `seats.reviewer`
+# 與選填的 `seats.reviewer.fallback`——各自與實作位比一次，同廠時比兩邊的 `model`：不同就
+# 每次執行都印一行 ℹ️、相同印 ⚠️（`R2` 建議同廠時換一個模型，同模型只差 context）。
+# 兩處獨立判定、各出一則。它依裁決是建議且不升關卡，兩級輸出都不進 errors 也不進 advisories，
+# 不影響 exit code；未宣告 fallback（它是選填）或該位異廠都是「不適用」，印 ✅。
+# 首版只判 fallback，於是協調者直接以同廠同模型的主 pin 審查時（PR #216 第一輪）一聲不吭；
+# 射程於 issue #221 補上主 pin，條文（`R2`）同步寫明「同廠」看的是當次實際擔任審查的那一位。
 #
 # 「GATES 是 True」只讓這個 check 自己變紅，**不等於它是 branch protection 的
 # required status check**——後者是 repo 設定，要另外設，前提見下面「升 required 的前提」。
@@ -816,7 +819,7 @@ GATES = {
     "version": True,    # V1 frontmatter version 四碼（第 3 節，ST1 起生效；issue #80）
     "fence":   True,    # fenced code block 未關閉（issue #80）
     "tables":  True,    # devflow.yml 指名的對照表都受版控（第 0 節，永遠生效；issue #87）
-    "r2":      False,   # R2 同廠 reviewer fallback 的模型建議（issue #218）
+    "r2":      False,   # R2 同廠審查位的模型建議（issue #218；#221 補主 pin 的射程）
                         # 依裁決不升關卡：本項不走 report()，輸出是 ℹ️／⚠️ 兩級，
                         # 這個 False 只讓 tag() 印「建議」，見 GATES_NO_UPGRADE
     "table":   True,    # 對照表形狀，依 R9 分節（issue #80）
@@ -894,8 +897,9 @@ TABLES_SEAT_DIRS = (("implementer", CODERS_DIR),
 TABLES_OPTIONAL_SEAT = "coordinator"
 TABLES_FILLER = "filler"
 TABLES_HUMAN = "human"
-# R2 的同廠 fallback 模型建議（issue #218）的定義域：同一個檔案（devflow.yml）、四條固定
-# 路徑、一次逐字比對。職位名與 `filler` 沿用上面那幾個常數，不另抄一份。
+# R2 的同廠模型建議（issue #218；射程於 issue #221 補上主審查位）的定義域：同一個檔案
+# （devflow.yml）、六條固定路徑、兩次逐字比對——審查的兩個宣告位置（主 pin 與選填的
+# fallback）各與實作位比一次。職位名與 `filler` 沿用上面那幾個常數，不另抄一份。
 R2_IMPLEMENTER = "implementer"
 R2_REVIEWER = "reviewer"
 R2_FALLBACK = "fallback"
@@ -903,6 +907,9 @@ R2_MODEL = "model"
 R2_IMPL_PATH = "%s.%s" % (TABLES_SEATS, R2_IMPLEMENTER)
 R2_REVIEWER_PATH = "%s.%s" % (TABLES_SEATS, R2_REVIEWER)
 R2_FALLBACK_PATH = "%s.%s" % (R2_REVIEWER_PATH, R2_FALLBACK)
+# 兩個位置在輸出裡的稱呼。各則訊息都帶著它，兩則才分得出誰是誰。
+R2_MAIN_LABEL = "審查位主 pin"
+R2_FB_LABEL = "審查位 fallback"
 TABLE_HEADER = ["面向", "值", "狀態"]
 STATUS_COL = "狀態"
 # R9 的分節：「對照表得分為通用節與本機節」。節名用詞以 R9 為準，
@@ -2340,29 +2347,37 @@ if not tables_problems and not tables_missing:
           "、".join("`%s`→%s%s.md" % (k, d, v) for k, v, d in tables_required)))
 
 print()
-print("── R2：同廠 reviewer fallback 的模型（%s；依裁決不升關卡）" % tag("r2"))
-# 定義域：一個檔案（devflow.yml）、四條固定路徑、一次逐字比對——
-#   `seats.implementer.filler`／`seats.implementer.model`
-#   `seats.reviewer.fallback.filler`／`seats.reviewer.fallback.model`
+print("── R2：同廠審查位的模型（%s；主 pin 與 fallback 各判一次；依裁決不升關卡）" % tag("r2"))
+# 定義域：一個檔案（devflow.yml）、六條固定路徑、兩次逐字比對——
+#   `seats.implementer.filler`／`seats.implementer.model`（被審者，兩次比對共用）
+#   `seats.reviewer.filler`／`seats.reviewer.model`（主 pin）
+#   `seats.reviewer.fallback.filler`／`seats.reviewer.fallback.model`（選填的改派宣告）
 # 節點樹沿用 i5 那一節 compose 出來的 i5_root（同一份 bytes、同一個 parser，不解析第三次）；
 # 取鍵沿用 tables_get（同名鍵重複＝歧義、`<<` 依 YAML merge 語意展開），所以本項自己不碰 YAML，
 # 也不會和 `i5`／`tables` 對同一份檔案給出兩套看法。
 #
+# 為什麼看兩個位置（issue #221）：`R2` 要防的是「審查者與被審者同廠同模型，只差 context」，
+# 這個風險不分它來自主 pin 還是 fallback——直接把 `seats.reviewer` 設成與實作位同廠同模型，
+# 風險完全相同。首版（issue #218）只判 fallback，於是 PR #216 那一輪協調者直接用與實作位
+# 同廠同模型的工具審查（根本沒走 fallback 路徑）時，本項一聲不吭。條文的射程本來就涵蓋
+# 「當次實際擔任審查的工具與模型」，改寫後寫明了（`R2`），本項跟著對兩個位置各判一次。
+# 兩處**獨立判定**：主 pin 異廠、fallback 同廠同模型時，只對 fallback 出 ⚠️，不混成一條。
+#
 # 本項是**提示，不是關卡**。`R2` 的模型約束是建議（issue #218 的使用者裁決，2026-09-25：
 # 「通用建議：條文寫明同廠 fallback 宜用不同模型，不強制；檢查器維持建議項不升關卡
 # （配你已定的 INFO／WARNING 提示）」），所以它不走 report()、不進 errors、不吃
-# DEVFLOW_GATE_R2=1（見 GATES_NO_UPGRADE），只印三種結果：
-#   ℹ️ 同廠 fallback 且兩邊的 `model` 不同 —— 合建議，仍**每次執行都印一行**。這是裁決的
+# DEVFLOW_GATE_R2=1（見 GATES_NO_UPGRADE），每個位置只印三種結果：
+#   ℹ️ 該位同廠且兩邊的 `model` 不同 —— 合建議，仍**每次執行都印一行**。這是裁決的
 #      字面要求：「如果使用同廠不同模型就簡單的 INFO 提示，每次使用都 INFO 提示」，
 #      所以它不是「有問題才提」，訊息也就保持一行、不附 detail。
-#   ⚠️ 同廠 fallback 且兩邊的 `model` 相同 —— 裁決：「同廠同模型需要用 warning 提示，
+#   ⚠️ 該位同廠且兩邊的 `model` 相同 —— 裁決：「同廠同模型需要用 warning 提示，
 #      要警告這個狀況是不建議的」。措辭到「不建議」為止，不說成違規。
 #   ✅ 其餘都是「不適用」，不印成問題（檢查器不發明規則）。
 #
 # 幾個刻意不做的判定，逐條對著改寫後的 R2：
-#   (1) `seats.reviewer.fallback` 不存在 → 不適用。條文把它寫成「可寫在」的選填宣告位置，
-#       要求它存在就是發明義務。
-#   (2) fallback 的 `filler` 與 `seats.implementer.filler` 不同 → 異廠 fallback，
+#   (1) `seats.reviewer.fallback` 不存在 → 該位不適用（主 pin 照判）。條文把它寫成「可寫在」
+#       的選填宣告位置，要求它存在就是發明義務。
+#   (2) 該位的 `filler` 與 `seats.implementer.filler` 不同 → 異廠，
 #       條文的模型建議只在同廠時才給，不適用。
 #   (3) 同廠但有一邊的 `model` 沒 pin → ℹ️「核不出來」，不是問題。改建議級後條文沒有
 #       「兩位的 `model` 都須顯式 pin」這條義務；而未 pin 時實際用哪個模型取決於工具當次的
@@ -2373,8 +2388,13 @@ print("── R2：同廠 reviewer fallback 的模型（%s；依裁決不升關�
 #       必需關卡把（見那兩節），本項不重複判，也不藉這條變成第三個把關的人。
 #   (5) 條文明寫「同廠只有一個堪用模型時，全新 context 即滿足本條」，所以 ⚠️ 那一行的
 #       處置文字照這句寫：換模型或換異廠是選項，沒有第二個堪用模型時不必勉強。
+#   (6) 不判「主 pin 與 fallback 哪一個是那一輪實際生效的」——那是派工當下的事實，
+#       檔案裡看不到。兩個位置各判各的，不互相遮蔽、也不合成一條結論。
 #
 # 本項看的是**pin 的形狀**，不是那一輪實際派了誰：派工發生在 repo 外，檢查器看不到。
+# 條文（改寫後的 `R2`）說的是「當次實際擔任審查的工具與模型」，那個事實只有協調者知道；
+# 本項能做的是把兩個宣告位置都攤開來，讓「照設定派工」的那條路上不會有同廠同模型沒人提醒。
+# 設定之外臨場改派（PR #216 那次就是）仍然出了本項的定義域，是 `R2` 給人遵守的部分。
 
 
 def r2_map(parent, where, key):
@@ -2397,104 +2417,126 @@ def r2_str(parent, where, key):
     return i5_scalar(node, "%s 的 `%s`" % (where, key))
 
 
-def r2_unreadable(why):
-    """讀不出形狀時的 ℹ️。why 是一或多條原因，照原文附在下面。"""
-    return "info", ("%s 的 `%s` 讀不出形狀，本項無從核對（解析層與 `%s` 的形狀另由 `i5`、"
+def r2_unreadable(what, why):
+    """讀不出形狀時的 ℹ️。what 是這一則涵蓋的位置，why 是一或多條原因，照原文附在下面。"""
+    return "info", ("%s 的 %s 讀不出形狀，本項無從核對（解析層與 `%s` 的形狀另由 `i5`、"
                     "`tables` 兩個必需關卡把守）"
-                    % (I5_FILE, R2_FALLBACK_PATH, TABLES_SEATS)), why
+                    % (I5_FILE, what, TABLES_SEATS)), why
 
 
-def r2_check():
-    """回傳 (級別, 訊息, detail)：級別是 `ok`／`info`／`warn` 三值之一。
+def r2_one(label, path, node, impl_filler, impl_model, impl_model_bad):
+    """判一個審查位置（主 pin 或 fallback）：與實作位同廠時才比 `model`。
+    回傳 (級別, 訊息, detail)，級別是 `ok`／`info`／`warn` 三值之一。
 
-    本項只有這三種輸出，不走 report()——`R2` 的模型約束是建議，依裁決不升關卡。"""
-    if i5_root is None:
-        return r2_unreadable(list(yml_parse_problems))
-    if not is_plain_map(i5_root):
-        return r2_unreadable(["根不是 !!map 的 MappingNode：%s" % node_desc(i5_root)])
-    seats, bad = r2_map(i5_root, "根", TABLES_SEATS)
-    if not bad and seats is None:
-        bad = "缺 `%s`（第 0 節的自變數）" % TABLES_SEATS
-    if bad:
-        return r2_unreadable([bad])
-    where_seats = "`%s`" % TABLES_SEATS
-    reviewer, bad = r2_map(seats, where_seats, R2_REVIEWER)
-    if bad:
-        return r2_unreadable([bad])
-    if reviewer is None:
-        return "ok", "%s 沒有 `%s`，沒有 fallback 可判" % (I5_FILE, R2_REVIEWER_PATH), ()
-    fallback, bad = r2_map(reviewer, "`%s`" % R2_REVIEWER_PATH, R2_FALLBACK)
-    if bad:
-        return r2_unreadable([bad])
-    if fallback is None:
-        return "ok", ("%s 沒有 `%s`：未宣告 fallback（選填），R2 的模型建議不適用"
-                      % (I5_FILE, R2_FALLBACK_PATH)), ()
-    implementer, bad = r2_map(seats, where_seats, R2_IMPLEMENTER)
-    if not bad and implementer is None:
-        bad = ("缺 `%s`：宣告了 `%s` 卻沒有實作位可比，判不出是不是同廠"
-               % (R2_IMPL_PATH, R2_FALLBACK_PATH))
-    if bad:
-        return r2_unreadable([bad])
-    where_fb = "`%s`" % R2_FALLBACK_PATH
+    兩個位置各呼叫一次、各出一則：同廠與否、model 相不相同，都是該位置自己的事實，
+    不互相遮蔽也不合成一條結論（issue #221）。被審者那一邊（impl_*）兩則共用。"""
+    what = "%s（`%s`）" % (label, path)
+    where = "`%s`" % path
     where_impl = "`%s`" % R2_IMPL_PATH
     unreadable = []
-    fb_filler, bad = r2_str(fallback, where_fb, TABLES_FILLER)
+    filler, bad = r2_str(node, where, TABLES_FILLER)
     if bad:
         unreadable.append(bad)
-    elif fb_filler is None:
-        unreadable.append("%s 缺 `%s`：分不出這是同廠還是異廠 fallback"
-                          % (where_fb, TABLES_FILLER))
-    impl_filler, bad = r2_str(implementer, where_impl, TABLES_FILLER)
-    if bad:
-        unreadable.append(bad)
-    elif impl_filler is None:
-        unreadable.append("%s 缺 `%s`：沒有可比的實作位廠牌" % (where_impl, TABLES_FILLER))
+    elif filler is None:
+        unreadable.append("%s 缺 `%s`：分不出這一位是同廠還是異廠" % (where, TABLES_FILLER))
     if unreadable:
-        return r2_unreadable(unreadable)
-    if fb_filler != impl_filler:
-        return "ok", ("%s：`%s` ＝ %r 與實作位的 %r 異廠，R2 的模型建議不適用"
-                      % (I5_FILE, R2_FALLBACK_PATH + "." + TABLES_FILLER,
-                         fb_filler, impl_filler)), ()
-    same = "同廠（`%s` 皆為 %r）" % (TABLES_FILLER, fb_filler)
+        return r2_unreadable(what, unreadable)
+    if filler != impl_filler:
+        return "ok", ("%s：%s 的 `%s` ＝ %r 與實作位的 %r 異廠，R2 的模型建議不適用"
+                      % (I5_FILE, label, path + "." + TABLES_FILLER,
+                         filler, impl_filler)), ()
+    same = "同廠（`%s` 皆為 %r）" % (TABLES_FILLER, filler)
     # 沒寫（missing）與寫了但讀不出來（unreadable）分開收：兩者都讓本項核不出模型是否相同，
     # 但只有前者要附「選填、不 pin 不違反 R2」那句——鍵重複的情形 pin 是寫了的，兩次。
     missing = []
-    fb_model, bad = r2_str(fallback, where_fb, R2_MODEL)
+    model, bad = r2_str(node, where, R2_MODEL)
     if bad:
         unreadable.append(bad)
-    elif fb_model is None:
-        missing.append("%s 沒有 `%s`" % (where_fb, R2_MODEL))
-    impl_model, bad = r2_str(implementer, where_impl, R2_MODEL)
-    if bad:
-        unreadable.append(bad)
+    elif model is None:
+        missing.append("%s 沒有 `%s`" % (where, R2_MODEL))
+    if impl_model_bad:
+        unreadable.append(impl_model_bad)
     elif impl_model is None:
         missing.append("%s 沒有 `%s`" % (where_impl, R2_MODEL))
     if unreadable or missing:
         # 沒 pin 不是違規（條文沒有這條義務），但沒 pin 就核不出模型是否相同——說核不出來。
-        return "info", ("%s：fallback 與實作位%s，但 `%s` 沒有兩邊都讀得出來，"
-                        "核不出模型是否相同" % (I5_FILE, same, R2_MODEL)), (
+        return "info", ("%s：%s與實作位%s，但 `%s` 沒有兩邊都讀得出來，"
+                        "核不出模型是否相同" % (I5_FILE, what, same, R2_MODEL)), (
             unreadable + missing
             + (["`%s` 是選填，不 pin 不違反 R2；要讓本項核得出來才需要兩邊都寫明" % R2_MODEL]
                if missing else []))
-    if fb_model == impl_model:
-        return "warn", ("%s 的 reviewer fallback 與實作位%s又同模型（`%s` 皆為 %r）："
+    if model == impl_model:
+        return "warn", ("%s 的%s與實作位%s又同模型（`%s` 皆為 %r）："
                         "只差 context，這個狀況不建議"
-                        % (I5_FILE, same, R2_MODEL, fb_model)), [
-            "`%s` 與 `%s` 都是 %r" % (R2_FALLBACK_PATH + "." + R2_MODEL,
-                                      R2_IMPL_PATH + "." + R2_MODEL, fb_model),
-            "R2 建議同廠時所用模型與實作位不同：可把 fallback 換成同廠的另一個模型，"
-            "或改用異廠的 fallback；同廠只有一個堪用模型時，依條文全新 context 即滿足 R2"]
-    return "info", ("%s：reviewer fallback 與實作位%s，模型 %r ≠ %r，合 R2 的建議"
-                    % (I5_FILE, same, fb_model, impl_model)), ()
+                        % (I5_FILE, what, same, R2_MODEL, model)), [
+            "`%s` 與 `%s` 都是 %r" % (path + "." + R2_MODEL,
+                                      R2_IMPL_PATH + "." + R2_MODEL, model),
+            "R2 建議同廠時所用模型與實作位不同：可換成同廠的另一個模型，或改派異廠的工具；"
+            "同廠只有一個堪用模型時，依條文全新 context 即滿足 R2"]
+    return "info", ("%s：%s與實作位%s，模型 %r ≠ %r，合 R2 的建議"
+                    % (I5_FILE, what, same, model, impl_model)), ()
 
 
-r2_level, r2_msg, r2_detail = r2_check()
-if r2_level == "warn":
-    warn(r2_msg, r2_detail)
-elif r2_level == "info":
-    info(r2_msg, r2_detail)
-else:
-    ok(r2_msg)
+def r2_check():
+    """回傳一或多則 (級別, 訊息, detail)：主 pin 與 fallback 各一則，順序固定。
+
+    本項只有這三種級別，不走 report()——`R2` 的模型約束是建議，依裁決不升關卡。
+    讀不出來的東西若是兩則共用的（YAML 根、`seats`、實作位），就只出一則合併的 ℹ️。"""
+    both = "審查位（`%s` 與 `%s`）" % (R2_REVIEWER_PATH, R2_FALLBACK_PATH)
+    if i5_root is None:
+        return [r2_unreadable(both, list(yml_parse_problems))]
+    if not is_plain_map(i5_root):
+        return [r2_unreadable(both, ["根不是 !!map 的 MappingNode：%s" % node_desc(i5_root)])]
+    seats, bad = r2_map(i5_root, "根", TABLES_SEATS)
+    if not bad and seats is None:
+        bad = "缺 `%s`（第 0 節的自變數）" % TABLES_SEATS
+    if bad:
+        return [r2_unreadable(both, [bad])]
+    where_seats = "`%s`" % TABLES_SEATS
+    reviewer, bad = r2_map(seats, where_seats, R2_REVIEWER)
+    if bad:
+        return [r2_unreadable(both, [bad])]
+    if reviewer is None:
+        return [("ok", "%s 沒有 `%s`：沒有審查位可判" % (I5_FILE, R2_REVIEWER_PATH), ())]
+    # fallback 是選填（判定 (1)）：沒宣告就只出「不適用」那一則，主 pin 照判。
+    fallback, bad = r2_map(reviewer, "`%s`" % R2_REVIEWER_PATH, R2_FALLBACK)
+    if bad:
+        fb_out = r2_unreadable("%s（`%s`）" % (R2_FB_LABEL, R2_FALLBACK_PATH), [bad])
+    elif fallback is None:
+        fb_out = ("ok", "%s 沒有 `%s`：未宣告 fallback（選填），R2 的模型建議不適用"
+                  % (I5_FILE, R2_FALLBACK_PATH), ())
+    else:
+        fb_out = None           # 宣告了，下面和主 pin 走同一套判定
+    # 被審者那一邊：兩則共用，讀不出來就兩則都判不了，合成一則。
+    implementer, bad = r2_map(seats, where_seats, R2_IMPLEMENTER)
+    if not bad and implementer is None:
+        bad = "缺 `%s`：沒有實作位可比，判不出審查位是不是同廠" % R2_IMPL_PATH
+    if bad:
+        return [r2_unreadable(both, [bad])]
+    where_impl = "`%s`" % R2_IMPL_PATH
+    impl_filler, bad = r2_str(implementer, where_impl, TABLES_FILLER)
+    if not bad and impl_filler is None:
+        bad = "%s 缺 `%s`：沒有可比的實作位廠牌" % (where_impl, TABLES_FILLER)
+    if bad:
+        return [r2_unreadable(both, [bad])]
+    # 實作位的 `model` 讀不讀得出來，只有同廠的位置才用得上，所以不在這裡就地判，
+    # 原樣交給 r2_one——異廠的那一則不該因為被審者沒 pin model 就改口。
+    impl_model, impl_model_bad = r2_str(implementer, where_impl, R2_MODEL)
+    out = [r2_one(R2_MAIN_LABEL, R2_REVIEWER_PATH, reviewer,
+                  impl_filler, impl_model, impl_model_bad)]
+    out.append(fb_out if fb_out is not None
+               else r2_one(R2_FB_LABEL, R2_FALLBACK_PATH, fallback,
+                           impl_filler, impl_model, impl_model_bad))
+    return out
+
+
+for _r2_level, _r2_msg, _r2_detail in r2_check():
+    if _r2_level == "warn":
+        warn(_r2_msg, _r2_detail)
+    elif _r2_level == "info":
+        info(_r2_msg, _r2_detail)
+    else:
+        ok(_r2_msg)
 
 print()
 print("── 對照表的形狀（%s）" % tag("table"))
