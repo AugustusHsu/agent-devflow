@@ -17,9 +17,9 @@ seats:
     filler: codex            # codex | claude-code
     model: gpt-5.6-sol
     reasoning: high          # 思考程度；值的寫法依工具
-    fallback:                # 主 filler 不可用（配額耗盡等）時改用這組；不臨場選（R2）
-      filler: claude-code    # 與 implementer 同廠，所以下面那行的 model 是 R2 的強制約束
-      model: claude-fable-5-1  # 須 ≠ seats.implementer.model（R2）；能力證據另見對照表，pin 不等於 ✅
+    fallback:                # 選填；主 filler 不可用（配額耗盡等）時改用這組，事先定下而非臨場選（R2）
+      filler: claude-code    # 與 implementer 同廠，所以下面那行的 model 適用 R2 的模型建議
+      model: claude-fable-5-1  # R2 建議 ≠ seats.implementer.model；能力證據另見對照表，pin 不等於 ✅
   coordinator:               # 協調位；省略＝human（無工具，各步由人執行；對照表 orchestrators/none.md）
     filler: hermes           # hermes | paperclip | human
   approver:                  # 裁決位；人（seats/approver.md），無 model／reasoning

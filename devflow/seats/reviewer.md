@@ -24,7 +24,7 @@ PR 上的 review／comment：verdict（`APPROVE`／`REQUEST_CHANGES`）、head s
 - 全新 context：不帶實作位的脈絡；每次審查（含 `R3` 的重審）都從全新 context 開始（`R1`）。
 - 不接受作者摘要當證據；只依材料判斷（`R1`）。
 - 不得對自己的工作簽正式 verdict（`R1`）。
-- 建議填此位的工具與填實作位的工具異廠；只有一家可用時，用同廠的全新 context，且所用模型不得與實作位所用者相同——異廠是建議，這條模型約束是強制；同廠 fallback 依 `devflow.yml` 的 `seats.reviewer.fallback` pin，不臨場選（`R2`）。
+- 建議填此位的工具與填實作位的工具異廠；只有一家可用時，用同廠的全新 context；同廠時另建議所用模型與實作位所用者（`devflow.yml` 的 `seats.implementer.model`）不同，同廠只有一個堪用模型時全新 context 即滿足；同廠改派的工具與模型要事先定下的話，選填的宣告位置是 `devflow.yml` 的 `seats.reviewer.fallback`，欄位 `filler`、`model`（`R2`）。
 - 計數式斷言不作任一條 AC 的唯一證據（`R6`）；`📝` 不當任一條 AC 的證據（`R9`）。
 - 超過 20 KB 的檔案不整份載入（`D4`）。
 
