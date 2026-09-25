@@ -16,7 +16,7 @@
 | 分支保護 | — | 導入的 GitLab 專案的 main 應設 protected：Allowed to push＝Maintainers、force push 關；Merge method＝Merge commit；Squash＝Do not allow；Delete source branch by default 開 | ⬜ 未測（值欄依 `R9` 改寫以表明宣稱對象：本 repo 無 GitLab 實例，本格只能是導入專案應採的設定，不是任一 instance 的現況） |
 | tag 保護 | — | 導入的 GitLab 專案應設 protected tags，Allowed to create＝Maintainers | ⬜ 未測（值欄依 `R9` 改寫以表明宣稱對象：本 repo 無 GitLab 實例，本格只能是導入專案應採的設定，不是任一 instance 的現況） |
 | 開 MR | implementer／coordinator（代行） | `POST /merge_requests` | ⬜ 未測 |
-| 審查證據（`R3`／`R5`） | reviewer | MR note；approval rules 在 Free 可能 403 → verdict 寫在 note 內並含 head sha | ⬜ 未測 |
+| 審查證據（`R3`／`R5`） | coordinator | MR note；approval rules 在 Free 可能 403 → verdict 寫在 note 內並含 head sha | ⬜ 未測 |
 | 合併（`I3`） | approver／coordinator（`M2`） | `PUT /merge_requests/:iid/merge` | ⬜ 未測 |
 | 已合併訊號（`C1`） | coordinator | `GET /merge_requests/:iid`（`state=merged`、`merge_commit_sha`）＋ `git merge-base --is-ancestor` | ⬜ 未測 |
 | 合併後刪分支（`C1`） | coordinator | `should_remove_source_branch` 可能不生效 → `git ls-remote --heads` 驗，多的手動刪 | ⬜ 未測 |

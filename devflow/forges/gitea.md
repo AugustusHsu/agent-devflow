@@ -16,7 +16,7 @@
 | 分支保護 | — | 導入的 Gitea repo 的 main 應設 branch protection：push 限 whitelist、`enable_merge_whitelist`、禁 force push；repo 設定 merge style 只留 merge commit | ⬜ 未測 |
 | tag 保護 | — | 導入的 Gitea repo 應設 protected tags（`POST /repos/{owner}/{repo}/tags/protection`，1.20+） | ⬜ 未測 |
 | 開 PR | implementer／coordinator（代行） | `POST /repos/{owner}/{repo}/pulls` | ⬜ 未測 |
-| 審查證據（`R3`／`R5`） | reviewer | `POST /pulls/{index}/reviews`（`event=COMMENT`），verdict 含 head sha | ⬜ 未測 |
+| 審查證據（`R3`／`R5`） | coordinator | `POST /pulls/{index}/reviews`（`event=COMMENT`），verdict 含 head sha | ⬜ 未測 |
 | 合併（`I3`） | approver／coordinator（`M2`） | `POST /pulls/{index}/merge`（`Do=merge`） | ⬜ 未測 |
 | 已合併訊號（`C1`） | coordinator | `GET /pulls/{index}`（`merged=true`、`merge_commit_sha`）＋ `git merge-base --is-ancestor` | ⬜ 未測 |
 | 合併後刪分支（`C1`） | coordinator | 合併 body `delete_branch_after_merge=true`；`git ls-remote --heads` 驗 | ⬜ 未測 |

@@ -11,7 +11,7 @@
 - 對照表格子的狀態依 `R7`、`R8`、`R9`、`R10` 判。
 - 審查對象是最終整合候選（`M4`）；有效 verdict 是合併前提（`M1`）。
 - 審查節屬保護節，自 stage 0 起生效、不依 stage（`ST5`）。
-- 派工前讀審（`L7`）——填位基準、產出物與唯讀限制依 `L7`；不適用本檔「共同要求」的 `R2` 異廠基準、「產出物」段的 PR review 定義、「填充者須具備的能力」的「在 forge 的 PR 上留 review／comment」一項。
+- 派工前讀審（`L7`）——填位基準與產出物依 `L7`，執行邊界依 `R12`；不適用本檔「共同要求」的 `R2` 異廠基準、「產出物」段的 PR review 定義。
 
 ## 產出物
 
@@ -34,7 +34,7 @@ PR 上的 review／comment：verdict（`APPROVE`／`REQUEST_CHANGES`）、head s
 
 ## 規則義務
 
-`I4`、`L7`、`R1`、`R2`、`R3`、`R4`、`R5`、`R6`、`R7`、`R8`、`R9`、`R10`、`R11`、`M1`、`M4`、`G1`、`G2`、`G5`、`S5`、`ST5`、`D4`。
+`I4`、`L7`、`R1`、`R2`、`R3`、`R4`、`R5`、`R6`、`R7`、`R8`、`R9`、`R10`、`R11`、`R12`、`M1`、`M4`、`G1`、`G2`、`G5`、`S5`、`ST5`、`D4`。
 
 ## 例外：規格 PR
 
@@ -44,5 +44,5 @@ PR 上的 review／comment：verdict（`APPROVE`／`REQUEST_CHANGES`）、head s
 
 - 讀取 `base..head` 的完整來源（不只 diff）以及 G、T。
 - 執行 issue 上的驗證指令。
-- 在 forge 的 PR 上留 review／comment。
+- 產出 verdict 全文供協調者貼上 forge；填充者自己不對 forge 寫（`R12`）。
 - 以全新 context 啟動（例如乾淨 checkout、不帶先前對話的新 session）。
