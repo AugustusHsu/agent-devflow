@@ -11,9 +11,12 @@
 # 注意不是 `G4`：`G4` 住第 9 節，依第 0 節與 `ST2` 要 stage 2 才生效，現在是 stage 1，
 # 不能引為依據。
 # 本檔每一項檢查都有自己的開關（下面的 GATES）：True＝必需關卡，False＝建議（只報告不擋）。
-# 十三項裡十二項是 True（`encoding`、`d2`、`i1`、`i5`、`version`、`fence`、`tables`、`table`、
-# `link`、`r9`、`dupid`、`v7`），一項是 False（`refs`）——分界不是「哪一項比較重要」，
-# 而是**定義域封不封閉**，見下面各節。
+# 十五項裡十二項是 True（`encoding`、`d2`、`i1`、`i5`、`version`、`fence`、`tables`、`table`、
+# `link`、`r9`、`dupid`、`v7`），三項是 False（`refs`、`seatoblig`、`orphan`）——分界不是
+# 「哪一項比較重要」，而是**定義域封不封閉**，見下面各節。
+# 三項建議裡 `refs` 與另外兩項停在建議的理由不同：`refs` 是定義域封不住（見下面
+# 「擋不住什麼」）；`seatoblig`／`orphan` 的定義域封閉，只是正反測試還沒補
+# （issue #213；升關卡的前提同樣是上面那條 README 的判定方式）。
 #
 # ── ⚠️ 這個 check 擋什麼、不擋什麼 ───────────────────────────────────────
 # 會擋（exit 1）：`encoding` 受版控 .md 的內容是合法 UTF-8、
@@ -39,7 +42,11 @@
 # `r9` 是 issue #94 開的，見「r9 為什麼可以是關卡」；`dupid` 是 issue #96 開的，
 # 見「dupid 為什麼可以是關卡」；`v7` 是 issue #150 開的，見「v7 為什麼可以是關卡」）。
 # 不擋（exit 0，只把發現印在 log）：`refs`（issue #96 逐項評估過三個收斂方向，沒有一個
-# 封得住定義域，見下面「擋不住什麼」的 refs 那條）。
+# 封得住定義域，見下面「擋不住什麼」的 refs 那條）、
+# `seatoblig` 職位檔的 `## 規則義務` 段與該檔其餘段的規則 ID 引用雙向一致、
+# `orphan` 規則本體定義的規則 ID 至少有一個職位檔認領（`devflow/seats/README.md`
+# 明文豁免的除外）——後兩項是 issue #213 開的，定義域封閉（見各自那一節的註解），
+# 停在建議是因為正反測試未補，不是因為判準收不住。
 #
 # 「GATES 是 True」只讓這個 check 自己變紅，**不等於它是 branch protection 的
 # required status check**——後者是 repo 設定，要另外設，前提見下面「升 required 的前提」。
@@ -785,7 +792,7 @@ if _drift and os.environ.get("DEVFLOW_ALLOW_PIN_DRIFT") != "1":
 
 # ── 關卡開關 ──────────────────────────────────────────────────────
 # True＝必需關卡（失敗就擋）；False＝建議（只報告）。
-# 十三項裡十二項是 True，一項是 False。分界是定義域封不封閉，理由見檔頭。
+# 十五項裡十二項是 True，三項是 False。分界是定義域封不封閉，理由見檔頭。
 # 驗證用：DEVFLOW_GATE_<KEY>=1 可單獨打開一項，環境變數只能加嚴不能放寬。
 # 順序＝執行順序：`encoding` 在讀檔當下就判，排在最前面。
 GATES = {
@@ -803,6 +810,9 @@ GATES = {
     "r9":      True,    # R9 對照表狀態欄三值（issue #94：64 格已換成條文原文）
     "v7":      True,    # V7 動到 devflow/** 須進位 devflow/VERSION（第 3 節，ST1 起生效；
                         # issue #150，定義域見檔頭「v7 為什麼可以是關卡」）
+    "seatoblig": False,  # 職位檔的「規則義務」段 ↔ 該檔其餘段的引用雙向一致
+                         # （issue #213；定義域封閉，首版為建議是因為正反測試未補）
+    "orphan":  False,   # 規則本體的規則 ID 至少一個職位檔認領（issue #213；同上）
 }
 for _k in GATES:
     if os.environ.get("DEVFLOW_GATE_" + _k.upper()) == "1":
@@ -908,6 +918,25 @@ V7_VERSION_FILE = "devflow/VERSION"
 # 本機／沙箱指定 base 的環境變數（issue #150 AC-2）。值是 sha 或任何 git 解析得了的 ref。
 # 它**只能指定比較對象，不能放寬判定**：設了之後照樣算 merge-base、照樣比四碼。
 V7_BASE_ENV = "DEVFLOW_V7_BASE"
+
+# seatoblig／orphan（issue #213）的定義域：四個已知檔、一個段落標題、一個正則，
+# 加上一份**從 repo 讀出來**的豁免清單。四樣都是字面事實，沒有啟發式。
+SEAT_DIR = "devflow/seats/"
+SEAT_FILES = tuple(SEAT_DIR + n + ".md"
+                   for n in ("coordinator", "implementer", "reviewer", "approver"))
+SEAT_README = SEAT_DIR + "README.md"
+# 段落標題逐字比對（四個職位檔都寫成這一行，`git grep -c '^## 規則義務' devflow/seats`
+# 每檔恰一）。不套 section_name() 的寬鬆判讀：那是 R9 為了 `## **通用**` 開的口子，
+# 這裡沒有那個需求，收緊反而讓定義域小一點。
+SEAT_OBLIG_HEADING = "## 規則義務"
+# 行內 `ID` 的字面形狀。**ID 的長相不另立第二份定義**——直接把 ID_RE 的 pattern
+# 包一層反引號（同 v7 沿用安裝器 VERSION_RE 的理由）。group(1) 是完整 ID，
+# group(2) 是家族前綴（來自 ID_RE 自己的括號）。
+SEAT_ID_RE = re.compile("`(%s)`" % ID_RE.pattern)
+# README 裡「刻意不分配」那句的辨識詞。豁免哪幾條是**規則決定**（現行那句寫的是
+# 「`V1`、`V2`、`V3`、`V5` 的行為人待 #63 裁定，四個職位檔都不分配」），機讀它而不是
+# 把 ID 抄進本檔：抄進來等於檢查器自己發明豁免（見檔頭「不發明規則」）。
+SEAT_EXEMPT_MARK = "不分配"
 
 # 解析器：commonmark ＋ GitHub 也認得的兩個擴充。`table` 是對照表要用的；`strikethrough`
 # 是 issue #98 補的——GitHub 算繪的是 GFM，`~~舊~~` 在讀者眼裡是刪除線**標記**，
@@ -2550,6 +2579,146 @@ else:
                     "位數（a／b／c／d）依 V1／V2 由人判，本項只判有沒有進位",
                     "base＝%s（%s，取自 %s）" % (v7_mb, v7_base, v7_base_from)]
                    + v7_detail)
+
+print()
+print("── seat 規則義務段 ↔ 同檔其餘段的引用雙向一致（%s）" % tag("seatoblig"))
+# 定義域封閉在三個字面事實上：**四個已知檔**（SEAT_FILES）、**一個段落標題**
+# （SEAT_OBLIG_HEADING，逐字比對）、**一個正則**（SEAT_ID_RE，由 ID_RE 包一層反引號
+# 而成）。判定只有集合差，沒有啟發式、沒有門檻、沒有「意圖」的猜測。
+#
+# 逐行找標題而不走 markdown-it：本項要的是**段的行範圍**（要把該段從全文裡扣掉再比），
+# 那是行的事實不是 token 的事實；四個職位檔一個 code fence 都沒有
+# （`git grep -c '```' devflow/seats` 全零，且上面 `fence` 那一項在驗每個 md 的 fence 成對），
+# 所以「行首是 `## `」不可能落在程式碼區塊裡。同 d2 逐行找標記的理由，見那一節。
+#
+# 兩個方向都是缺陷，各報各的：
+#   * cited - listed：其餘段引了、義務段沒列 → 義務清單不完整。
+#   * listed - cited：義務段列了、其餘段沒有對應條文 → 職責條文缺漏。
+# 後者正是本項的來由（issue #213）：`29316c1`（#194 AC-11）只補了 coordinator 義務段的
+# `R12`，職責段沒有對應條文，六輪讀審＋一輪審查都沒抓到。
+#
+# 首版是**建議**：定義域封閉，但升關卡的前提是 README「Phase 1 第三出口的判定方式」
+# （正反兩個 run、同一份 blob、exit 1 只能由目標項造成），那組測試還沒補，由 #213 的後續單處理。
+def seat_oblig_span(lines):
+    """`## 規則義務` 的 (標題行索引, 段結束索引)：段內容是 lines[head + 1:end]，
+    `end` 是其後第一個 `## ` 開頭的行索引，沒有就是檔尾。找不到標題回 None。
+
+    標題行自己不屬於任何一側——它既不是義務清單的內容，也不該讓「規則義務」四個字
+    出現在另一側。四個職位檔各恰一個這樣的標題，取第一個。"""
+    head = None
+    for i, line in enumerate(lines):
+        if line.rstrip() == SEAT_OBLIG_HEADING:
+            head = i
+            break
+    if head is None:
+        return None
+    for j in range(head + 1, len(lines)):
+        if lines[j].startswith("## "):
+            return head, j
+    return head, len(lines)
+
+
+def seat_ids(lines):
+    """一段行文字裡出現的規則 ID 集合。"""
+    return {m.group(1) for m in SEAT_ID_RE.finditer("\n".join(lines))}
+
+
+def seat_id_line(lines, lo, hi, rid):
+    """`rid` 在 lines[lo:hi] 裡第一次出現的行號（1-based）；找不到回 None。"""
+    for i in range(lo, hi):
+        if "`%s`" % rid in lines[i]:
+            return i + 1
+    return None
+
+
+seat_claimed = {}
+seatoblig_clean = True
+for f in SEAT_FILES:
+    if f not in docs:
+        # 受版控的職位檔少一個＝定義域與 repo 佈局脫節。不 die()：這是被檢查的**內容**
+        # 與假設不符，和 dupid「找不到任何規則定義」同一種分類。
+        seatoblig_clean = False
+        report("seatoblig", "%s 不在受版控的 md 裡，本項的定義域與 repo 佈局脫節" % f)
+        continue
+    seat_lines = docs[f]["lines"]
+    span = seat_oblig_span(seat_lines)
+    if span is None:
+        seatoblig_clean = False
+        report("seatoblig", "%s 沒有「%s」段，列不出它的規則義務"
+               % (f, SEAT_OBLIG_HEADING))
+        continue
+    seat_head, seat_end = span
+    listed = seat_ids(seat_lines[seat_head + 1:seat_end])
+    cited = seat_ids(seat_lines[:seat_head] + seat_lines[seat_end:])
+    seat_claimed[f] = listed
+    if not listed:
+        seatoblig_clean = False
+        report("seatoblig", "%s 的「%s」段沒有任何規則 ID"
+               % (f, SEAT_OBLIG_HEADING))
+    missing = sorted(cited - listed)
+    if missing:
+        seatoblig_clean = False
+        report("seatoblig",
+               "%s：其餘段引用了 %d 個 ID，「%s」段漏列" % (f, len(missing), SEAT_OBLIG_HEADING),
+               ["%s:%s 引用了 `%s`，義務段沒有它"
+                % (f, seat_id_line(seat_lines, 0, seat_head, rid)
+                   or seat_id_line(seat_lines, seat_end, len(seat_lines), rid), rid)
+                for rid in missing])
+    extra = sorted(listed - cited)
+    if extra:
+        seatoblig_clean = False
+        report("seatoblig",
+               "%s：「%s」段列了 %d 個 ID，職責／禁止／能力等其餘段沒有對應條文"
+               % (f, SEAT_OBLIG_HEADING, len(extra)),
+               ["%s:%s 義務段列了 `%s`，其餘段找不到它"
+                % (f, seat_id_line(seat_lines, seat_head + 1, seat_end, rid), rid)
+                for rid in extra])
+if seatoblig_clean:
+    ok("%d 個職位檔的「%s」段與同檔其餘段雙向一致（共 %d 個相異 ID）"
+       % (len(SEAT_FILES), SEAT_OBLIG_HEADING,
+          len(set().union(*seat_claimed.values()) if seat_claimed else set())))
+
+print()
+print("── 規則 ID 至少有一個 seat 認領（%s）" % tag("orphan"))
+# 定義域的三段都是**已經在別處機讀出來的事實**，本項一個都不自己發明：
+#   * 定義：上面 `dupid` 算好的 defined（rule_definitions 的三條件判準，issue #96／#98）。
+#     不另寫一份「什麼算定義」——同 v7 沿用安裝器 VERSION_RE 的理由。
+#   * 認領：上一項算好的 seat_claimed（四個職位檔「規則義務」段的聯集）。
+#   * 豁免：**從 devflow/seats/README.md 機讀**——取含「不分配」的行裡的 `ID`。
+#     豁免哪幾條是規則決定（現行那句是 `V1`／`V2`／`V3`／`V5` 待 #63 裁定），
+#     把 ID 寫死在本檔等於檢查器發明規則（見檔頭「不發明規則」）。README 改了豁免範圍，
+#     本項跟著改；改的人不必同時想到還要來動檢查器——那正是本項要消掉的那種漏改。
+#
+# 少了誰就報誰，不猜處置：報出來的 ID 可能該補進某個職位檔的義務段，也可能該併進
+# README 的豁免句，兩條路都改的是**規則**，由人裁決（現況的 `V6`／`V7` 已開子單）。
+#
+# 首版是建議，理由同上一項：定義域封閉，正反測試未補。
+orphan_exempt = set()
+orphan_exempt_where = []
+if SEAT_README not in docs:
+    report("orphan", "%s 不在受版控的 md 裡，讀不到豁免清單（本項以「沒有豁免」往下判）"
+           % SEAT_README)
+else:
+    for n, line in enumerate(docs[SEAT_README]["lines"], 1):
+        if SEAT_EXEMPT_MARK not in line:
+            continue
+        ids = {m.group(1) for m in SEAT_ID_RE.finditer(line)}
+        if ids:
+            orphan_exempt |= ids
+            orphan_exempt_where.append("%s:%d" % (SEAT_README, n))
+orphan_claimed = set().union(*seat_claimed.values()) if seat_claimed else set()
+orphans = sorted(set(defined) - orphan_claimed - orphan_exempt)
+orphan_src = ("讀自 %s" % "、".join(orphan_exempt_where)) if orphan_exempt_where \
+    else "%s 裡沒有含「%s」的豁免句" % (SEAT_README, SEAT_EXEMPT_MARK)
+if orphans:
+    report("orphan", "%d 個規則 ID 沒有任何職位檔認領，也不在 %s 的豁免句裡"
+           % (len(orphans), SEAT_README),
+           ["%s:%s 定義了 `%s`" % (RULES_FILE, defined[rid][0], rid) for rid in orphans]
+           + ["豁免清單（%s）：%s"
+              % (orphan_src, "、".join("`%s`" % r for r in sorted(orphan_exempt)) or "（空）")])
+else:
+    ok("%d 條規則 ID 都有職位檔認領或在豁免句裡（認領 %d、豁免 %d，%s）"
+       % (len(defined), len(orphan_claimed & set(defined)), len(orphan_exempt), orphan_src))
 
 print()
 if errors:
