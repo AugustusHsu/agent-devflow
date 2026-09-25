@@ -11,12 +11,15 @@
 # 注意不是 `G4`：`G4` 住第 9 節，依第 0 節與 `ST2` 要 stage 2 才生效，現在是 stage 1，
 # 不能引為依據。
 # 本檔每一項檢查都有自己的開關（下面的 GATES）：True＝必需關卡，False＝建議（只報告不擋）。
-# 十五項裡十二項是 True（`encoding`、`d2`、`i1`、`i5`、`version`、`fence`、`tables`、`table`、
-# `link`、`r9`、`dupid`、`v7`），三項是 False（`refs`、`seatoblig`、`orphan`）——分界不是
+# 十六項裡十二項是 True（`encoding`、`d2`、`i1`、`i5`、`version`、`fence`、`tables`、`table`、
+# `link`、`r9`、`dupid`、`v7`），四項是 False（`refs`、`seatoblig`、`orphan`、`r2`）——分界不是
 # 「哪一項比較重要」，而是**定義域封不封閉**，見下面各節。
-# 三項建議裡 `refs` 與另外兩項停在建議的理由不同：`refs` 是定義域封不住（見下面
-# 「擋不住什麼」）；`seatoblig`／`orphan` 的定義域封閉，只是正反測試還沒補
-# （issue #213；升關卡的前提同樣是上面那條 README 的判定方式）。
+# 四項建議停在建議的理由各不相同：`refs` 是定義域封不住（見下面「擋不住什麼」）；
+# `seatoblig`／`orphan` 的定義域封閉，只是正反測試還沒補（issue #213；升關卡的前提同樣是
+# 上面那條 README 的判定方式）；`r2` 的定義域也封閉，但它**依裁決永遠不升關卡**
+# （issue #218 的使用者裁決，2026-09-25：條文寫明同廠 fallback 宜用不同模型、不強制，
+# 「檢查器維持建議項不升關卡」）——所以它不走 report()，輸出改用 ℹ️（提示）／⚠️（警告）
+# 兩級，DEVFLOW_GATE_R2=1 也不再能打開它（見下面 GATES_NO_UPGRADE）。
 #
 # ── ⚠️ 這個 check 擋什麼、不擋什麼 ───────────────────────────────────────
 # 會擋（exit 1）：`encoding` 受版控 .md 的內容是合法 UTF-8、
@@ -47,6 +50,10 @@
 # `orphan` 規則本體定義的規則 ID 至少有一個職位檔認領（`devflow/seats/README.md`
 # 明文豁免的除外）——後兩項是 issue #213 開的，定義域封閉（見各自那一節的註解），
 # 停在建議是因為正反測試未補，不是因為判準收不住。
+# 另有 `r2`（issue #218 開的）：devflow.yml 宣告了 reviewer fallback 且與實作位同廠時，
+# 比對兩邊的 `model`——不同就每次執行都印一行 ℹ️、相同印 ⚠️（`R2` 建議同廠時換一個模型，
+# 同模型只差 context）。它依裁決是建議且不升關卡，兩級輸出都不進 errors 也不進 advisories，
+# 不影響 exit code；未宣告 fallback（它是選填）或異廠 fallback 都是「不適用」，印 ✅。
 #
 # 「GATES 是 True」只讓這個 check 自己變紅，**不等於它是 branch protection 的
 # required status check**——後者是 repo 設定，要另外設，前提見下面「升 required 的前提」。
@@ -685,6 +692,11 @@ from urllib.parse import unquote
 # 例外統一收成 exit 2；SystemExit 不經 hook，所以 die() 與關卡的 sys.exit(1) 不受影響。
 # traceback 照印（除錯要用），另補一行 💥 說明分類。
 #
+# 印出的符號與 exit code 的對應：✅ 該項通過、❌ 必需關卡失敗（→ exit 1）、
+# 📝 建議項的發現（report() 在 GATES 為 False 時，→ 不影響 exit code）、
+# 💥 檢查器無法執行（→ exit 2）。另有 ℹ️（提示）與 ⚠️（警告）兩級，只有 `r2` 用，
+# 依 issue #218 的裁決不進 errors、不影響 exit code，見該節與 info()／warn()。
+#
 # 分界的判準是「壞掉的是誰」，不是「哪一步失敗」：
 #   * 受版控 .md 的**內容**不是合法 UTF-8 ── exit 1（`encoding` 關卡，issue #91 缺口 11）。
 #     檢查器執行得好好的，是被檢查的檔案有問題；判 2 會讓「有人 commit 了壞編碼的 md」
@@ -792,8 +804,9 @@ if _drift and os.environ.get("DEVFLOW_ALLOW_PIN_DRIFT") != "1":
 
 # ── 關卡開關 ──────────────────────────────────────────────────────
 # True＝必需關卡（失敗就擋）；False＝建議（只報告）。
-# 十五項裡十二項是 True，三項是 False。分界是定義域封不封閉，理由見檔頭。
-# 驗證用：DEVFLOW_GATE_<KEY>=1 可單獨打開一項，環境變數只能加嚴不能放寬。
+# 十六項裡十二項是 True，四項是 False。分界是定義域封不封閉，理由見檔頭。
+# 驗證用：DEVFLOW_GATE_<KEY>=1 可單獨打開一項（GATES_NO_UPGRADE 列的例外除外），
+# 環境變數只能加嚴不能放寬。
 # 順序＝執行順序：`encoding` 在讀檔當下就判，排在最前面。
 GATES = {
     "encoding": True,   # 受版控 .md 的內容是合法 UTF-8（issue #91）
@@ -803,6 +816,9 @@ GATES = {
     "version": True,    # V1 frontmatter version 四碼（第 3 節，ST1 起生效；issue #80）
     "fence":   True,    # fenced code block 未關閉（issue #80）
     "tables":  True,    # devflow.yml 指名的對照表都受版控（第 0 節，永遠生效；issue #87）
+    "r2":      False,   # R2 同廠 reviewer fallback 的模型建議（issue #218）
+                        # 依裁決不升關卡：本項不走 report()，輸出是 ℹ️／⚠️ 兩級，
+                        # 這個 False 只讓 tag() 印「建議」，見 GATES_NO_UPGRADE
     "table":   True,    # 對照表形狀，依 R9 分節（issue #80）
     "link":    True,    # 相對連結有效性（issue #80）
     "dupid":   True,    # 規則 ID 唯一定義（定義域＝節前綴判準；issue #96）
@@ -814,7 +830,13 @@ GATES = {
                          # （issue #213；定義域封閉，首版為建議是因為正反測試未補）
     "orphan":  False,   # 規則本體的規則 ID 至少一個職位檔認領（issue #213；同上）
 }
+# 不接受環境變數升關卡的項目。`r2` 在這裡是因為 issue #218 的裁決逐字要求「檢查器維持
+# 建議項不升關卡」——那是條文強度的決定（`R2` 的模型約束是建議），不是「正反測試還沒補」
+# 的暫時狀態，所以不留 DEVFLOW_GATE_R2=1 這條升級路徑。本項的輸出另見該節。
+GATES_NO_UPGRADE = ("r2",)
 for _k in GATES:
+    if _k in GATES_NO_UPGRADE:
+        continue
     if os.environ.get("DEVFLOW_GATE_" + _k.upper()) == "1":
         GATES[_k] = True
 
@@ -872,6 +894,15 @@ TABLES_SEAT_DIRS = (("implementer", CODERS_DIR),
 TABLES_OPTIONAL_SEAT = "coordinator"
 TABLES_FILLER = "filler"
 TABLES_HUMAN = "human"
+# R2 的同廠 fallback 模型建議（issue #218）的定義域：同一個檔案（devflow.yml）、四條固定
+# 路徑、一次逐字比對。職位名與 `filler` 沿用上面那幾個常數，不另抄一份。
+R2_IMPLEMENTER = "implementer"
+R2_REVIEWER = "reviewer"
+R2_FALLBACK = "fallback"
+R2_MODEL = "model"
+R2_IMPL_PATH = "%s.%s" % (TABLES_SEATS, R2_IMPLEMENTER)
+R2_REVIEWER_PATH = "%s.%s" % (TABLES_SEATS, R2_REVIEWER)
+R2_FALLBACK_PATH = "%s.%s" % (R2_REVIEWER_PATH, R2_FALLBACK)
 TABLE_HEADER = ["面向", "值", "狀態"]
 STATUS_COL = "狀態"
 # R9 的分節：「對照表得分為通用節與本機節」。節名用詞以 R9 為準，
@@ -950,6 +981,9 @@ SEAT_EXEMPT_MARK = "不分配"
 MD = MarkdownIt("commonmark").enable(["table", "strikethrough"])
 errors = []
 advisories = []
+# ⚠️ 警告：不建議的狀況；不取名 warnings 是為了不遮蔽同名的標準函式庫模組。
+# ℹ️ 提示不收集——它每次執行都印（`r2` 的 INFO 依裁決如此），結尾再列一次沒有意義。
+cautions = []
 
 
 def die(msg):
@@ -976,6 +1010,24 @@ def report(gate, msg, detail=()):
 
 def ok(msg):
     print("  ✅ %s" % msg)
+
+
+def info(msg, detail=()):
+    """ℹ️ 提示：不是違規。不進 errors、不進 advisories，不影響 exit code。
+    用在「條文是建議、而當下的狀態值得每次執行都說一聲」的項目——目前只有 `r2`
+    （issue #218 的裁決：同廠不同模型「每次使用都 INFO 提示」）。"""
+    print("  ℹ️ %s" % msg)
+    for d in detail:
+        print("       %s" % d)
+
+
+def warn(msg, detail=()):
+    """⚠️ 警告：不建議的狀況。同樣不進 errors、不影響 exit code，
+    但收進 cautions，結尾再列一次，免得在長 log 裡被滑過去。"""
+    cautions.append(msg)
+    print("  ⚠️ %s" % msg)
+    for d in detail:
+        print("       %s" % d)
 
 
 def tag(gate):
@@ -2288,6 +2340,163 @@ if not tables_problems and not tables_missing:
           "、".join("`%s`→%s%s.md" % (k, d, v) for k, v, d in tables_required)))
 
 print()
+print("── R2：同廠 reviewer fallback 的模型（%s；依裁決不升關卡）" % tag("r2"))
+# 定義域：一個檔案（devflow.yml）、四條固定路徑、一次逐字比對——
+#   `seats.implementer.filler`／`seats.implementer.model`
+#   `seats.reviewer.fallback.filler`／`seats.reviewer.fallback.model`
+# 節點樹沿用 i5 那一節 compose 出來的 i5_root（同一份 bytes、同一個 parser，不解析第三次）；
+# 取鍵沿用 tables_get（同名鍵重複＝歧義、`<<` 依 YAML merge 語意展開），所以本項自己不碰 YAML，
+# 也不會和 `i5`／`tables` 對同一份檔案給出兩套看法。
+#
+# 本項是**提示，不是關卡**。`R2` 的模型約束是建議（issue #218 的使用者裁決，2026-09-25：
+# 「通用建議：條文寫明同廠 fallback 宜用不同模型，不強制；檢查器維持建議項不升關卡
+# （配你已定的 INFO／WARNING 提示）」），所以它不走 report()、不進 errors、不吃
+# DEVFLOW_GATE_R2=1（見 GATES_NO_UPGRADE），只印三種結果：
+#   ℹ️ 同廠 fallback 且兩邊的 `model` 不同 —— 合建議，仍**每次執行都印一行**。這是裁決的
+#      字面要求：「如果使用同廠不同模型就簡單的 INFO 提示，每次使用都 INFO 提示」，
+#      所以它不是「有問題才提」，訊息也就保持一行、不附 detail。
+#   ⚠️ 同廠 fallback 且兩邊的 `model` 相同 —— 裁決：「同廠同模型需要用 warning 提示，
+#      要警告這個狀況是不建議的」。措辭到「不建議」為止，不說成違規。
+#   ✅ 其餘都是「不適用」，不印成問題（檢查器不發明規則）。
+#
+# 幾個刻意不做的判定，逐條對著改寫後的 R2：
+#   (1) `seats.reviewer.fallback` 不存在 → 不適用。條文把它寫成「可寫在」的選填宣告位置，
+#       要求它存在就是發明義務。
+#   (2) fallback 的 `filler` 與 `seats.implementer.filler` 不同 → 異廠 fallback，
+#       條文的模型建議只在同廠時才給，不適用。
+#   (3) 同廠但有一邊的 `model` 沒 pin → ℹ️「核不出來」，不是問題。改建議級後條文沒有
+#       「兩位的 `model` 都須顯式 pin」這條義務；而未 pin 時實際用哪個模型取決於工具當次的
+#       預設（devflow.yml 自己的註解就記著別名靜默漂移那次），機械上確實核不了——
+#       核不了要說，但不能把「沒做非義務的事」報成問題。
+#   (4) 結構或取值讀不出來（壞 YAML、鍵重複、值不是 !!str 純量）→ ℹ️「無從核對」並附原因。
+#       同一份檔案的解析層與 `seats`／`seats.implementer` 的形狀另有 `i5`、`tables` 兩個
+#       必需關卡把（見那兩節），本項不重複判，也不藉這條變成第三個把關的人。
+#   (5) 條文明寫「同廠只有一個堪用模型時，全新 context 即滿足本條」，所以 ⚠️ 那一行的
+#       處置文字照這句寫：換模型或換異廠是選項，沒有第二個堪用模型時不必勉強。
+#
+# 本項看的是**pin 的形狀**，不是那一輪實際派了誰：派工發生在 repo 外，檢查器看不到。
+
+
+def r2_map(parent, where, key):
+    """parent（已確認 !!map）裡 `key` 的值節點，要求是 !!map。
+    缺鍵＝(None, None)，由呼叫端決定缺了算不算違規。"""
+    node, bad = tables_get(parent, key, where)
+    if bad or node is None:
+        return None, bad
+    if not is_plain_map(node):
+        return None, ("%s 的 `%s` 的值不是 !!map 的 MappingNode：%s"
+                      % (where, key, node_desc(node)))
+    return node, None
+
+
+def r2_str(parent, where, key):
+    """parent 裡 `key` 的 !!str 純量值。缺鍵＝(None, None)。"""
+    node, bad = tables_get(parent, key, where)
+    if bad or node is None:
+        return None, bad
+    return i5_scalar(node, "%s 的 `%s`" % (where, key))
+
+
+def r2_unreadable(why):
+    """讀不出形狀時的 ℹ️。why 是一或多條原因，照原文附在下面。"""
+    return "info", ("%s 的 `%s` 讀不出形狀，本項無從核對（解析層與 `%s` 的形狀另由 `i5`、"
+                    "`tables` 兩個必需關卡把守）"
+                    % (I5_FILE, R2_FALLBACK_PATH, TABLES_SEATS)), why
+
+
+def r2_check():
+    """回傳 (級別, 訊息, detail)：級別是 `ok`／`info`／`warn` 三值之一。
+
+    本項只有這三種輸出，不走 report()——`R2` 的模型約束是建議，依裁決不升關卡。"""
+    if i5_root is None:
+        return r2_unreadable(list(yml_parse_problems))
+    if not is_plain_map(i5_root):
+        return r2_unreadable(["根不是 !!map 的 MappingNode：%s" % node_desc(i5_root)])
+    seats, bad = r2_map(i5_root, "根", TABLES_SEATS)
+    if not bad and seats is None:
+        bad = "缺 `%s`（第 0 節的自變數）" % TABLES_SEATS
+    if bad:
+        return r2_unreadable([bad])
+    where_seats = "`%s`" % TABLES_SEATS
+    reviewer, bad = r2_map(seats, where_seats, R2_REVIEWER)
+    if bad:
+        return r2_unreadable([bad])
+    if reviewer is None:
+        return "ok", "%s 沒有 `%s`，沒有 fallback 可判" % (I5_FILE, R2_REVIEWER_PATH), ()
+    fallback, bad = r2_map(reviewer, "`%s`" % R2_REVIEWER_PATH, R2_FALLBACK)
+    if bad:
+        return r2_unreadable([bad])
+    if fallback is None:
+        return "ok", ("%s 沒有 `%s`：未宣告 fallback（選填），R2 的模型建議不適用"
+                      % (I5_FILE, R2_FALLBACK_PATH)), ()
+    implementer, bad = r2_map(seats, where_seats, R2_IMPLEMENTER)
+    if not bad and implementer is None:
+        bad = ("缺 `%s`：宣告了 `%s` 卻沒有實作位可比，判不出是不是同廠"
+               % (R2_IMPL_PATH, R2_FALLBACK_PATH))
+    if bad:
+        return r2_unreadable([bad])
+    where_fb = "`%s`" % R2_FALLBACK_PATH
+    where_impl = "`%s`" % R2_IMPL_PATH
+    unreadable = []
+    fb_filler, bad = r2_str(fallback, where_fb, TABLES_FILLER)
+    if bad:
+        unreadable.append(bad)
+    elif fb_filler is None:
+        unreadable.append("%s 缺 `%s`：分不出這是同廠還是異廠 fallback"
+                          % (where_fb, TABLES_FILLER))
+    impl_filler, bad = r2_str(implementer, where_impl, TABLES_FILLER)
+    if bad:
+        unreadable.append(bad)
+    elif impl_filler is None:
+        unreadable.append("%s 缺 `%s`：沒有可比的實作位廠牌" % (where_impl, TABLES_FILLER))
+    if unreadable:
+        return r2_unreadable(unreadable)
+    if fb_filler != impl_filler:
+        return "ok", ("%s：`%s` ＝ %r 與實作位的 %r 異廠，R2 的模型建議不適用"
+                      % (I5_FILE, R2_FALLBACK_PATH + "." + TABLES_FILLER,
+                         fb_filler, impl_filler)), ()
+    same = "同廠（`%s` 皆為 %r）" % (TABLES_FILLER, fb_filler)
+    # 沒寫（missing）與寫了但讀不出來（unreadable）分開收：兩者都讓本項核不出模型是否相同，
+    # 但只有前者要附「選填、不 pin 不違反 R2」那句——鍵重複的情形 pin 是寫了的，兩次。
+    missing = []
+    fb_model, bad = r2_str(fallback, where_fb, R2_MODEL)
+    if bad:
+        unreadable.append(bad)
+    elif fb_model is None:
+        missing.append("%s 沒有 `%s`" % (where_fb, R2_MODEL))
+    impl_model, bad = r2_str(implementer, where_impl, R2_MODEL)
+    if bad:
+        unreadable.append(bad)
+    elif impl_model is None:
+        missing.append("%s 沒有 `%s`" % (where_impl, R2_MODEL))
+    if unreadable or missing:
+        # 沒 pin 不是違規（條文沒有這條義務），但沒 pin 就核不出模型是否相同——說核不出來。
+        return "info", ("%s：fallback 與實作位%s，但 `%s` 沒有兩邊都讀得出來，"
+                        "核不出模型是否相同" % (I5_FILE, same, R2_MODEL)), (
+            unreadable + missing
+            + (["`%s` 是選填，不 pin 不違反 R2；要讓本項核得出來才需要兩邊都寫明" % R2_MODEL]
+               if missing else []))
+    if fb_model == impl_model:
+        return "warn", ("%s 的 reviewer fallback 與實作位%s又同模型（`%s` 皆為 %r）："
+                        "只差 context，這個狀況不建議"
+                        % (I5_FILE, same, R2_MODEL, fb_model)), [
+            "`%s` 與 `%s` 都是 %r" % (R2_FALLBACK_PATH + "." + R2_MODEL,
+                                      R2_IMPL_PATH + "." + R2_MODEL, fb_model),
+            "R2 建議同廠時所用模型與實作位不同：可把 fallback 換成同廠的另一個模型，"
+            "或改用異廠的 fallback；同廠只有一個堪用模型時，依條文全新 context 即滿足 R2"]
+    return "info", ("%s：reviewer fallback 與實作位%s，模型 %r ≠ %r，合 R2 的建議"
+                    % (I5_FILE, same, fb_model, impl_model)), ()
+
+
+r2_level, r2_msg, r2_detail = r2_check()
+if r2_level == "warn":
+    warn(r2_msg, r2_detail)
+elif r2_level == "info":
+    info(r2_msg, r2_detail)
+else:
+    ok(r2_msg)
+
+print()
 print("── 對照表的形狀（%s）" % tag("table"))
 # 定義域：TABLE_DIRS 的直屬 .md（見上面 table_files）。每條斷言都是
 # 「檢查器沒看懂這個檔案」的絆線，所以 fail closed——沒看懂就報，不靜默放行。
@@ -2721,6 +2930,11 @@ else:
        % (len(defined), len(orphan_claimed & set(defined)), len(orphan_exempt), orphan_src))
 
 print()
+if cautions:
+    print("===== 警告（%d 項）：不建議的狀況，不影響本次結果 =====" % len(cautions))
+    for m in cautions:
+        print("  ⚠️ %s" % m)
+    print()
 if errors:
     print("===== 必需關卡失敗（%d 項）=====" % len(errors))
     for m in errors:
