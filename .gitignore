@@ -1,2 +1,6 @@
 .serena/
 __pycache__/
+# 本機執行 scripts/devflow_checks.py 的設定（issue #222）。不受版控是**機制的一部分**，
+# 不是偏好：CI 與煙霧測試沙箱因此讀不到它，pin 守衛在那裡照常生效。
+# 注意跟受版控的 devflow.local/（對照表目錄）不是一回事。
+.devflow-local
