@@ -1946,6 +1946,12 @@ def _():
         eq(r.stderr, b"devflow: not a directory\n", "stderr 恰一行錯誤，無 advisory")
 
 
+# AC-15 依路徑字串序檢查，第一個不可寫的即報——哪個檔案是第一個取決於 kit 當下的檔案集合
+# （#196：RELEASING.md 加入後由 VERSION 變成它），故下一案只斷言形狀不綁檔名。
+# 字元類排掉 \n 是刻意的：只寫 [^:]+ 會跨行，「第二行無冒號」的 stderr 就漏網（#196）。
+UNWRITABLE_RE = re.compile(rb"devflow/[^:\n]+: directory not writable\n")
+
+
 @case("kit-AC-9-entry-advisory-buffered-until-exit-0-on-exit-2")
 def _():
     # 入口規格 AC-7 的 advisory 原本在 choose_targets() 中途就 print——那樣 exit 2 的
@@ -1959,9 +1965,11 @@ def _():
         try:
             r = p.run()
             err_run(r, 2)
-            # AC-15 依路徑字串序檢查，第一個不可寫的即報：devflow/VERSION 要 created
-            eq(r.stderr, b"devflow/VERSION: directory not writable\n",
-               "stderr 恰一行錯誤，advisory 被緩衝掉")
+            # 本案驗的是「advisory 在 exit 2 時被緩衝掉、stderr 只剩錯誤那一行」
+            # （kit-install AC-9）；哪個檔先被判不可寫不是本案要驗的性質
+            expect(bool(UNWRITABLE_RE.fullmatch(r.stderr)),
+                   "stderr 恰一行錯誤，advisory 被緩衝掉", r.stderr, UNWRITABLE_RE.pattern)
+            eq(r.stderr.count(b"\n"), 1, "stderr 恰一行")
         finally:
             os.chmod(str(p.path("devflow")), 0o755)
 
