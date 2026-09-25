@@ -2419,7 +2419,7 @@ def r2_str(parent, where, key):
 
 def r2_unreadable(what, why):
     """讀不出形狀時的 ℹ️。what 是這一則涵蓋的位置，why 是一或多條原因，照原文附在下面。"""
-    return "info", ("%s 的 %s 讀不出形狀，本項無從核對（解析層與 `%s` 的形狀另由 `i5`、"
+    return "info", ("%s 的%s讀不出形狀，本項無從核對（解析層與 `%s` 的形狀另由 `i5`、"
                     "`tables` 兩個必需關卡把守）"
                     % (I5_FILE, what, TABLES_SEATS)), why
 
