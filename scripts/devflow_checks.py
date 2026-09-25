@@ -776,6 +776,79 @@ if "--check-pins" in _args:
     # 只比 distribution 的版本，不 import：這條路徑的存在理由就是「裝之前也要能問」。
     sys.exit(1 if _bad else 0)
 
+# ── 本機設定檔（issue #222）───────────────────────────────────────
+# 本機執行才需要的設定住 repo 根目錄的 `.devflow-local`（不受版控，見 .gitignore）。
+#
+# 它存在的理由是**指令形式**，不是新功能：`L4` 要實作位自己跑這支檢查器，而派工的
+# `--allowedTools` 白名單以指令前綴比對，`Bash(python3 *)` 不匹配任何帶環境變數前綴的
+# 形式。逐一列舉組合列不完——issue #217 的甲案加了 `Bash(DEVFLOW_ALLOW_PIN_DRIFT=1 *)`
+# 之後，兩個變數連寫（`A=1 B=2 python3 …`）實測仍被拒，而每新增一個變數都要再改名單。
+# 設定搬進檔案，`L4` 的指令就回到裸形式 `python3 scripts/devflow_checks.py`。
+#
+# CI 的嚴格性由「這個檔不受版控」保證，不靠檢查器判斷自己在不在 CI：CI 的 checkout 與
+# 煙霧測試用 `git archive HEAD` 造的沙箱都不會有它，讀不到就一切照舊。這和舊機制
+# （CI 不設環境變數）是同一個保證換一個載體，不是多開一條放寬路徑。
+#
+# 格式是**手寫解析的 `key = value`**，不用 YAML，也因此排在下面的 import 之前：
+# `allow_pin_drift` 的用途正是「import 到的 parser 不是 pin 的那一版時放行」，拿那個
+# parser 去讀這個決定，等於用受質疑的工具判自己該不該被質疑。這段只碰標準庫。
+#
+# 定義域：一個檔案、兩個已知鍵、逐行 `key = value`、`#` 開頭與空白行略過。認不得的鍵、
+# 收不了的值、缺 `=` 的行一律 exit 2 而不是略過——這是開發者自己維護的檔，打錯字若被
+# 靜默忽略，人會以為設定生效了（同 _QUERY_MODES 不默默忽略認不得的旗標的理由）。
+# 查詢模式（`--print-pins`／`--check-pins`）在上面就已結束，不讀本檔：它們只回報
+# 「裝了什麼」，不做任何豁免。
+LOCAL_FILE = ".devflow-local"
+# 鍵 → 收的值域（None＝收任何非空字串）。`allow_pin_drift` 只收兩個字面布林，不收
+# `1`／`yes`／`on`：多一種寫法就多一種要說明的事，而這個檔只有一個讀者。`v7_base` 的值
+# 有效性交給 git 自己判（同 DEVFLOW_V7_BASE 現行的處置：解析不了就在 `v7` 那節 die）。
+LOCAL_KEYS = {"allow_pin_drift": ("true", "false"), "v7_base": None}
+
+
+def _local_bad(msg):
+    """本機設定檔判不了＝檢查器無法執行。die() 這裡還沒定義，自己印。"""
+    print("💥 檢查器無法執行：%s" % msg)
+    sys.exit(2)
+
+
+def _read_local_conf(path):
+    """讀 `.devflow-local`，回傳 {鍵: 值字串}。檔案不存在回傳 {}（CI 走的就是這條）。"""
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read()
+    except FileNotFoundError:
+        return {}
+    except OSError as e:
+        _local_bad("%s 存在卻讀不到：%s" % (path, e))
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as e:
+        _local_bad("%s 的內容不是合法 UTF-8：%s" % (path, e))
+    conf = {}
+    for _no, _line in enumerate(text.splitlines(), 1):
+        _s = _line.strip()
+        if not _s or _s.startswith("#"):
+            continue
+        if "=" not in _s:
+            _local_bad("%s 第 %d 行不是 `key = value`：%r" % (path, _no, _line))
+        _k, _, _v = _s.partition("=")
+        _k, _v = _k.strip(), _v.strip()
+        if _k not in LOCAL_KEYS:
+            _local_bad("%s 第 %d 行的鍵 %r 認不得（只收 %s）"
+                       % (path, _no, _k, "／".join(sorted(LOCAL_KEYS))))
+        _allowed = LOCAL_KEYS[_k]
+        if _allowed is None:
+            if not _v:
+                _local_bad("%s 第 %d 行 %s 的值是空的" % (path, _no, _k))
+        elif _v not in _allowed:
+            _local_bad("%s 第 %d 行 %s 的值 %r 認不得（只收 %s）"
+                       % (path, _no, _k, _v, "／".join(_allowed)))
+        conf[_k] = _v
+    return conf
+
+
+LOCAL_CONF = _read_local_conf(LOCAL_FILE)
+
 try:
     import yaml
     from markdown_it import MarkdownIt
@@ -798,11 +871,24 @@ except ImportError as e:
 _RUNTIME = {"markdown-it-py": markdown_it.__version__, "PyYAML": yaml.__version__}
 _drift = ["%s：import 到 %s，pin 是 %s" % (_d, _RUNTIME[_d], _v)
           for _d, _v in PINS if _RUNTIME.get(_d) != _v]
-if _drift and os.environ.get("DEVFLOW_ALLOW_PIN_DRIFT") != "1":
+#
+# 豁免的取得順序（issue #222）：環境變數 `DEVFLOW_ALLOW_PIN_DRIFT` ＞ `.devflow-local` 的
+# `allow_pin_drift`。環境變數優先，因為它是「這一次執行的覆寫」、檔案是持久設定——
+# 煙霧測試的沙箱靠的正是這個順序：它逐案設 `DEVFLOW_ALLOW_PIN_DRIFT=1`，沙箱裡沒有
+# 設定檔也照樣放行（`git archive` 不含未追蹤的檔），所以 tests/ 不必跟著改。
+# 設成 `1` 以外的非空值是明確的「不要放行」，覆寫檔案；**完全未設**才往下看檔案，
+# CI 走的就是這條——檔案也讀不到時，判定與本段改動前逐字相同。
+_pin_drift_env = os.environ.get("DEVFLOW_ALLOW_PIN_DRIFT", "")
+if _pin_drift_env:
+    _allow_drift = _pin_drift_env == "1"
+else:
+    _allow_drift = LOCAL_CONF.get("allow_pin_drift") == "true"
+if _drift and not _allow_drift:
     print("💥 檢查器無法執行：實際 import 的相依版本不符 pin")
     for _line in _drift:
         print("    %s" % _line)
-    print("    （本機開發可設 DEVFLOW_ALLOW_PIN_DRIFT=1 略過；CI 不設）")
+    print("    （本機開發可在 %s 放 `allow_pin_drift = true` 略過，"
+          "或設 DEVFLOW_ALLOW_PIN_DRIFT=1；CI 兩者都沒有）" % LOCAL_FILE)
     sys.exit(2)
 
 # ── 關卡開關 ──────────────────────────────────────────────────────
@@ -955,6 +1041,7 @@ V7_DIR = "devflow/"
 V7_VERSION_FILE = "devflow/VERSION"
 # 本機／沙箱指定 base 的環境變數（issue #150 AC-2）。值是 sha 或任何 git 解析得了的 ref。
 # 它**只能指定比較對象，不能放寬判定**：設了之後照樣算 merge-base、照樣比四碼。
+# issue #222 起同一個事實多一個持久來源：`.devflow-local` 的 `v7_base`（見該節的順序）。
 V7_BASE_ENV = "DEVFLOW_V7_BASE"
 
 # seatoblig／orphan（issue #213）的定義域：四個已知檔、一個段落標題、一個正則，
@@ -2767,13 +2854,23 @@ def v7_version(rev, side):
     return tuple(int(g) for g in m.groups()), raw.decode("ascii").rstrip("\n"), None
 
 
-# base 的取得順序：`DEVFLOW_V7_BASE`（本機與煙霧測試沙箱用）＞ CI 的 `origin/<GITHUB_BASE_REF>`。
-# 兩個都沒有時與 `i1` 同款：`pull_request` 事件卻取不到就 die（略過會讓關卡靜默失效），
+# base 的取得順序：`DEVFLOW_V7_BASE`（一次性覆寫，煙霧測試沙箱走這條）＞ `.devflow-local`
+# 的 `v7_base`（本機持久設定，issue #222）＞ CI 的 `origin/<GITHUB_BASE_REF>`。三者的值都是
+# sha 或任何 git 解析得了的 ref，也都**只能指定比較對象，不能放寬判定**。
+# 三個都沒有時與 `i1` 同款：`pull_request` 事件卻取不到就 die（略過會讓關卡靜默失效），
 # 非 `pull_request` 就略過並印明。event_name 是 `i1` 那一節取的同一個事實，不重取。
+#
+# `v7_base` 可以是**持久設定**，是因為它在本機其實不是每次執行的參數：本機分支要合進哪裡
+# 是固定的，寫 `v7_base = main` 就算 `merge-base main HEAD`，與 CI 對 PR base 做的事同型，
+# 一次寫定之後每個任務都適用（`V7` 要的「這個 PR 有沒有進位」本來就是對著 merge-base 問，
+# 見下面那段）。沙箱那條仍走環境變數：它比的是沙箱自己的 HEAD，那才是真的逐次不同。
 v7_base_env = os.environ.get(V7_BASE_ENV, "").strip()
+v7_base_conf = LOCAL_CONF.get("v7_base", "").strip()
 v7_base_ref = os.environ.get("GITHUB_BASE_REF", "").strip()
 if v7_base_env:
     v7_base, v7_base_from = v7_base_env, V7_BASE_ENV
+elif v7_base_conf:
+    v7_base, v7_base_from = v7_base_conf, "%s 的 v7_base" % LOCAL_FILE
 elif v7_base_ref:
     v7_base, v7_base_from = "origin/%s" % v7_base_ref, "GITHUB_BASE_REF"
 else:
