@@ -17,6 +17,10 @@ seats:
     filler: human            # codex | claude-code | human
     # model: <工具的模型 ID>
     # reasoning: high        # 思考程度；值的寫法依工具
+    # fallback:              # 選填；主 filler 不可用（配額耗盡等）時改用這組，不臨場選（R2）
+    #   filler: <工具名>
+    #   model: <工具的模型 ID>   # filler 與 implementer 同廠時，R2 強制此值 ≠ seats.implementer.model
+    #                            （且兩位的 model 都須顯式 pin）
   coordinator:               # 協調位；human＝無工具，各步由人執行（對照表 orchestrators/none.md）
     filler: human            # hermes | paperclip | human
   approver:                  # 裁決位；人（seats/approver.md），無 model／reasoning

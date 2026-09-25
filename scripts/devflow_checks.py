@@ -11,12 +11,12 @@
 # 注意不是 `G4`：`G4` 住第 9 節，依第 0 節與 `ST2` 要 stage 2 才生效，現在是 stage 1，
 # 不能引為依據。
 # 本檔每一項檢查都有自己的開關（下面的 GATES）：True＝必需關卡，False＝建議（只報告不擋）。
-# 十五項裡十二項是 True（`encoding`、`d2`、`i1`、`i5`、`version`、`fence`、`tables`、`table`、
-# `link`、`r9`、`dupid`、`v7`），三項是 False（`refs`、`seatoblig`、`orphan`）——分界不是
+# 十六項裡十二項是 True（`encoding`、`d2`、`i1`、`i5`、`version`、`fence`、`tables`、`table`、
+# `link`、`r9`、`dupid`、`v7`），四項是 False（`refs`、`seatoblig`、`orphan`、`r2`）——分界不是
 # 「哪一項比較重要」，而是**定義域封不封閉**，見下面各節。
-# 三項建議裡 `refs` 與另外兩項停在建議的理由不同：`refs` 是定義域封不住（見下面
-# 「擋不住什麼」）；`seatoblig`／`orphan` 的定義域封閉，只是正反測試還沒補
-# （issue #213；升關卡的前提同樣是上面那條 README 的判定方式）。
+# 四項建議裡 `refs` 與另外三項停在建議的理由不同：`refs` 是定義域封不住（見下面
+# 「擋不住什麼」）；`seatoblig`／`orphan`／`r2` 的定義域封閉，只是正反測試還沒補
+# （issue #213、#218；升關卡的前提同樣是上面那條 README 的判定方式）。
 #
 # ── ⚠️ 這個 check 擋什麼、不擋什麼 ───────────────────────────────────────
 # 會擋（exit 1）：`encoding` 受版控 .md 的內容是合法 UTF-8、
@@ -45,7 +45,9 @@
 # 封得住定義域，見下面「擋不住什麼」的 refs 那條）、
 # `seatoblig` 職位檔的 `## 規則義務` 段與該檔其餘段的規則 ID 引用雙向一致、
 # `orphan` 規則本體定義的規則 ID 至少有一個職位檔認領（`devflow/seats/README.md`
-# 明文豁免的除外）——後兩項是 issue #213 開的，定義域封閉（見各自那一節的註解），
+# 明文豁免的除外）——這兩項是 issue #213 開的，
+# `r2` devflow.yml 宣告的 reviewer fallback 與實作位同廠時，兩位的 `model` 都顯式 pin
+# 且不逐字相同（issue #218 開的）——後三項的定義域封閉（見各自那一節的註解），
 # 停在建議是因為正反測試未補，不是因為判準收不住。
 #
 # 「GATES 是 True」只讓這個 check 自己變紅，**不等於它是 branch protection 的
@@ -792,7 +794,7 @@ if _drift and os.environ.get("DEVFLOW_ALLOW_PIN_DRIFT") != "1":
 
 # ── 關卡開關 ──────────────────────────────────────────────────────
 # True＝必需關卡（失敗就擋）；False＝建議（只報告）。
-# 十五項裡十二項是 True，三項是 False。分界是定義域封不封閉，理由見檔頭。
+# 十六項裡十二項是 True，四項是 False。分界是定義域封不封閉，理由見檔頭。
 # 驗證用：DEVFLOW_GATE_<KEY>=1 可單獨打開一項，環境變數只能加嚴不能放寬。
 # 順序＝執行順序：`encoding` 在讀檔當下就判，排在最前面。
 GATES = {
@@ -803,6 +805,8 @@ GATES = {
     "version": True,    # V1 frontmatter version 四碼（第 3 節，ST1 起生效；issue #80）
     "fence":   True,    # fenced code block 未關閉（issue #80）
     "tables":  True,    # devflow.yml 指名的對照表都受版控（第 0 節，永遠生效；issue #87）
+    "r2":      False,   # R2 同廠 reviewer fallback 的 model ≠ implementer 的 model
+                        # （issue #218；定義域封閉，首版為建議是因為正反測試未補）
     "table":   True,    # 對照表形狀，依 R9 分節（issue #80）
     "link":    True,    # 相對連結有效性（issue #80）
     "dupid":   True,    # 規則 ID 唯一定義（定義域＝節前綴判準；issue #96）
@@ -872,6 +876,15 @@ TABLES_SEAT_DIRS = (("implementer", CODERS_DIR),
 TABLES_OPTIONAL_SEAT = "coordinator"
 TABLES_FILLER = "filler"
 TABLES_HUMAN = "human"
+# R2 的同廠 fallback 模型約束（issue #218）的定義域：同一個檔案（devflow.yml）、四條固定
+# 路徑、一次逐字比對。職位名與 `filler` 沿用上面那幾個常數，不另抄一份。
+R2_IMPLEMENTER = "implementer"
+R2_REVIEWER = "reviewer"
+R2_FALLBACK = "fallback"
+R2_MODEL = "model"
+R2_IMPL_PATH = "%s.%s" % (TABLES_SEATS, R2_IMPLEMENTER)
+R2_REVIEWER_PATH = "%s.%s" % (TABLES_SEATS, R2_REVIEWER)
+R2_FALLBACK_PATH = "%s.%s" % (R2_REVIEWER_PATH, R2_FALLBACK)
 TABLE_HEADER = ["面向", "值", "狀態"]
 STATUS_COL = "狀態"
 # R9 的分節：「對照表得分為通用節與本機節」。節名用詞以 R9 為準，
@@ -2286,6 +2299,135 @@ if not tables_problems and not tables_missing:
     ok("%s 指名的 %d 張對照表都受版控：%s（`human` 與省略的 coordinator 不要求，approver 不讀）"
        % (I5_FILE, len(tables_required),
           "、".join("`%s`→%s%s.md" % (k, d, v) for k, v, d in tables_required)))
+
+print()
+print("── R2：同廠 reviewer fallback 的 model ≠ 實作位的 model（%s）" % tag("r2"))
+# 定義域：一個檔案（devflow.yml）、四條固定路徑、一次逐字比對——
+#   `seats.implementer.filler`／`seats.implementer.model`
+#   `seats.reviewer.fallback.filler`／`seats.reviewer.fallback.model`
+# 節點樹沿用 i5 那一節 compose 出來的 i5_root（同一份 bytes、同一個 parser，不解析第三次）；
+# 取鍵沿用 tables_get（同名鍵重複＝歧義、`<<` 依 YAML merge 語意展開），所以本項自己不碰 YAML，
+# 也不會和 `i5`／`tables` 對同一份檔案給出兩套看法。
+#
+# 判準逐條對著 R2 的條文（issue #218 改寫）：
+#   (1) `seats.reviewer.fallback` 不存在 → 沒宣告 fallback，本項不適用。R2 沒有規定一定要
+#       宣告 fallback，要求它存在就是檢查器發明規則（見檔頭「不發明規則」）。
+#   (2) fallback 的 `filler` 與 `seats.implementer.filler` 不同 → 異廠 fallback，獨立性由
+#       異廠本身滿足，R2 的模型約束依條文不適用。
+#   (3) 兩者相同（同廠 fallback）→ R2 強制「兩位的 `model` 都須顯式 pin 且不得逐字相同」。
+#       少一個 pin 就報：未 pin 時實際用哪個模型取決於工具當次的預設（devflow.yml 自己的註解
+#       就記著別名靜默漂移那次），機械上核不了，fail closed。
+#   (4) 結構或取值出問題（壞 YAML、鍵重複、值不是 !!str 純量）一律報，不跳過——理由同
+#       `tables` 那一節：跳過正是本項要消除的失敗模式。
+#
+# 本項擋的是**pin 的形狀**，不是那一輪實際派了誰：派工發生在 repo 外，檢查器看不到。
+# 條文把 fallback 綁到 pin（「不臨場選」）就是為了讓可機械檢查的那一半真的擋得住。
+#
+# 首版是**建議**：定義域封閉，但升關卡的前提是 README「Phase 1 第三出口的判定方式」
+# （正反兩個 run、同一份 blob、exit 1 只能由目標項造成），那組正反案例住 tests/，
+# 不在 issue #218 的 write scope，由後續單補。停在建議的理由同 `seatoblig`／`orphan`。
+
+
+def r2_map(parent, where, key):
+    """parent（已確認 !!map）裡 `key` 的值節點，要求是 !!map。
+    缺鍵＝(None, None)，由呼叫端決定缺了算不算違規。"""
+    node, bad = tables_get(parent, key, where)
+    if bad or node is None:
+        return None, bad
+    if not is_plain_map(node):
+        return None, ("%s 的 `%s` 的值不是 !!map 的 MappingNode：%s"
+                      % (where, key, node_desc(node)))
+    return node, None
+
+
+def r2_str(parent, where, key):
+    """parent 裡 `key` 的 !!str 純量值。缺鍵＝(None, None)。"""
+    node, bad = tables_get(parent, key, where)
+    if bad or node is None:
+        return None, bad
+    return i5_scalar(node, "%s 的 `%s`" % (where, key))
+
+
+def r2_check():
+    """回傳 (違規清單, 通過時要印的那句話或 None)。"""
+    if i5_root is None:
+        return list(yml_parse_problems), None
+    if not is_plain_map(i5_root):
+        return ["根不是 !!map 的 MappingNode：%s" % node_desc(i5_root)], None
+    seats, bad = r2_map(i5_root, "根", TABLES_SEATS)
+    if not bad and seats is None:
+        bad = "缺 `%s`（第 0 節的自變數）" % TABLES_SEATS
+    if bad:
+        return [bad], None
+    where_seats = "`%s`" % TABLES_SEATS
+    reviewer, bad = r2_map(seats, where_seats, R2_REVIEWER)
+    if bad:
+        return [bad], None
+    if reviewer is None:
+        return [], "%s 沒有 `%s`，沒有 fallback 可判" % (I5_FILE, R2_REVIEWER_PATH)
+    fallback, bad = r2_map(reviewer, "`%s`" % R2_REVIEWER_PATH, R2_FALLBACK)
+    if bad:
+        return [bad], None
+    if fallback is None:
+        return [], ("%s 沒有 `%s`：未宣告 fallback，R2 的模型約束不適用"
+                    % (I5_FILE, R2_FALLBACK_PATH))
+    implementer, bad = r2_map(seats, where_seats, R2_IMPLEMENTER)
+    if not bad and implementer is None:
+        bad = ("缺 `%s`：宣告了 `%s` 卻沒有實作位可比，判不出是不是同廠"
+               % (R2_IMPL_PATH, R2_FALLBACK_PATH))
+    if bad:
+        return [bad], None
+    where_fb = "`%s`" % R2_FALLBACK_PATH
+    where_impl = "`%s`" % R2_IMPL_PATH
+    problems = []
+    fb_filler, bad = r2_str(fallback, where_fb, TABLES_FILLER)
+    if bad:
+        problems.append(bad)
+    elif fb_filler is None:
+        problems.append("%s 缺 `%s`：分不出這是同廠還是異廠 fallback"
+                        % (where_fb, TABLES_FILLER))
+    impl_filler, bad = r2_str(implementer, where_impl, TABLES_FILLER)
+    if bad:
+        problems.append(bad)
+    elif impl_filler is None:
+        problems.append("%s 缺 `%s`：沒有可比的實作位廠牌" % (where_impl, TABLES_FILLER))
+    if problems:
+        return problems, None
+    if fb_filler != impl_filler:
+        return [], ("%s：`%s` ＝ %r 與實作位的 %r 異廠，R2 的模型約束不適用"
+                    % (I5_FILE, R2_FALLBACK_PATH + "." + TABLES_FILLER,
+                       fb_filler, impl_filler))
+    fb_model, bad = r2_str(fallback, where_fb, R2_MODEL)
+    if bad:
+        problems.append(bad)
+    elif fb_model is None:
+        problems.append("%s 缺 `%s`" % (where_fb, R2_MODEL))
+    impl_model, bad = r2_str(implementer, where_impl, R2_MODEL)
+    if bad:
+        problems.append(bad)
+    elif impl_model is None:
+        problems.append("%s 缺 `%s`" % (where_impl, R2_MODEL))
+    if problems:
+        return problems + ["fallback 與實作位同廠（`%s` 皆為 %r）時，R2 要求兩位的 `%s` "
+                           "都顯式 pin——未 pin 時用的是工具當次的預設，核不了"
+                           % (TABLES_FILLER, fb_filler, R2_MODEL)], None
+    if fb_model == impl_model:
+        return ["`%s` 與 `%s` 都是 %r"
+                % (R2_FALLBACK_PATH + "." + R2_MODEL,
+                   R2_IMPL_PATH + "." + R2_MODEL, fb_model),
+                "同廠（`%s` 皆為 %r）又同模型，只差 context——R2 的獨立性只剩 R1 的下限"
+                % (TABLES_FILLER, fb_filler),
+                "處置：把 fallback 換成同廠的另一個模型，或改用異廠的 fallback"], None
+    return [], ("%s：fallback 與實作位同廠（`%s` 皆為 %r），模型 %r ≠ %r，合 R2"
+                % (I5_FILE, TABLES_FILLER, fb_filler, fb_model, impl_model))
+
+
+r2_problems, r2_pass = r2_check()
+if r2_problems:
+    report("r2", "%s 的 `%s` 不合 R2（%d 項）"
+           % (I5_FILE, R2_FALLBACK_PATH, len(r2_problems)), r2_problems)
+else:
+    ok(r2_pass)
 
 print()
 print("── 對照表的形狀（%s）" % tag("table"))
