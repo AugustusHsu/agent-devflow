@@ -12,6 +12,7 @@ forge: github          # github | gitlab | gitea（gitea 全表 ⬜，無實例�
 seats:
   implementer:               # 實作位
     filler: claude-code      # claude-code | codex
+    model: claude-opus-5[1m] # 顯式 pin：別名 opus 於 2026-09-23T18:55Z 起靜默漂移到 claude-opus-5-5；[1m] 為 1M context 窗
   reviewer:                  # 審查位；建議與 implementer 異廠（R2）。本 repo 審查一律顯式 pin，不讀工具的全域設定
     filler: codex            # codex | claude-code
     model: gpt-5.6-sol
