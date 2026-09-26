@@ -87,8 +87,8 @@ gh pr create --base main --head <N>-<slug> --title "<gitmoji> <type>(<scope>): <
 fresh context、異廠、丟棄式 checkout（`coders/codex.md` 「審查與讀審用法（`R1`、`L7`）」格，引用前查狀態 `R9`）：
 
 ```bash
-T=$(mktemp -d)   # 本輪專用暫存目錄，審畢即刪
-D=$(mktemp -d)   # 丟棄式 checkout，不置於 /tmp 本身（`R12`）
+T=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-rev.XXXXXX")   # 本輪專用暫存目錄；`TMPDIR` 未設時落在 `$HOME/.cache`，不落 /tmp 本身（`TMPDIR` 指向 /tmp 時須先改設）；第 10 步 (0) 刪
+D=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-co.XXXXXX")    # 丟棄式 checkout，同上不落 /tmp 本身；第 10 步 (0) 刪
 git clone --shared <repo> "$D" && git -C "$D" checkout <head sha>
 env TMPDIR="$T" codex exec -C "$D" --sandbox workspace-write -m <model> -c model_reasoning_effort=<level> \
   -c approval_policy="never" -c sandbox_workspace_write.exclude_slash_tmp=true \
@@ -125,6 +125,33 @@ M2: <誰按、依據什麼授權>"
 gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格（`--match-head-commit <head sha>` 不在該格實測範圍）。
 
 ### 10. 收尾（`C1`～`C4`、`F4`）
+
+`C1` 七步之前先執行 (0) 刪本輪暫存目錄——第 7 步建的 `$T`、`$D` 在此回收（`R12` 「隨暫存目錄丟棄」）。`$T`／`$D` 不跨段保留，路徑由執行者填入，**填錯就是 `rm -rf` 打在別處**，故刪除前逐一驗證：
+
+```bash
+# (0) 刪本輪暫存目錄。先 canonicalize 再驗「父目錄＝暫存根」且「目錄名＝本流程前綴」（不辨輪次），兩者皆合才刪。
+# 只辨前綴不辨輪次：同根下若有另一輪的 devflow-rev.*／devflow-co.*，填錯照樣會刪。
+# 占位務必加引號（未加時含 glob 的路徑會展開，實測會多刪同根下別輪的目錄）。
+# $RP 不得帶尾斜線：rm -rf -- "<link>/" 會跟隨 symlink 刪掉目標（readlink -f 已剝掉尾斜線）。
+# 整段包在子 shell 裡：rc 照樣傳出，本步的機械判定不受影響；但人工貼進互動 shell 時 exit 1 不會把 shell 關掉。
+(
+  ROOT="${TMPDIR:-$HOME/.cache}"
+  RR=$(readlink -f -- "$ROOT") || { echo "無法解析暫存根：$ROOT" >&2; exit 1; }
+  for P in "<第 7 步的 $T>" "<第 7 步的 $D>"; do \
+    [ -n "$P" ] || { echo "空路徑，停" >&2; exit 1; }; \
+    if [ -L "$P" ]; then echo "是 symlink，停：$P" >&2; exit 1; fi; \
+    RP=$(readlink -f -- "$P") || { echo "無法解析：$P" >&2; exit 1; }; \
+    [ "$(dirname -- "$RP")" = "$RR" ] || { echo "父目錄非本輪暫存根，停：$P -> $RP" >&2; exit 1; }; \
+    case "$(basename -- "$RP")" in devflow-rev.??????|devflow-co.??????) : ;; \
+      *) echo "目錄名非本流程暫存目錄，停：$P -> $RP" >&2; exit 1 ;; esac; \
+    if [ -d "$RP" ]; then rm -rf -- "$RP"; \
+    elif [ -e "$RP" ]; then echo "非目錄，略過：$P" >&2; \
+    else echo "已不存在，略過：$P" >&2; fi; \
+  done
+)
+```
+
+> **反測不得以真實工作目錄當靶**（AC-4 第 23 條）：守衛若寫壞，反測本身就會刪掉靶目錄。一律用 `mktemp -d` 另建的誘餌 `HOME`。
 
 `C1` 七步照序執行，判準見條文；每段的最終 exit 即該步的機械判定（判定鏈以 `&&` 串接，不作判定的指令已 `|| true`，整段貼入與逐行執行結果相同），非 0 或註解所列情況即停、不進下一步。Hermes 側指令（在主 checkout 執行）：
 
