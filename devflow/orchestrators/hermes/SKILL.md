@@ -136,6 +136,7 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 # $RP 不得帶尾斜線：rm -rf -- "<link>/" 會跟隨 symlink 刪掉目標（readlink -f 已剝掉尾斜線）。
 # 整段包在子 shell 裡：rc 照樣傳出，本步的機械判定不受影響；但人工貼進互動 shell 時 exit 1 不會把 shell 關掉。
 (
+  FAILED=
   ROOT="${TMPDIR:-$HOME/.cache}"
   RR=$(readlink -f -- "$ROOT") || { echo "無法解析暫存根：$ROOT" >&2; exit 1; }
   for P in "<第 7 步的 $T>" "<第 7 步的 $D>"; do \
