@@ -134,6 +134,7 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 # 只辨前綴不辨輪次：同根下若有另一輪的 devflow-rev.*／devflow-co.*，填錯照樣會刪。
 # 占位務必加引號（未加時含 glob 的路徑會展開，實測會多刪同根下別輪的目錄）。
 # 占位在雙引號內：路徑含 $、反引號、雙引號、反斜線時須先跳脫——指令替換會在任何判定之前執行（實測含 $(…) 的路徑會執行該指令，守衛擋得住刪除、擋不住執行）。
+# 反測本守衛時勿用 busybox sh：它以內建 applet 執行 rm，PATH 前置的 rm 攔截器完全不生效（實測 shim 零呼叫、目標真的被刪）；bash 與 dash 才會走 PATH。
 # $RP 不得帶尾斜線：rm -rf -- "<link>/" 會跟隨 symlink 刪掉目標（readlink -f 已剝掉尾斜線）。
 # 整段包在子 shell 裡：rc 照樣傳出，本步的機械判定不受影響；但人工貼進互動 shell 時 exit 1 不會把 shell 關掉。
 (
@@ -150,9 +151,9 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
     elif RP=$(readlink -f -- "$P" && printf x); then RP=${RP%x}; RP=${RP%"$NL"}; \
       case "$RP" in *"$NL"*) echo "路徑含換行，停：$P" >&2; RP= ;; esac; \
       if [ -z "$RP" ]; then :; \
-      elif [ "${RP%/*}" != "$RR" ]; then echo "父目錄非本輪暫存根，停：$P -> $RP" >&2; \
+      elif [ "${RP%/*}" != "$RR" ]; then echo "父目錄非本輪暫存根，停：$P -> $RP" >&2; RP=; \
       else case "${RP##*/}" in devflow-rev.??????|devflow-co.??????) OK=1 ;; \
-        *) echo "目錄名非本流程暫存目錄，停：$P -> $RP" >&2 ;; esac; fi; \
+        *) echo "目錄名非本流程暫存目錄，停：$P -> $RP" >&2; RP= ;; esac; fi; \
     else echo "無法解析：$P" >&2; fi; \
     if [ "$OK" = 1 ]; then \
       if [ -d "$RP" ]; then rm -rf -- "$RP" || { echo "刪除失敗：$RP" >&2; FAILED=1; }; \
