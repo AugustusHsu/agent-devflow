@@ -133,12 +133,15 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 # (0) 刪本輪暫存目錄。先 canonicalize 再驗「父目錄＝暫存根」且「目錄名＝本流程前綴」（不辨輪次），兩者皆合才刪。
 # 只辨前綴不辨輪次：同根下若有另一輪的 devflow-rev.*／devflow-co.*，填錯照樣會刪。
 # 占位務必加引號（未加時含 glob 的路徑會展開，實測會多刪同根下別輪的目錄）。
+# 占位在雙引號內：路徑含 $、反引號、雙引號、反斜線時須先跳脫——指令替換會在任何判定之前執行（實測含 $(…) 的路徑會執行該指令，守衛擋得住刪除、擋不住執行）。
 # $RP 不得帶尾斜線：rm -rf -- "<link>/" 會跟隨 symlink 刪掉目標（readlink -f 已剝掉尾斜線）。
 # 整段包在子 shell 裡：rc 照樣傳出，本步的機械判定不受影響；但人工貼進互動 shell 時 exit 1 不會把 shell 關掉。
 (
   FAILED=
   ROOT="${TMPDIR:-$HOME/.cache}"
-  RR=$(readlink -f -- "$ROOT") || { echo "無法解析暫存根：$ROOT" >&2; exit 1; }
+  NL=$(printf '\nx'); NL=${NL%x}
+  RR=$(readlink -f -- "$ROOT" && printf x) || { echo "無法解析暫存根：$ROOT" >&2; exit 1; }
+  RR=${RR%x}; case "$RR" in *"$NL"*"$NL"*) echo "暫存根解析後路徑含換行，停" >&2; exit 1 ;; esac; RR=${RR%"$NL"}
   for P in "<第 7 步的 $T>" "<第 7 步的 $D>"; do \
     [ -n "$P" ] || { echo "空路徑，停" >&2; exit 1; }; \
     if [ -L "$P" ]; then echo "是 symlink，停：$P" >&2; exit 1; fi; \
