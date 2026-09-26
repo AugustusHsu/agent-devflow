@@ -41,6 +41,7 @@ jobs:
           set -euo pipefail
           echo "checkout_sha=$(git rev-parse HEAD)"
           echo "checker_blob=$(git rev-parse HEAD:scripts/devflow_checks.py)"
+          echo "harness_blob=$(git rev-parse HEAD:tests/install/harness.py)"
           echo "event=${GITHUB_EVENT_NAME:-}"
           echo "head_ref=${GITHUB_HEAD_REF:-}"
           echo "base_ref=${GITHUB_BASE_REF:-}"
@@ -119,3 +120,16 @@ jobs:
           git fetch --no-tags origin '+refs/pull/*/head:refs/remotes/origin/pr/*'
           python3 tests/smoke_release_doc.py
           python3 tests/smoke_readme_refs.py
+
+      # install harness（issue #196）。harness 的失敗是**內容問題**（安裝器行為與規格不符，
+      # 或 harness 自身的期望值與 kit 樹脫節），狀態碼 1、check 變紅——與「規則檢查」同層級。
+      # 不套「準備檢查器相依」的 EXIT 守衛：那一步把任何非零收成 2＝「檢查器無法執行」，
+      # 把內容問題也收成 2 等於把本項從關卡降成雜訊。
+      # 升為必需關卡的依據是 README「Phase 1 第三出口的判定方式」與 scripts/devflow_checks.py
+      # 檔頭「升 required 的前提」：同一份 blob 的正、反兩個 run，負向的 exit 1 只能由本項造成。
+      # 依據不是 G4（G4 依 ST2 要 stage 2 才生效，本 repo 現為 stage 1）。
+      - name: install harness
+        run: |
+          set -euo pipefail
+          python3 --version
+          python3 tests/install/harness.py
