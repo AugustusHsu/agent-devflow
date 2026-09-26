@@ -103,6 +103,7 @@ prompt 以 `templates/review-prompt.md` 為底，另加：
 - verdict 開頭 `APPROVE`／`REQUEST_CHANGES`、寫明 head sha（`R3`）；一格不通過不阻擋其他格的判定。
 - 功能 PR：審查者自構輸入逐條 AC 找反例，不以 coder 的 harness 輸出為證據（`R4`、`R6`）。
 - `-m` 是萃取當時的模型名，依當下可用者換。
+- **模板的每一項都要進 prompt**：`R4` 寫「用 `templates/review-prompt.md`」，「以它為底」指全文納入後再加上列各項，不是取其要旨自行改寫。自寫 prompt 會靜默漏掉模板的條目——#229 所記的三張單即因四輪審查全自寫，模板的「核對 issue『派工前讀審』行」項從未進入審查位視野。
 
 ### 8. verdict 處理（`R3`、`R5`、`F1`、`F2`）
 
