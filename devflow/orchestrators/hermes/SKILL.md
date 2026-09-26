@@ -87,6 +87,7 @@ gh pr create --base main --head <N>-<slug> --title "<gitmoji> <type>(<scope>): <
 fresh context、異廠、丟棄式 checkout（`coders/codex.md` 「審查與讀審用法（`R1`、`L7`）」格，引用前查狀態 `R9`）：
 
 ```bash
+mkdir -p -m 700 -- "${TMPDIR:-$HOME/.cache}"
 T=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-rev.XXXXXX")   # 本輪專用暫存目錄；`TMPDIR` 未設時落在 `$HOME/.cache`，不落 /tmp 本身（`TMPDIR` 指向 /tmp 時須先改設）；第 10 步 (0) 刪
 D=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-co.XXXXXX")    # 丟棄式 checkout，同上不落 /tmp 本身；第 10 步 (0) 刪
 git clone --shared <repo> "$D" && git -C "$D" checkout <head sha>
@@ -135,19 +136,21 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 # $RP 不得帶尾斜線：rm -rf -- "<link>/" 會跟隨 symlink 刪掉目標（readlink -f 已剝掉尾斜線）。
 # 整段包在子 shell 裡：rc 照樣傳出，本步的機械判定不受影響；但人工貼進互動 shell 時 exit 1 不會把 shell 關掉。
 (
+  FAILED=
   ROOT="${TMPDIR:-$HOME/.cache}"
   RR=$(readlink -f -- "$ROOT") || { echo "無法解析暫存根：$ROOT" >&2; exit 1; }
   for P in "<第 7 步的 $T>" "<第 7 步的 $D>"; do \
     [ -n "$P" ] || { echo "空路徑，停" >&2; exit 1; }; \
     if [ -L "$P" ]; then echo "是 symlink，停：$P" >&2; exit 1; fi; \
     RP=$(readlink -f -- "$P") || { echo "無法解析：$P" >&2; exit 1; }; \
-    [ "$(dirname -- "$RP")" = "$RR" ] || { echo "父目錄非本輪暫存根，停：$P -> $RP" >&2; exit 1; }; \
-    case "$(basename -- "$RP")" in devflow-rev.??????|devflow-co.??????) : ;; \
+    [ "${RP%/*}" = "$RR" ] || { echo "父目錄非本輪暫存根，停：$P -> $RP" >&2; exit 1; }; \
+    case "${RP##*/}" in devflow-rev.??????|devflow-co.??????) : ;; \
       *) echo "目錄名非本流程暫存目錄，停：$P -> $RP" >&2; exit 1 ;; esac; \
-    if [ -d "$RP" ]; then rm -rf -- "$RP"; \
+    if [ -d "$RP" ]; then rm -rf -- "$RP" || { echo "刪除失敗：$RP" >&2; FAILED=1; }; \
     elif [ -e "$RP" ]; then echo "非目錄，略過：$P" >&2; \
     else echo "已不存在，略過：$P" >&2; fi; \
-  done
+  done; \
+  [ -z "$FAILED" ] || exit 1
 )
 ```
 
