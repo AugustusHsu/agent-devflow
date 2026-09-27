@@ -121,6 +121,22 @@ jobs:
           python3 tests/smoke_release_doc.py
           python3 tests/smoke_readme_refs.py
 
+      # 檢查器本身的煙霧測試（issue #254）。它造一份沙箱輸入、注入突變、比檢查器的 exit code
+      # 與 ❌ 明細（做法見 tests/smoke_devflow_checks.py 的 docstring），失敗是**內容問題**
+      # （檢查器被改壞、某一項該報而沒報），狀態碼 1、check 變紅——與「規則檢查」同層、同語意，
+      # 所以刻意用跟它一樣的 `set -euo pipefail`。
+      # 不套「準備檢查器相依」那個把任何非零狀態碼一律收成 2 的 EXIT 守衛：那一步的 2 意思是
+      # 「檢查器無法執行」＝環境問題，把內容問題也收成 2 就是把本項從關卡降成雜訊，而且和
+      # runner 壞掉撞同一個號碼（見 scripts/devflow_checks.py 檔頭「exit code 的分類守則」）。
+      # 與上面那兩支的差別要記著：本支**未裝** `sys.excepthook`（smoke_release_doc.py 與
+      # smoke_readme_refs.py 裝了）。所以這裡只承諾「內容突變 → exit 1」，不宣稱未預期例外會
+      # 收成 2；本支的未攔截例外走 Python 預設，和內容違規撞同一個 1。要改這一點得動測試本身，
+      # 不在 issue #254 的射程內。
+      - name: 檢查器煙霧測試
+        run: |
+          set -euo pipefail
+          python3 tests/smoke_devflow_checks.py
+
       # install harness（issue #196）。harness 的失敗是**內容問題**（安裝器行為與規格不符，
       # 或 harness 自身的期望值與 kit 樹脫節），狀態碼 1、check 變紅——與「規則檢查」同層級。
       # 不套「準備檢查器相依」的 EXIT 守衛：那一步把任何非零收成 2＝「檢查器無法執行」，
