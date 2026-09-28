@@ -137,6 +137,16 @@ jobs:
           set -euo pipefail
           python3 tests/smoke_devflow_checks.py
 
+      # .gitignore 的 `.devflow-local` 只忽略 repo 根目錄那一份（issue #252）。規則沒錨定時，
+      # 子目錄裡預定受版控的同名樣本會被默默擋在 index 外。測試內建負向對照（暫存 repo 裡拿掉
+      # 錨定、必須抓到差異），失敗是**內容問題**，狀態碼 1、check 變紅——所以同樣用
+      # `set -euo pipefail`、不套「準備檢查器相依」的 EXIT 守衛（理由同「檢查器煙霧測試」）。
+      # 本支裝了 `sys.excepthook`，跑不起來是 2，與內容違規的 1 分得開。
+      - name: gitignore 射程
+        run: |
+          set -euo pipefail
+          python3 tests/smoke_gitignore_scope.py
+
       # install harness（issue #196）。harness 的失敗是**內容問題**（安裝器行為與規格不符，
       # 或 harness 自身的期望值與 kit 樹脫節），狀態碼 1、check 變紅——與「規則檢查」同層級。
       # 不套「準備檢查器相依」的 EXIT 守衛：那一步把任何非零收成 2＝「檢查器無法執行」，
