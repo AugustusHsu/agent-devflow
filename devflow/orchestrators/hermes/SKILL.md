@@ -30,7 +30,6 @@ metadata:
 - 用 `templates/issue.md`，欄位依 `L1`；G 填 commit sha，T 填規格 commit sha 或（治理／流程類）T 留言 id。
 - 平行前提四欄 stage < 3 時依 `L1` 填；`P1`／`P4` 的判定 `ST3` 起。
 - 命中 `L3` 停判準的政策問題先在 issue 留言裁決，再派工。
-- 依 `L7` 判定是否觸發派工前讀審；觸發者取得 `READY`（或停損後人的書面裁決）並填妥「派工前讀審」留痕行後才進下一步。
 
 ### 2. 建 worktree（`I1`、`I2`、`L2`）
 
@@ -84,7 +83,7 @@ gh pr create --base main --head <N>-<slug> --title "<gitmoji> <type>(<scope>): <
 
 ### 7. 派審（`R1`、`R2`、`R4`、`R6`）
 
-fresh context、異廠、丟棄式 checkout（`coders/codex.md` 「審查與讀審用法（`R1`、`L7`）」格，引用前查狀態 `R9`）：
+fresh context、異廠、丟棄式 checkout（`coders/codex.md` 「審查用法（`R1`）」格，引用前查狀態 `R9`）：
 
 ```bash
 mkdir -p -m 700 -- "${TMPDIR:-$HOME/.cache}"
@@ -103,7 +102,7 @@ prompt 以 `templates/review-prompt.md` 為底，另加：
 - verdict 開頭 `APPROVE`／`REQUEST_CHANGES`、寫明 head sha（`R3`）；一格不通過不阻擋其他格的判定。
 - 功能 PR：審查者自構輸入逐條 AC 找反例，不以 coder 的 harness 輸出為證據（`R4`、`R6`）。
 - `-m` 是萃取當時的模型名，依當下可用者換。
-- **模板的每一項都要進 prompt**：`R4` 寫「用 `templates/review-prompt.md`」，「以它為底」指全文納入後再加上列各項，不是取其要旨自行改寫。自寫 prompt 會靜默漏掉模板的條目——#229 所記的三張單即因四輪審查全自寫，模板的「核對 issue『派工前讀審』行」項從未進入審查位視野。
+- **模板的每一項都要進 prompt**：`R4` 寫「用 `templates/review-prompt.md`」，「以它為底」指全文納入後再加上列各項，不是取其要旨自行改寫。自寫 prompt 會靜默漏掉模板的條目——#229 所記的三張單即因四輪審查全自寫，模板當時的留痕核對項從未進入審查位視野。
 
 ### 8. verdict 處理（`R3`、`R5`、`F1`、`F2`）
 
