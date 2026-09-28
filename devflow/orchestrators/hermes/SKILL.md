@@ -107,7 +107,7 @@ prompt 以 `templates/review-prompt.md` 為底，另加：
 
 ### 8. verdict 處理（`R3`、`R5`、`F1`、`F2`）
 
-- 完整 verdict 貼成 PR 留言（`R5`；`forges/github.md` 「審查證據（`R3`／`R5`）」格），另一則留處置表：每條阻擋項標 `FIX`／`DEFER`／`REJECT` 並附 `R11` 要求的依據；該留言 URL 記入 issue「審查處置」段。
+- 完整 verdict 貼成 PR 留言（`R5`；`forges/github.md` 「審查證據（`R3`／`R5`）」格），另一則留處置表：每條阻擋項標 `FIX`／`DEFER`／`REJECT` 並附 `R11` 要求的依據，並在同一則記 `R13` 的續審判定行與「續審」(a)(b)(c) 三項依據；該留言 URL 記入 issue「審查處置」段。
 - `REQUEST_CHANGES` 分兩類：
   - 實作阻擋 → coder `--resume` 修（步驟 4；`F1`）。
   - T 的漏洞 → 依 `F2`。Hermes 側：問人、答案寫回原 issue（`L3` 通道）→ T 修訂作為新任務走步驟 1～10（新 issue／分支／worktree；原分支已承載開啟中的 PR，不再開第二張；原任務 coder 已停、worktree 依 `C3` 保留）→ 合入後把原 issue 的 T 更新為新 commit、影響分析留言 → 重派原任務。
@@ -209,7 +209,7 @@ gh issue view <N> --json state --jq .state
 
 ## 三、輪次紀律（`F1`、`R3`、`R5`）
 
-- 每單審查輪次上限由人定，寫進 issue；停損與升級依 `F1`。
+- 審查輪次不設上限；每輪處置後依 `R13` 判定續審、升人或擱置，並記該條要求的續審留痕。實作未達 AC 的兩輪無進展升級另依 `F1`。
 - 審查 reasoning：首輪 `xhigh`／`high`；後續範圍縮窄可降 `medium`／`low`。
 - 每輪 PR 留言兩則：verdict 摘要表＋完整 verdict（`R5`）。
 
@@ -229,7 +229,7 @@ gh issue view <N> --json state --jq .state
 
 ## 六、無人值守
 
-- 事先授權由人寫進 issue 或授權檔，逐項列：`APPROVE` 即按合併（仍依 `M1`、`M2`）、輪次上限（第三節）、停止條件、Codex 額度撞到時 sleep 到恢復再派（日上限；週上限依第七節「Codex 配額耗盡」）。
+- 事先授權由人寫進 issue 或授權檔，逐項列：`APPROVE` 即按合併（仍依 `M1`、`M2`）、`R13` 升人與擱置的處置方式（第三節）、停止條件、Codex 額度撞到時 sleep 到恢復再派（日上限；週上限依第七節「Codex 配額耗盡」）。
 - 每步邊界（派工、撞 turns、verdict、合併、收尾）在 issue 留狀態（`L3`）。
 - forge 回錯或逾時依 `F3`。
 - Codex 額度撞到（日上限）：一次性 cron 於恢復時間重派＋watchdog 每 3 分鐘看 verdict 檔；週上限依第七節「Codex 配額耗盡」。Claude 額度撞到：Hermes 自身靜默，人隔日看 issue 接手。
