@@ -22,7 +22,10 @@ scripts/devflow_checks.py 說該設定檔住 repo 根目錄，規則就該錨定
 這條規則是**本測試主動保證的**，不是假設：`git init` 預設從 template 目錄（可被
 `GIT_TEMPLATE_DIR`／`init.templateDir` 改指）複製 `info/exclude`，所以這裡以測試自建的空
 template 初始化（`--template=` 優先於環境變數與設定），init 後再把 `info/exclude` 寫空
-（PR #266 R1 第 2 輪 BLOCK 1）。輸出的「真 repo」指的是**本 repo 的 `.gitignore` 內容**。
+（PR #266 R1 第 2 輪 BLOCK 1）。所有 git 子程序以剝除 `GIT_*`（只保留 `GIT_EXEC_PATH`）的
+環境執行，暫存 repo 不受呼叫端 `GIT_DIR`／`GIT_WORK_TREE`／`GIT_TEMPLATE_DIR` 等影響；init
+後另驗 git dir 與 `info/exclude` 皆落在暫存目錄內，否則 exit 2——任何情況下都不寫暫存目錄
+以外的檔（PR #266 R1 第 3 輪 BLOCK 1）。輸出的「真 repo」指的是**本 repo 的 `.gitignore` 內容**。
 
 **`--no-index`**：`git check-ignore` 對已在 index 的路徑預設回 1（不報告）；加上它才是
 純粹問忽略規則。四條路徑都不必真的存在，本檔不碰本 repo 的 index 與工作樹。
@@ -31,6 +34,7 @@ template 初始化（`--template=` 優先於環境變數與設定），init 後�
 與期望不符。抓不到就表示這支測試對「錨定被拿掉」沒有鑑別力，自報並 exit 1——正向過了
 也不算數。
 """
+import os
 import subprocess
 import sys
 import tempfile
@@ -68,7 +72,24 @@ sys.excepthook = _uncaught
 
 
 class CannotRun(Exception):
-    """環境問題：git 回了預期以外的狀態碼。"""
+    """環境問題：git 回了預期以外的狀態碼，或暫存 repo 的路徑不在暫存目錄內。"""
+
+
+def git_env():
+    """呼叫端環境剝除所有 `GIT_*`，只留 `GIT_EXEC_PATH`（見檔頭）。"""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    if "GIT_EXEC_PATH" in os.environ:
+        env["GIT_EXEC_PATH"] = os.environ["GIT_EXEC_PATH"]
+    return env
+
+
+def inside(path, root):
+    """path 解析後是否落在 root（解析後）底下。"""
+    try:
+        Path(path).resolve().relative_to(Path(root).resolve())
+        return True
+    except ValueError:
+        return False
 
 
 def check_ignore(cwd, path):
@@ -77,7 +98,7 @@ def check_ignore(cwd, path):
     `-c core.excludesFile=/dev/null` 關掉使用者全域的忽略檔（見檔頭）。"""
     p = subprocess.run(["git", "-c", "core.excludesFile=/dev/null",
                         "check-ignore", "-q", "--no-index", "--", path],
-                       cwd=str(cwd), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                       cwd=str(cwd), env=git_env(), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     if p.returncode not in (0, 1):
         raise CannotRun("git check-ignore %s 在 %s 回 %d：%s"
                         % (path, cwd, p.returncode, p.stderr.decode("utf-8", "replace").strip()))
@@ -93,16 +114,27 @@ def run_in_scratch(gitignore):
         repo = Path(tmp) / "repo"
         template.mkdir()
         p = subprocess.run(["git", "init", "-q", "--template=%s" % template, str(repo)],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                           env=git_env(), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         if p.returncode != 0:
             raise CannotRun("git init %s 回 %d：%s"
                             % (repo, p.returncode, p.stderr.decode("utf-8", "replace").strip()))
+        # 兩道路徑防護都在寫入之前：git dir 或 info/exclude 不在暫存 repo 底下就不寫、exit 2。
+        p = subprocess.run(["git", "-C", str(repo), "rev-parse", "--absolute-git-dir"],
+                           env=git_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if p.returncode != 0:
+            raise CannotRun("git rev-parse --absolute-git-dir 回 %d：%s"
+                            % (p.returncode, p.stderr.decode("utf-8", "replace").strip()))
+        gitdir = p.stdout.decode("utf-8").strip()
+        if not inside(gitdir, repo):
+            raise CannotRun("暫存 repo 的 git dir 是 %s，不在 %s 底下" % (gitdir, repo))
         p = subprocess.run(["git", "-C", str(repo), "rev-parse", "--git-path", "info/exclude"],
-                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                           env=git_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if p.returncode != 0:
             raise CannotRun("git rev-parse --git-path info/exclude 回 %d：%s"
                             % (p.returncode, p.stderr.decode("utf-8", "replace").strip()))
         exclude = repo / p.stdout.decode("utf-8").strip()   # 相對路徑以 repo 為基準；絕對路徑照用
+        if not inside(exclude, repo):
+            raise CannotRun("暫存 repo 的 info/exclude 是 %s，不在 %s 底下" % (exclude, repo))
         exclude.parent.mkdir(parents=True, exist_ok=True)
         exclude.write_bytes(b"")
         (repo / ".gitignore").write_bytes(gitignore)
