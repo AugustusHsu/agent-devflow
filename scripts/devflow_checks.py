@@ -1071,7 +1071,7 @@ R9_SEPS = " \t（(：:，,。、；;）)"
 # 能執行的驗證方式分兩種，須標明是哪一種」）。`r9sub` 那一節用它判 `📝` 格有沒有標子類。
 # **不併進 R9_STATUSES**：那個 tuple 是狀態格的三值、`r9` 拿它逐字比對格子的開頭；
 # 子類是 `📝` 之後的補充，兩者判的不是同一件事（併進去會讓 `r9` 誤收子類名當狀態值）。
-R9_SUBS = ("無可執行的驗證方式", "驗證未達 `✅`")
+R9_SUBS = ("無可執行的驗證方式", "驗證未達 ✅")
 # 規則家族前綴的基線。實際集合是「基線 ∪ WORKFLOW.md 的節標題宣告的家族」
 # （issue #96 AC-2 的第一層；家族的來源見 RULE_SECTION_RE）：加新節自動納入，
 # 整個家族被刪掉時基線仍擋得住懸空引用。
@@ -1339,6 +1339,21 @@ def container_stacks(children):
     return out
 
 
+def _visible_text(inline_token):
+    """inline token 的**可見文字**：讀者在算繪後看得見的字。"""
+    kids = inline_token.children or []
+    stacks = container_stacks(kids)
+    out = []
+    for c, stack in zip(kids, stacks):
+        if c.type not in TEXT_TOKENS + ("code_inline",):
+            continue
+        # stack 的元素是**推入時的索引**（不是容器名），回查該位置的 token 型別。
+        if any(kids[i].type == "s_open" for i in stack):
+            continue
+        out.append(c.content)
+    return "".join(out)
+
+
 def leading_code_span(children):
     """一個 inline 開頭的 code span：第一個 `code_inline`，且它前面沒有裸文字。
     開頭不是 code span 就回 None（issue #98 AC-1）。
@@ -1538,7 +1553,7 @@ def tables_of(tokens, lines):
                     cur["body"].append(row)
             row = None
         elif t.type == "inline" and row is not None:
-            row["cells"].append(t.content.strip())
+            row["cells"].append(_visible_text(t).strip())
     return out
 
 
