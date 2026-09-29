@@ -1,5 +1,5 @@
 ---
-version: 1.11.1.0
+version: 1.12.0.0
 ---
 
 # agent-devflow WORKFLOW
@@ -45,7 +45,7 @@ version: 1.11.1.0
 
 ## 4. 任務生命週期（L）
 
-- `L1` 派工前 issue 必須有：目標與對應 AC、G、T、write scope、阻塞依賴、共用契約、外部資源；「未決事項」為空。模板 `templates/issue.md`。派工後 orchestrator 須在 issue 留言記派工紀錄：coder／reviewer 的完整啟動指令（含版本旗標與工具版本）、`session_id` 或同等識別、驗證指令的輸出原文（首行 JSON、`-o` 全文、review id 與比對結果等；只寫「正常」「通過」等結論者不構成紀錄）。輸出原文只證明驗證方式曾實跑並供核對；對照表狀態仍須另滿足 `R8`。對照表引用**本條生效後**的執行作證據時，只能引此紀錄，不引記憶；本條生效前的既有證據依其原記載引用，不受本句限制。
+- `L1` 派工前 issue 必須有：目標與對應 AC、G、T、write scope、阻塞依賴、共用契約、外部資源；「未決事項」為空。模板 `templates/issue.md`。AC 的驗證步驟若其期望值取決於標的處於與候選不同的狀態（還原、破壞、反向對照、環境注入），該步驟須在已 commit 且工作樹乾淨的狀態下實跑，於 issue 貼出輸出原文，並說明該步驟確實使標的離開候選狀態。AC 的驗證步驟若在該 AC 未達成時仍會給出相同輸出，該步驟不構成證據；判定方式為對至少一個明確的未達成候選實跑同一步驟並得到不同輸出。派工後 orchestrator 須在 issue 留言記派工紀錄：coder／reviewer 的完整啟動指令（含版本旗標與工具版本）、`session_id` 或同等識別、驗證指令的輸出原文（首行 JSON、`-o` 全文、review id 與比對結果等；只寫「正常」「通過」等結論者不構成紀錄）。輸出原文只證明驗證方式曾實跑並供核對；對照表狀態仍須另滿足 `R8`。對照表引用**本條生效後**的執行作證據時，只能引此紀錄，不引記憶；本條生效前的既有證據依其原記載引用，不受本句限制。
 - `L2` 派工：從最新 main 建分支與 worktree；coder 收到 issue、G、T、worktree 路徑、驗證指令。
 - `L3` coder 遇未決事項不猜，依判準分兩路徑。停（blocked），任一命中即停：(a) 處置會落在 write scope 外（repo 設定、branch protection、`WORKFLOW.md`、其他任務的 worktree）或會改變 issue 明列的 AC；(b) issue 本體、規格、issue 留言互相矛盾。命中：issue 留言 → 停；orchestrator 問人，答案寫回 issue，再重派。續：未命中者為工程判斷，issue 留言記錄情況、暫定處置、位置後繼續，不停。issue 留言是持久紀錄，提問通道只是通道。工作區內出現非本任務產生的檔案或工具生成物（MCP、編輯器、快取自動寫入者）同樣適用：回報，不自行 `add`、不自行刪除。
 - `L4` 完成：測試綠 → push 分支 → 開 PR，引用 issue、G、T、head sha。模板 `templates/pr.md`。
