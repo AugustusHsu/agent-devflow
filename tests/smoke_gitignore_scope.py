@@ -18,8 +18,11 @@ scripts/devflow_checks.py 說該設定檔住 repo 根目錄，規則就該錨定
 自己的）。兩者都不是 repo 內容，卻能讓子目錄路徑被忽略——在本 repo 裡直接量，合法的
 `.gitignore` 會被使用者環境判成「內容違規」exit 1，違反下面的 1／2 分類。所以正、負兩組
 都在 `git init` 出來的暫存 repo 裡量：`.gitignore` 自本 repo 當下的檔逐位元組複製（負向
-再拿掉錨定），`core.excludesFile` 以 `-c` 指向 /dev/null，暫存 repo 的 `info/exclude` 是
-`git init` 產生的、不含這條規則。輸出的「真 repo」指的是**本 repo 的 `.gitignore` 內容**。
+再拿掉錨定），`core.excludesFile` 以 `-c` 指向 /dev/null。暫存 repo 的 `info/exclude` 不含
+這條規則是**本測試主動保證的**，不是假設：`git init` 預設從 template 目錄（可被
+`GIT_TEMPLATE_DIR`／`init.templateDir` 改指）複製 `info/exclude`，所以這裡以測試自建的空
+template 初始化（`--template=` 優先於環境變數與設定），init 後再把 `info/exclude` 寫空
+（PR #266 R1 第 2 輪 BLOCK 1）。輸出的「真 repo」指的是**本 repo 的 `.gitignore` 內容**。
 
 **`--no-index`**：`git check-ignore` 對已在 index 的路徑預設回 1（不報告）；加上它才是
 純粹問忽略規則。四條路徑都不必真的存在，本檔不碰本 repo 的 index 與工作樹。
@@ -82,15 +85,28 @@ def check_ignore(cwd, path):
 
 
 def run_in_scratch(gitignore):
-    """在新 `git init` 的暫存 repo 放入 gitignore（bytes），回傳 [(路徑, 期望 rc, 實得 rc)]。"""
+    """在新 `git init` 的暫存 repo 放入 gitignore（bytes），回傳 [(路徑, 期望 rc, 實得 rc)]。
+
+    空 template ＋ 清空 `info/exclude`：暫存 repo 裡除了這份 gitignore 之外沒有別的忽略來源（見檔頭）。"""
     with tempfile.TemporaryDirectory() as tmp:
-        p = subprocess.run(["git", "init", "-q", tmp],
+        template = Path(tmp) / "template"
+        repo = Path(tmp) / "repo"
+        template.mkdir()
+        p = subprocess.run(["git", "init", "-q", "--template=%s" % template, str(repo)],
                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         if p.returncode != 0:
             raise CannotRun("git init %s 回 %d：%s"
-                            % (tmp, p.returncode, p.stderr.decode("utf-8", "replace").strip()))
-        (Path(tmp) / ".gitignore").write_bytes(gitignore)
-        return [(path, want, check_ignore(tmp, path)) for path, want in CASES]
+                            % (repo, p.returncode, p.stderr.decode("utf-8", "replace").strip()))
+        p = subprocess.run(["git", "-C", str(repo), "rev-parse", "--git-path", "info/exclude"],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if p.returncode != 0:
+            raise CannotRun("git rev-parse --git-path info/exclude 回 %d：%s"
+                            % (p.returncode, p.stderr.decode("utf-8", "replace").strip()))
+        exclude = repo / p.stdout.decode("utf-8").strip()   # 相對路徑以 repo 為基準；絕對路徑照用
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        exclude.write_bytes(b"")
+        (repo / ".gitignore").write_bytes(gitignore)
+        return [(path, want, check_ignore(repo, path)) for path, want in CASES]
 
 
 def unanchor(data):
@@ -104,9 +120,10 @@ def unanchor(data):
 
 
 def main():
+    # .gitignore 是受版控的 repo 內容：它不見了是內容違規（1），不是環境問題（PR #266 R1 第 2 輪 BLOCK 2）。
     if not GITIGNORE.exists():
-        print("💥 找不到 %s（repo 佈局與本檔假設不符；exit 2，不是內容違規）" % GITIGNORE)
-        return 2
+        print("❌ 真 repo: 找不到 .gitignore（內容違規：受版控的 .gitignore 不存在）")
+        return 1
     data = GITIGNORE.read_bytes()
 
     failures = []
