@@ -762,7 +762,7 @@ def mut_r9_other_word(root):
 
 
 # ── r9sub：`📝` 格須標明 R9 的哪一個子類（issue #190）─────────────────────
-# 四個應擋案例的突變同樣附加在 devflow/coders/codex.md 檔尾（錨點與理由同上面的 `r9` 群）。
+# 應擋案例的突變同樣附加在 devflow/coders/codex.md 檔尾（錨點與理由同上面的 `r9` 群）。
 # 每列都是四格、狀態格非空且取得三值之一，`table` 與 `r9` 照樣通過：exit 1 只會由 r9sub 造成。
 # 兩個「舊子類名」是條文自己的歷史用詞，不是隨手編的字串——`自述未驗證` 於 `265e996`、
 # `先前驗證已失效` 於 `a2c6c76` 分別改述成現行的「無可執行的驗證方式」與「驗證未達 `✅`」。
@@ -778,6 +778,13 @@ R9SUB_BARE = "| 沒有補充 | — | 值 | 📝 已宣稱 |\n"
 # 期望的明細寫**沒有反斜線**的 `沒標子類 | 後綴`：那是 markdown-it 解析後的格子內容，
 # 切字串切不出來，所以它同時鎖住「欄位要走 tables_of() 的 token」這件事。
 R9SUB_ESCAPED_PIPE = "| 跳脫 | — | 值 a \\| b | 📝 已宣稱（沒標子類 \\| 後綴） |\n"
+# issue #250：`r9sub` 比對的是格子的**可見文字**，不是原文。下面兩案的子類名讀者看不到：
+# HTML 註解整段不算繪；刪除線劃掉的宣稱不算數。期望的明細因此也是可見文字——註解內容
+# 不出現、反引號被剝掉、`~~ ~~` 內的字不出現。
+R9SUB_HTML_COMMENT = "| 註解 | — | 值 | 📝 已宣稱（<!-- 驗證未達 `✅` -->沒標可見子類） |\n"
+# 刪除線案是唯一擋得住「用容器名比對 `container_stacks()` 堆疊」的一條：堆疊存的是推入時的
+# 索引，拿 `"s"` 去比恆為 False，劃掉的子類名會被照收，本案回報 0 筆而失敗。
+R9SUB_STRIKE = "| 刪除線 | — | 值 | 📝 已宣稱（~~驗證未達 `✅`~~：…） |\n"
 
 
 def r9sub_summary(row, aspect):
@@ -806,6 +813,16 @@ def mut_r9sub_escaped_pipe(root):
     edit(root, R9SUB_FILE, lambda t: append(t, R9SUB_ESCAPED_PIPE))
 
 
+def mut_r9sub_html_comment(root):
+    """子類名只在 HTML 註解裡（見 R9SUB_HTML_COMMENT）：原文比對會照收，讀者什麼都看不到。"""
+    edit(root, R9SUB_FILE, lambda t: append(t, R9SUB_HTML_COMMENT))
+
+
+def mut_r9sub_strike(root):
+    """子類名包在 `~~ ~~` 裡（見 R9SUB_STRIKE）：劃掉的宣稱不算標明了子類。"""
+    edit(root, R9SUB_FILE, lambda t: append(t, R9SUB_STRIKE))
+
+
 def ok_r9sub_current(root):
     """repo 現況的九個 `📝` 格全都標了子類。突變刻意**不動任何狀態格**，附的是一行 HTML
     註解（PASSING 的案例一定要改到東西，`edit()` 沒改到會當場失敗），所以 ok 訊息報的格數
@@ -819,6 +836,13 @@ def ok_r9sub_form_b(root):
     寫法）。`R9` 只要求「標明是哪一種」，判準若收成單一寫法，這一案會誤擋。"""
     edit(root, R9SUB_FILE,
          lambda t: append(t, "| 寫法 B | — | 值 | 📝 已宣稱（驗證未達 `✅`：…） |\n"))
+
+
+def ok_r9sub_emphasis(root):
+    """子類名中間夾行內強調（issue #250 缺陷 1）：讀者看得見「驗證未達 ✅」，原文比對卻因
+    `**` 切開子類名而誤擋。"""
+    edit(root, R9SUB_FILE,
+         lambda t: append(t, "| 強調 | — | 值 | 📝 已宣稱（驗證**未達** `✅`：…） |\n"))
 
 
 def ok_r9sub_prose(root):
@@ -1168,6 +1192,11 @@ CASES = [
     ("r9sub:escaped-pipe", "r9sub", mut_r9sub_escaped_pipe, {},
      (r9sub_summary(R9SUB_ESCAPED_PIPE, "跳脫"),
       "狀態欄=「📝 已宣稱（沒標子類 | 後綴）」")),
+    # issue #250：子類名讀者看不到的兩種寫法，明細鎖住**可見文字**。
+    ("r9sub:html-comment", "r9sub", mut_r9sub_html_comment, {},
+     (r9sub_summary(R9SUB_HTML_COMMENT, "註解"), "狀態欄=「📝 已宣稱（沒標可見子類）」")),
+    ("r9sub:strike", "r9sub", mut_r9sub_strike, {},
+     (r9sub_summary(R9SUB_STRIKE, "刪除線"), "狀態欄=「📝 已宣稱（：…）」")),
     # issue #150 AC-2 的四個應擋案例。前三案的摘要只差在兩端的版本值，明細再指出是哪個
     # 檔觸發的——摘要片段帶上 `base … → HEAD …`，才分得出「沒動」「改低」是哪一種。
     # 版本值由 V7_BASE／V7_LOW 組出，不寫死當下版號（issue #156）。
@@ -1237,6 +1266,7 @@ PASSING = [
     # issue #190：現況九格全標子類（訊息鎖住格數 9）、第二種寫法、表格外的敘述句。
     ("r9sub:current", "r9sub", ok_r9sub_current, "9 個 📝 格都標明了 R9 的子類"),
     ("r9sub:form-b", "r9sub", ok_r9sub_form_b),
+    ("r9sub:emphasis", "r9sub", ok_r9sub_emphasis),
     ("r9sub:prose", "r9sub", ok_r9sub_prose),
     # issue #96 的三個「修不掉」的假陽性，逐案對應判準的三個條件。
     ("dupid:appendix", "dupid", ok_dupid_appendix),
