@@ -137,6 +137,7 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 # 行為收窄（刻意）：<合法名>/. 與 <合法名>/./ 即使是普通目錄也一律擋，因為最後一段是 . 不是合法名。<合法名>／<合法名>/／<合法名>/// 三種寫法仍可用——差一個 . 而已，別用會連尾斜線一起擋的粗判準。
 # 暫存根有兩個可接受的字面值：$ROOT 原值與「釘住後 pwd -P 給的真實路徑」（TMPDIR 指向 symlink 時兩者不同，都得接受，否則正常路徑會被誤擋）。兩者都要剝盡尾斜線：TMPDIR=/foo/ 時第 7 步產生的占位是 /foo//devflow-rev.xxxxxx，前綴為 /foo/，不剝就比不等。
 # 後者務必在 cd 之後以 pwd -P 取，不可在 cd 之前用 readlink -f -- "$ROOT"：$ROOT 若在 readlink 與 cd 之間被改指（A→B），該值留著舊 root A 而 cwd 已是 B，指向 A 的占位會比對舊值通過驗證，-L／-d／rm 卻全打在 B，刪掉 B 底下從未驗證的目錄（實測 bash 與 dash 皆可重現）。pwd -P 問的是已釘住的 inode，不重走 $ROOT。
+# 「暫存根是否被換掉」用 inode 比對（ls -dLi，cd 前後各一次），不用 pathname 字串比對：pathname 相同而 inode 不同的情形存在（$ROOT 被 mv 走後同名重建，字串比對誤認沒變，刪掉新 inode 下從未驗證的兩目錄）；inode 相同而 pathname 不同的情形也存在（TMPDIR=//foo 時 GNU readlink -f 正規化成 /foo、pwd -P 保留 //foo，字串比對必然不等，合法用法被誤擋）。兩者皆實測，inode 比對同時解掉這兩面。
 # 兩段式，先驗完再刪：兩個占位全部通過（非空、不含換行、合白名單、非 symlink、須為現存目錄、兩者相異）才進刪除；任一不合法 → 零刪除、rc 非 0。
 # 「零刪除」的範圍限於驗證階段：驗證未全過就一個都不刪。進入刪除階段後兩個 rm 都會執行，其一失敗（例如權限）只使 rc 非 0，不會回滾另一個已刪的——刪除本身不是交易。
 # 角色樣式寫死在 case 的 pattern 位置、不經參數傳遞：樣式若當參數傳，呼叫點會做 pathname expansion，cwd 內有字面同形目錄（devflow-rev.******）時樣式會被換成該目錄名，不合法的短名就會被放行。
@@ -161,6 +162,7 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 # 環境變數注入（BASH_FUNC_*）不在此列——它不需執行 code，已由 /usr/bin/env -i 阻斷。
 # 本守衛也不防占位貼入時的 shell 求值（指令替換、glob 展開）——見上方既有註解。
 # 本守衛不逐元件追查 symlink，改以輸入格式白名單：占位須恰為 <暫存根>/<合法名>（可帶尾斜線）；含 . 或 .. 或多層或經中間 symlink 的寫法一律拒絕，不論解析結果是否合規。
+# 本守衛不防「暫存根在守衛執行期間被換掉」以外的 TOCTOU：占位本身在驗證與 rm 之間被替換不在防護範圍（占位由第 7 步產生，其父目錄即暫存根，已由 inode 比對與釘住 cwd 覆蓋）。
 (
   /usr/bin/env -i \
     HOME="$HOME" TMPDIR="${TMPDIR:-}" PATH=/usr/bin:/bin \
@@ -182,20 +184,43 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
   # RA 在 cd 之前取沒有問題：它是字面值，不經任何解析，外部改指不會改變它。
   strip "$ROOT"; RA=$SS
   [ -n "$RA" ] || { echo "暫存根為空，停" >&2; exit 1; }
-  # 釘住前先記下 $ROOT 當下解析到的真實路徑。這個值「不」拿來當可接受的前綴——它只作為改指偵測器：
-  # 釘住後與 pwd -P 比，不等就表示 $ROOT 在「第一次觀測」與「釘住」之間被改指過，整個守衛零刪除中止。
-  # 為何需要它：RA 是 $ROOT 的字面值，占位若寫成 <symlink 字面>/<合法名>，其前綴恆等於 RA，
-  # 不論 symlink 當下指向哪裡都會通過——光把 RB 移到 cd 之後只擋得住 canonical 形式的占位。
-  RPRE=$(readlink -f -- "$ROOT" && printf x) && RPRE=${RPRE%x} || RPRE=
-  [ -n "$RPRE" ] || { echo "無法解析暫存根：$ROOT" >&2; exit 1; }
-  RPRE=${RPRE%"$NL"}; strip "$RPRE"; RPRE=$SS
+  # 取一個路徑的 inode 編號到 IN。ls -i 是 POSIX 取 inode 的可攜辦法（stat 非 POSIX 必備）。
+  # -L 不可省：ls -di <symlink> 取的是 symlink 自身的 inode，cd -P 後 ls -di . 取的是目標的，
+  # 兩者本來就不等，漏 -L 會把「暫存根為 symlink 且未被換掉」這個合法用法全部誤擋（實測 20859917 vs 20859911）。
+  # 解析不用 awk：守衛本體整段在 bash -c 的單引號字串內，本體裡再出現單引號會切斷該字串。改用參數展開。
+  # （這條註解本身也因此不寫單引號——切出來的片段若含空白或 metachar，整個守衛的參數就被打亂。）
+  # 先剝前導空白再取第一欄：某些 ls 會為對齊補空白，不剝的話 ${IN%% *} 會取到空字串。
+  inum() {
+    IN=$(ls -dLi -- "$1" 2>/dev/null) || { IN=; return 1; }
+    while :; do case "$IN" in " "*|"	"*) IN=${IN#?} ;; *) break ;; esac; done
+    IN=${IN%% *}
+    case "$IN" in "" | *[!0-9]*) IN=; return 1 ;; esac
+    return 0
+  }
+  # 釘住前先記下暫存根的 inode。判「暫存根是否被換掉」用 inode 而不是 pathname 字串：
+  #   pathname 相同但 inode 不同的情形確實存在——$ROOT 被 mv 走後以同名新目錄重建，
+  #   字串比對會誤認「沒變」而把新 inode 底下從未驗證的兩個目錄刪掉（實測 bash 與 dash 皆可重現）。
+  #   反過來，inode 相同而 pathname 不同也存在——TMPDIR=//foo 時 GNU readlink -f 正規化成 /foo、
+  #   pwd -P 保留 //foo，字串比對必然不等，合法用法被誤擋。inode 比對同時解掉這兩面。
+  inum "$ROOT" || { echo "無法取得暫存根 inode：$ROOT" >&2; exit 1; }
+  IPRE=$IN
   # 釘住暫存根目錄本身，之後所有碰檔案系統的動作（-L、-d、rm）都用「相對名」對這個已釘住的 cwd 做。
-  # 為什麼要釘：$ROOT 可以是 symlink（T v9 明文允許），而 symlink 可在驗證與 rm 之間被外部重新指向，
+  # 為什麼要釘：$ROOT 可以是 symlink（T 明文允許），而 symlink 可在驗證與 rm 之間被外部重新指向，
   # 使 rm 打到另一個 root 底下同名但「從未驗證」的目錄。cd 之後 cwd 綁定的是當時那個目錄的 inode，
   # 事後改 symlink 不會改變相對名的解析——窗口是關掉而不是縮小（重跑驗證只能縮小，關不掉）。
-  # 判定「格式」仍只看占位字面（見 chk），故 BLOCK 3 的迂迴寫法照樣擋得住：釘住只換掉「碰檔案系統的路徑」，不換判定依據。
+  # 判定「格式」仍只看占位字面（見 chk），故迂迴寫法照樣擋得住：釘住只換掉「碰檔案系統的路徑」，不換判定依據。
   # CDPATH= 顯式清零：cd 在 CDPATH 非空時可能跳到別處並把落腳路徑印到 stdout，不倚賴外層環境已清乾淨。
   CDPATH= cd -P -- "$ROOT" || { echo "無法進入暫存根：$ROOT" >&2; exit 1; }
+  # 釘住後再取一次 inode，這次問「已釘住的 cwd」（.）而不是再解析一次 $ROOT——
+  # 對 $ROOT 重新求值等於把「可被外部改掉的觀測」重新引回判定，那正是前一版的缺陷成因。
+  inum . || { echo "無法取得釘住後的 inode，停" >&2; exit 1; }
+  IPOST=$IN
+  # 同一性檢查：釘住的必須就是一開始看到的那個目錄。不是就零刪除中止。
+  # 這道擋的是「$ROOT 在守衛執行期間被換掉」本身——symlink 改指與同名重建都在射程內，
+  # 且與占位寫成 canonical 還是 symlink 字面無關（兩種形式都在檢查前就被擋下）。
+  if [ "$IPRE" != "$IPOST" ]; then
+    echo "暫存根在守衛執行期間被換掉（inode $IPRE -> $IPOST），零刪除中止" >&2; exit 1
+  fi
   # RB 必須在 cd 之後才取，而且要問「已釘住的 cwd」而不是再解析一次 $ROOT。
   # pwd -P 回的是當前 cwd 那個 inode 的真實路徑，不重走 $ROOT，故與 RA 同樣不受事後改指影響。
   # 若像舊版在 cd 之前用 readlink -f -- "$ROOT" 當可接受前綴：$ROOT 可在 readlink 與 cd 之間被改指（A→B），
@@ -210,11 +235,6 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
   esac
   case "$RB" in *"$NL"*) echo "暫存根真實路徑含換行，停" >&2; exit 1 ;; esac
   strip "$RB"; RB=$SS
-  # 改指偵測：第一次觀測到的真實路徑必須與釘住的那個相同。不等即中止，零刪除。
-  # 這道擋的是「$ROOT 在守衛執行期間被換掉」本身，與占位寫成 canonical 還是 symlink 字面無關。
-  if [ "$RPRE" != "$RB" ]; then
-    echo "暫存根在守衛執行期間被改指（$RPRE -> $RB），零刪除中止" >&2; exit 1
-  fi
   # 驗一個占位：$1 路徑、$2 角色代號（rev／co）、$3 占位序號（僅供訊息）。通過回 0 並把「相對名」留在 CRP。
   # 白名單：剝盡尾斜線後須恰為 <暫存根>/<該位合法名>。格式判定全走占位字面，不靠 readlink -f 的解析結果——
   # readlink -f 會把 <symlink>/.、<中間 symlink>/<合法名> 正規化成同根合規目錄，拿它當判定依據就是 BLOCK 3 的成因。
