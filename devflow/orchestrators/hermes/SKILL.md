@@ -132,6 +132,7 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 ```bash
 # (0) 刪本輪暫存目錄。第 7 步建的 $T（devflow-rev.??????）與 $D（devflow-co.??????）在此回收。
 # 輸入格式白名單（不逐元件追查 symlink）：占位剝盡尾斜線後須恰為 <暫存根>/<該位的合法名>——最後一段命中該位角色樣式、去掉最後一段的前綴字面等於暫存根、該路徑本身非 symlink。三項全中才算合法。
+# 先 cd -P 釘住暫存根，之後碰檔案系統的動作（-L、-d、rm）全用相對名：$ROOT 可以是 symlink，若拿完整路徑去刪，symlink 可在驗證與 rm 之間被重新指向，rm 就打到另一個 root 底下同名而「從未驗證」的目錄（實測 bash 與 dash 皆可重現）。cd 綁的是當時那個目錄的 inode，事後改 symlink 不影響相對名解析——窗口是關掉，不是縮小。
 # 為何走白名單不逐元件追查：readlink -f 會把 <symlink>/.、<symlink>/./、<中間 symlink>/<合法名> 都解析成同根下一個「合規的」目錄並刪掉它，而逐元件檢查須區分 <symlink>/. 與 <普通目錄>/.（兩者解析結果都合法），成本高且易誤擋合法邊界。占位本應由第 7 步原樣填入，迂迴寫法不是正常用法。
 # 行為收窄（刻意）：<合法名>/. 與 <合法名>/./ 即使是普通目錄也一律擋，因為最後一段是 . 不是合法名。<合法名>／<合法名>/／<合法名>/// 三種寫法仍可用——差一個 . 而已，別用會連尾斜線一起擋的粗判準。
 # 暫存根有兩個可接受的字面值：$ROOT 原值與其 readlink -f 結果（TMPDIR 指向 symlink 時兩者不同，都得接受，否則正常路徑會被誤擋）。兩者都要剝盡尾斜線：TMPDIR=/foo/ 時第 7 步產生的占位是 /foo//devflow-rev.xxxxxx，前綴為 /foo/，不剝就比不等。
@@ -185,8 +186,14 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
   esac
   RB=${RB%"$NL"}; strip "$RB"; RB=$SS
   [ -n "$RA" ] || { echo "暫存根為空，停" >&2; exit 1; }
-  # 驗一個占位：$1 路徑、$2 角色代號（rev／co）、$3 占位序號（僅供訊息）。通過回 0 並把要刪的路徑留在 CRP。
-  # 白名單：剝盡尾斜線後須恰為 <暫存根>/<該位合法名>。判定全走占位字面，不靠 readlink -f 的解析結果——
+  # 釘住暫存根目錄本身，之後所有碰檔案系統的動作（-L、-d、rm）都用「相對名」對這個已釘住的 cwd 做。
+  # 為什麼要釘：$ROOT 可以是 symlink（T v9 明文允許），而 symlink 可在驗證與 rm 之間被外部重新指向，
+  # 使 rm 打到另一個 root 底下同名但「從未驗證」的目錄。cd 之後 cwd 綁定的是當時那個目錄的 inode，
+  # 事後改 symlink 不會改變相對名的解析——窗口是關掉而不是縮小（重跑驗證只能縮小，關不掉）。
+  # 判定「格式」仍只看占位字面（見 chk），故 BLOCK 3 的迂迴寫法照樣擋得住：釘住只換掉「碰檔案系統的路徑」，不換判定依據。
+  CDPATH= cd -P -- "$ROOT" || { echo "無法進入暫存根：$ROOT" >&2; exit 1; }
+  # 驗一個占位：$1 路徑、$2 角色代號（rev／co）、$3 占位序號（僅供訊息）。通過回 0 並把「相對名」留在 CRP。
+  # 白名單：剝盡尾斜線後須恰為 <暫存根>/<該位合法名>。格式判定全走占位字面，不靠 readlink -f 的解析結果——
   # readlink -f 會把 <symlink>/.、<中間 symlink>/<合法名> 正規化成同根合規目錄，拿它當判定依據就是 BLOCK 3 的成因。
   # 角色樣式寫死在 case 的 pattern 位置、不經參數傳遞：pattern 位置不做 pathname expansion，cwd 內容與判定無關。
   chk() {
@@ -195,10 +202,11 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
     case "$CP" in *"$NL"*) echo "占位 $IDX 路徑含換行，停" >&2; return 1 ;; esac
     strip "$CP"; CPS=$SS
     # 最後一段須命中該位角色樣式。"."、".."、空字串都不命中，迂迴寫法在此一併被擋。
+    CPN=${CPS##*/}
     case "$ROLE" in
-      rev) case "${CPS##*/}" in devflow-rev.??????) : ;;
+      rev) case "$CPN" in devflow-rev.??????) : ;;
              *) echo "占位 $IDX 末段非該位合法名（須 devflow-rev.??????），停：$CP" >&2; return 1 ;; esac ;;
-      co)  case "${CPS##*/}" in devflow-co.??????) : ;;
+      co)  case "$CPN" in devflow-co.??????) : ;;
              *) echo "占位 $IDX 末段非該位合法名（須 devflow-co.??????），停：$CP" >&2; return 1 ;; esac ;;
       *) echo "占位 $IDX 角色代號有誤（只收 rev／co），停" >&2; return 1 ;;
     esac
@@ -210,10 +218,11 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
     if [ "$CPP" != "$RA" ] && [ "$CPP" != "$RB" ]; then
       echo "占位 $IDX 前綴非暫存根字面（須 $RA），停：$CP" >&2; return 1
     fi
+    # 以下改用相對名對已釘住的 cwd 判定，不再走 $CP／$CPS 那條會經 root symlink 重新解析的路徑。
     # 最終路徑本身仍須非 symlink（白名單擋的是迂迴寫法，直接填 symlink 名要靠這道）。
-    if [ -L "$CPS" ]; then echo "占位 $IDX 是 symlink，停：$CP" >&2; return 1; fi
-    if [ ! -d "$CPS" ]; then echo "占位 $IDX 不是現存目錄，停：$CP" >&2; return 1; fi
-    CRP=$CPS
+    if [ -L "$CPN" ]; then echo "占位 $IDX 是 symlink，停：$CP" >&2; return 1; fi
+    if [ ! -d "$CPN" ]; then echo "占位 $IDX 不是現存目錄，停：$CP" >&2; return 1; fi
+    CRP=$CPN
     return 0
   }
   # 第一段：只驗證，不刪。兩個都驗（不短路）好讓人一次看到全部問題。
@@ -223,7 +232,7 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
   # 相異性：角色樣式已使兩位不可能收到同一路徑，此檢查是第二道（樣式若日後放寬仍守得住），且明確拒絕而非靜默略過。
   if [ -n "$RP1" ] && [ "$RP1" = "$RP2" ]; then echo "兩占位指向同一目錄，停：$RP1" >&2; BAD=1; fi
   [ -z "$BAD" ] || { echo "有占位未通過驗證，零刪除中止" >&2; exit 1; }
-  # 第二段：全數通過才刪。
+  # 第二段：全數通過才刪。以相對名刪，對象即驗證時看到的那兩個目錄（cwd 已釘住），不受 root symlink 事後改指影響。
   RC=0
   rm -rf -- "$RP1" || { echo "刪除失敗：$RP1" >&2; RC=1; }
   rm -rf -- "$RP2" || { echo "刪除失敗：$RP2" >&2; RC=1; }
