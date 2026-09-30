@@ -234,22 +234,55 @@ def check_orchestrator(rep, target, conf):
     # 與 harness 的 kit-AC-17 是同一斷言、不同受檢對象：那邊驗**執行中的 kit 來源**，
     # 本項驗**安裝後的目標**。目標 ≠ kit 自身時兩者不重疊。
     root = target / "devflow"
+
+    # 根自身的判定**必須先於 is_dir()**：symlink 指到目錄時 is_dir() 也是 True，順序顛倒就
+    # 永遠落進下面的掃描分支。而 os.walk(followlinks=False) 的 followlinks 只管「遍歷中遇到的
+    # 子目錄要不要跟進去」，起點自身是 symlink 它照樣走得進去、也不會報——整棵被連過去的樹
+    # 會被當成 devflow/ 的內容，本項給出假 PASS（issue #247 缺陷 1）。
+    if root.is_symlink():
+        rep.item(FAIL, "AC-9-no-symlink-under-devflow",
+                 "devflow/ 自身是 symlink → %s（realpath %s）"
+                 % (os.readlink(str(root)), os.path.realpath(str(root))))
+        return
+
+    # **根缺席不算遍歷錯誤**：os.walk 對「起點就不存在／不是目錄」也會呼叫 onerror，把它算成
+    # incomplete scan 會讓「目標還沒安裝」被記成「掃描不完整」。缺席由 AC-8 的三項報，這裡
+    # 先判掉、根本不走 os.walk，onerror 因此只會收到**子樹**的失敗。
+    if not root.is_dir():
+        # 判定仍依字面（無 symlink → PASS）；devflow/ 缺席由 AC-8 的三項報，這裡只寫清楚
+        # 這個 PASS 是空掃出來的，免得輸出看起來像「目標沒問題」
+        rep.item(PASS, "AC-9-no-symlink-under-devflow",
+                 "devflow/ 不存在或不是目錄，沒有可掃的 symlink")
+        return
+
     links = []
-    for dirpath, dirnames, filenames in os.walk(str(root), followlinks=False):
+    scan_errors = []
+
+    def on_walk_error(error):
+        """os.walk 的預設行為是把 scandir 的 OSError 吞掉。
+
+        吞掉之後掃不進去的子樹靜靜消失，「沒掃到 symlink」和「沒有 symlink」就分不開——
+        本項會給出假 PASS（issue #247 缺陷 2）。收下來一律 FAIL：掃不完整就不能簽字。
+        """
+        scan_errors.append("%s（%s: %s）" % (error.filename if error.filename else root,
+                                            type(error).__name__, error.strerror or error))
+
+    for dirpath, dirnames, filenames in os.walk(str(root), onerror=on_walk_error,
+                                                followlinks=False):
         dirnames[:] = [d for d in dirnames if d != EXCLUDED_DIR]
         for name in dirnames + filenames:
             full = Path(dirpath) / name
             if not name.endswith(EXCLUDED_SUFFIX) and full.is_symlink():
                 links.append(str(full.relative_to(target)))
     if links:
+        # 掃到 symlink 就報 symlink：既有訊息逐字不動，也不摻 `incomplete scan:`——本項已經
+        # 是 FAIL，掃描是否完整改變不了判定，兩種註記混在一行只會讓人分不清哪個是原因。
         note = "devflow/ 下有 symlink：" + "、".join(sorted(links))
-    elif not root.is_dir():
-        # 判定仍依字面（無 symlink → PASS）；devflow/ 缺席由 AC-8 的三項報，這裡只寫清楚
-        # 這個 PASS 是空掃出來的，免得輸出看起來像「目標沒問題」
-        note = "devflow/ 不存在或不是目錄，沒有可掃的 symlink"
+    elif scan_errors:
+        note = "incomplete scan: " + "；".join(scan_errors)
     else:
         note = "devflow/ 下（排除路徑以外）無 symlink"
-    rep.item(FAIL if links else PASS, "AC-9-no-symlink-under-devflow", note)
+    rep.item(FAIL if (links or scan_errors) else PASS, "AC-9-no-symlink-under-devflow", note)
 
 
 # ── 執行 ─────────────────────────────────────────────────────────────
