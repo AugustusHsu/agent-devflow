@@ -245,9 +245,12 @@ def check_orchestrator(rep, target, conf):
                  % (os.readlink(str(root)), os.path.realpath(str(root))))
         return
 
-    # **根缺席不算遍歷錯誤**：os.walk 對「起點就不存在／不是目錄」也會呼叫 onerror，把它算成
-    # incomplete scan 會讓「目標還沒安裝」被記成「掃描不完整」。缺席由 AC-8 的三項報，這裡
-    # 先判掉、根本不走 os.walk，onerror 因此只會收到**子樹**的失敗。
+    # **初始即缺席的根不算遍歷錯誤**：os.walk 對「起點就不存在／不是目錄」也會呼叫 onerror，把
+    # 它算成 incomplete scan 會讓「目標還沒安裝」被記成「掃描不完整」。缺席由 AC-8 的三項報，
+    # 這裡先判掉、根本不走 os.walk。
+    # 邊界：這只排除**開始前**就缺席的根。根在 is_dir() 通過後、os.walk 的 scandir 之前才消失
+    # （被移走、unmount）時，onerror 仍會收到根自身——那時記成 incomplete scan 是對的：我們已經
+    # 承諾要掃這棵樹卻沒掃到，和「一開始就沒有樹可掃」不是同一件事。
     if not root.is_dir():
         # 判定仍依字面（無 symlink → PASS）；devflow/ 缺席由 AC-8 的三項報，這裡只寫清楚
         # 這個 PASS 是空掃出來的，免得輸出看起來像「目標沒問題」
@@ -274,15 +277,17 @@ def check_orchestrator(rep, target, conf):
             full = Path(dirpath) / name
             if not name.endswith(EXCLUDED_SUFFIX) and full.is_symlink():
                 links.append(str(full.relative_to(target)))
+    # 兩種發現各自獨立成段，不互相遮蔽：對 PASS/FAIL 而言兩者都只是「FAIL」，但對讀報告的人
+    # 不是——「掃到這幾個 symlink」和「有一塊根本沒掃到」是不同的處置。只印前者會讓人以為清單
+    # 已完整，據此修完就收工；沒掃到的那塊裡還有沒有 symlink，這份報告答不出來。
+    # note 裡的 \n 由 Report.item 統一縮排成多行。
+    parts = []
     if links:
-        # 掃到 symlink 就報 symlink：既有訊息逐字不動，也不摻 `incomplete scan:`——本項已經
-        # 是 FAIL，掃描是否完整改變不了判定，兩種註記混在一行只會讓人分不清哪個是原因。
-        note = "devflow/ 下有 symlink：" + "、".join(sorted(links))
-    elif scan_errors:
-        note = "incomplete scan: " + "；".join(scan_errors)
-    else:
-        note = "devflow/ 下（排除路徑以外）無 symlink"
-    rep.item(FAIL if (links or scan_errors) else PASS, "AC-9-no-symlink-under-devflow", note)
+        parts.append("devflow/ 下有 symlink：" + "、".join(sorted(links)))
+    if scan_errors:
+        parts.append("incomplete scan: " + "；".join(scan_errors))
+    note = "\n".join(parts) if parts else "devflow/ 下（排除路徑以外）無 symlink"
+    rep.item(FAIL if parts else PASS, "AC-9-no-symlink-under-devflow", note)
 
 
 # ── 執行 ─────────────────────────────────────────────────────────────
