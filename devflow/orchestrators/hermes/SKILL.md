@@ -131,10 +131,14 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 
 ```bash
 # (0) 刪本輪暫存目錄。第 7 步建的 $T（devflow-rev.??????）與 $D（devflow-co.??????）在此回收。
-# 兩段式，先驗完再刪：兩個占位全部通過（非空、非 symlink、可解析、父目錄＝暫存根、名稱＝該位的角色樣式、須為現存目錄、兩者相異）才進刪除；任一不合法 → 零刪除、rc 非 0。
+# 輸入格式白名單（不逐元件追查 symlink）：占位剝盡尾斜線後須恰為 <暫存根>/<該位的合法名>——最後一段命中該位角色樣式、去掉最後一段的前綴字面等於暫存根、該路徑本身非 symlink。三項全中才算合法。
+# 為何走白名單不逐元件追查：readlink -f 會把 <symlink>/.、<symlink>/./、<中間 symlink>/<合法名> 都解析成同根下一個「合規的」目錄並刪掉它，而逐元件檢查須區分 <symlink>/. 與 <普通目錄>/.（兩者解析結果都合法），成本高且易誤擋合法邊界。占位本應由第 7 步原樣填入，迂迴寫法不是正常用法。
+# 行為收窄（刻意）：<合法名>/. 與 <合法名>/./ 即使是普通目錄也一律擋，因為最後一段是 . 不是合法名。<合法名>／<合法名>/／<合法名>/// 三種寫法仍可用——差一個 . 而已，別用會連尾斜線一起擋的粗判準。
+# 暫存根有兩個可接受的字面值：$ROOT 原值與其 readlink -f 結果（TMPDIR 指向 symlink 時兩者不同，都得接受，否則正常路徑會被誤擋）。兩者都要剝盡尾斜線：TMPDIR=/foo/ 時第 7 步產生的占位是 /foo//devflow-rev.xxxxxx，前綴為 /foo/，不剝就比不等。
+# 兩段式，先驗完再刪：兩個占位全部通過（非空、不含換行、合白名單、非 symlink、須為現存目錄、兩者相異）才進刪除；任一不合法 → 零刪除、rc 非 0。
 # 「零刪除」的範圍限於驗證階段：驗證未全過就一個都不刪。進入刪除階段後兩個 rm 都會執行，其一失敗（例如權限）只使 rc 非 0，不會回滾另一個已刪的——刪除本身不是交易。
 # 角色樣式寫死在 case 的 pattern 位置、不經參數傳遞：樣式若當參數傳，呼叫點會做 pathname expansion，cwd 內有字面同形目錄（devflow-rev.******）時樣式會被換成該目錄名，不合法的短名就會被放行。
-# 尾斜線先剝盡才測 -L：[ -L "<link>/" ] 回假（尾斜線要求解析到目標），symlink 帶尾斜線會漏過 symlink 閘門，接著 readlink -f 解析到目標、目標被刪。
+# 尾斜線先剝盡才測 -L：[ -L "<link>/" ] 回假（尾斜線要求解析到目標），symlink 帶尾斜線會漏過 symlink 閘門。
 # 「已不存在就算成功」是缺陷不是寬容（#251）：占位 2 填成不存在的合法名時，舊版會照刪占位 1 再回 0，看起來成功、實際漏刪。
 # 角色綁位：占位 1 只收 devflow-rev.??????、占位 2 只收 devflow-co.??????，兩者對調即失敗。
 # 守衛本體在 /usr/bin/env -i 造的空環境裡由 /bin/bash 執行，內層 PATH 固定；占位以位置參數 $1／$2 傳入，不再內插進指令字串。
@@ -154,6 +158,7 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 # 不防的理由：植入它們需要先能在本 shell 內執行 code，而有該權限者可直接 rm -rf。
 # 環境變數注入（BASH_FUNC_*）不在此列——它不需執行 code，已由 /usr/bin/env -i 阻斷。
 # 本守衛也不防占位貼入時的 shell 求值（指令替換、glob 展開）——見上方既有註解。
+# 本守衛不逐元件追查 symlink，改以輸入格式白名單：占位須恰為 <暫存根>/<合法名>（可帶尾斜線）；含 . 或 .. 或多層或經中間 symlink 的寫法一律拒絕，不論解析結果是否合規。
 (
   /usr/bin/env -i \
     HOME="$HOME" TMPDIR="${TMPDIR:-}" PATH=/usr/bin:/bin \
@@ -161,40 +166,54 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
   set -u
   [ $# -eq 2 ] || { echo "須恰兩個占位路徑，停" >&2; exit 1; }
   NL=$(printf "\nx"); NL=${NL%x}
+  # 剝盡尾斜線。?*/ 要求「至少一字元＋斜線」才剝，故 "/" 剝不成空字串、"///" 剝到剩 "/" 就停。
+  # 用迴圈不用單次 ${x%/}：三重尾斜線單次剝完仍以 / 收尾，後續 -L 與前綴比對都會走偏。
+  strip() {
+    SS=$1
+    while :; do
+      case "$SS" in ?*/) SS=${SS%/} ;; *) break ;; esac
+    done
+  }
   ROOT="${TMPDIR:-$HOME/.cache}"
-  RR=$(readlink -f -- "$ROOT" && printf x) && RR=${RR%x} || RR=
-  case "$RR" in
+  # 暫存根的兩個可接受字面值：環境給的原值與其 readlink -f 結果（TMPDIR 指向 symlink 時兩者不同）。
+  # 兩者都剝盡尾斜線後才拿來比對：TMPDIR=/foo/ 時第 7 步的占位是 /foo//devflow-rev.xxxxxx，其前綴為 /foo/。
+  strip "$ROOT"; RA=$SS
+  RB=$(readlink -f -- "$ROOT" && printf x) && RB=${RB%x} || RB=
+  case "$RB" in
     "") echo "無法解析暫存根：$ROOT" >&2; exit 1 ;;
     *"$NL"*"$NL"*) echo "暫存根解析後路徑含換行，停" >&2; exit 1 ;;
   esac
-  RR=${RR%"$NL"}
-  # 驗一個占位：$1 路徑、$2 角色代號（rev／co）、$3 占位序號（僅供訊息）。通過回 0 並把解析結果留在 CRP。
-  # 角色樣式不經參數傳遞：樣式字面只出現在 case 的 pattern 位置（該位置不做路徑展開），
-  # 故 cwd 內有字面同形目錄（例如 devflow-rev.******）時也無從把樣式換掉。
+  RB=${RB%"$NL"}; strip "$RB"; RB=$SS
+  [ -n "$RA" ] || { echo "暫存根為空，停" >&2; exit 1; }
+  # 驗一個占位：$1 路徑、$2 角色代號（rev／co）、$3 占位序號（僅供訊息）。通過回 0 並把要刪的路徑留在 CRP。
+  # 白名單：剝盡尾斜線後須恰為 <暫存根>/<該位合法名>。判定全走占位字面，不靠 readlink -f 的解析結果——
+  # readlink -f 會把 <symlink>/.、<中間 symlink>/<合法名> 正規化成同根合規目錄，拿它當判定依據就是 BLOCK 3 的成因。
+  # 角色樣式寫死在 case 的 pattern 位置、不經參數傳遞：pattern 位置不做 pathname expansion，cwd 內容與判定無關。
   chk() {
     CP=$1; ROLE=$2; IDX=$3; CRP=
     if [ -z "$CP" ]; then echo "占位 $IDX 為空路徑，停" >&2; return 1; fi
-    case "$CP" in *"$NL"*) echo "占位 $IDX 原始路徑含換行，停" >&2; return 1 ;; esac
-    # 先剝盡尾斜線再測 -L：[ -L "<link>/" ] 會回假（尾斜線要求解析到目標），symlink 帶尾斜線就會漏過本閘門，
-    # 之後 readlink -f 解析到目標、目標被刪。剝到只剩 "/" 就停，不會剝成空字串。
-    CPS=$CP
-    while :; do
-      case "$CPS" in ?*/) CPS=${CPS%/} ;; *) break ;; esac
-    done
-    if [ -L "$CPS" ]; then echo "占位 $IDX 是 symlink，停：$CP" >&2; return 1; fi
-    CRP=$(readlink -f -- "$CPS" && printf x) || { echo "占位 $IDX 無法解析：$CP" >&2; CRP=; return 1; }
-    CRP=${CRP%x}
-    case "$CRP" in *"$NL"*"$NL"*) echo "占位 $IDX 解析後路徑含換行，停：$CP" >&2; CRP=; return 1 ;; esac
-    CRP=${CRP%"$NL"}
-    if [ "${CRP%/*}" != "$RR" ]; then echo "占位 $IDX 父目錄非本輪暫存根，停：$CP -> $CRP" >&2; CRP=; return 1; fi
+    case "$CP" in *"$NL"*) echo "占位 $IDX 路徑含換行，停" >&2; return 1 ;; esac
+    strip "$CP"; CPS=$SS
+    # 最後一段須命中該位角色樣式。"."、".."、空字串都不命中，迂迴寫法在此一併被擋。
     case "$ROLE" in
-      rev) case "${CRP##*/}" in devflow-rev.??????) : ;;
-             *) echo "占位 $IDX 名稱與該位角色不符（須 devflow-rev.??????），停：$CP -> $CRP" >&2; CRP=; return 1 ;; esac ;;
-      co)  case "${CRP##*/}" in devflow-co.??????) : ;;
-             *) echo "占位 $IDX 名稱與該位角色不符（須 devflow-co.??????），停：$CP -> $CRP" >&2; CRP=; return 1 ;; esac ;;
-      *) echo "占位 $IDX 角色代號有誤（只收 rev／co），停" >&2; CRP=; return 1 ;;
+      rev) case "${CPS##*/}" in devflow-rev.??????) : ;;
+             *) echo "占位 $IDX 末段非該位合法名（須 devflow-rev.??????），停：$CP" >&2; return 1 ;; esac ;;
+      co)  case "${CPS##*/}" in devflow-co.??????) : ;;
+             *) echo "占位 $IDX 末段非該位合法名（須 devflow-co.??????），停：$CP" >&2; return 1 ;; esac ;;
+      *) echo "占位 $IDX 角色代號有誤（只收 rev／co），停" >&2; return 1 ;;
     esac
-    if [ ! -d "$CRP" ]; then echo "占位 $IDX 不是現存目錄，停：$CP -> $CRP" >&2; CRP=; return 1; fi
+    # 去掉最後一段的前綴須字面等於暫存根。CPS 已剝盡尾斜線且末段非空，故 ${CPS%/*} 就是前綴；
+    # 前綴也要剝盡尾斜線：TMPDIR=/foo/ 時第 7 步的 mktemp -d "${TMPDIR:-…}/devflow-rev.XXXXXX"
+    # 產生的占位是 /foo//devflow-rev.xxxxxx，其 ${CPS%/*} 為 /foo/，不剝就與 /foo 比不等（實測會誤擋正常路徑）。
+    # 沒有斜線時（相對路徑如 devflow-rev.xxxxxx）${CPS%/*} 回原字串，與暫存根不等，一併被擋。
+    strip "${CPS%/*}"; CPP=$SS
+    if [ "$CPP" != "$RA" ] && [ "$CPP" != "$RB" ]; then
+      echo "占位 $IDX 前綴非暫存根字面（須 $RA），停：$CP" >&2; return 1
+    fi
+    # 最終路徑本身仍須非 symlink（白名單擋的是迂迴寫法，直接填 symlink 名要靠這道）。
+    if [ -L "$CPS" ]; then echo "占位 $IDX 是 symlink，停：$CP" >&2; return 1; fi
+    if [ ! -d "$CPS" ]; then echo "占位 $IDX 不是現存目錄，停：$CP" >&2; return 1; fi
+    CRP=$CPS
     return 0
   }
   # 第一段：只驗證，不刪。兩個都驗（不短路）好讓人一次看到全部問題。
