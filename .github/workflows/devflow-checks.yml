@@ -159,3 +159,16 @@ jobs:
           set -euo pipefail
           python3 --version
           python3 tests/install/harness.py
+
+      # install preflight（issue #196 的 AC-7～AC-9、接入由 issue #247）。受檢目標＝本 repo 自身
+      # （`.`）：kit 自己就是一份安裝完成的樹，AC-8 的四個路徑、AC-9 的 orchestrator symlink 與
+      # 「devflow/ 下無 symlink」在這裡都該成立。與 harness 的分工見 preflight.py 檔頭——
+      # harness 驗**安裝器行為**（/tmp 假專案），本支驗**某個目標 repo 的環境與安裝結果**。
+      # 同 harness：失敗是**內容問題**，狀態碼 1、check 變紅，所以用 `set -euo pipefail`、
+      # **不套「準備檢查器相依」的 EXIT 守衛**——那一步把任何非零收成 2＝「檢查器無法執行」，
+      # 會把內容問題也收成 2，等於把本項從關卡降成雜訊。本支自己把「無法執行」（缺 PyYAML、
+      # 引數不是目錄）留在 2（preflight.py:21），與內容違規的 1 分得開。
+      - name: install preflight
+        run: |
+          set -euo pipefail
+          python3 -B tests/install/preflight.py .
