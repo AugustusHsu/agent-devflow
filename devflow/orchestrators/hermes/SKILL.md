@@ -132,6 +132,9 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 ```bash
 # (0) 刪本輪暫存目錄。第 7 步建的 $T（devflow-rev.??????）與 $D（devflow-co.??????）在此回收。
 # 兩段式，先驗完再刪：兩個占位全部通過（非空、非 symlink、可解析、父目錄＝暫存根、名稱＝該位的角色樣式、須為現存目錄、兩者相異）才進刪除；任一不合法 → 零刪除、rc 非 0。
+# 「零刪除」的範圍限於驗證階段：驗證未全過就一個都不刪。進入刪除階段後兩個 rm 都會執行，其一失敗（例如權限）只使 rc 非 0，不會回滾另一個已刪的——刪除本身不是交易。
+# 角色樣式寫死在 case 的 pattern 位置、不經參數傳遞：樣式若當參數傳，呼叫點會做 pathname expansion，cwd 內有字面同形目錄（devflow-rev.******）時樣式會被換成該目錄名，不合法的短名就會被放行。
+# 尾斜線先剝盡才測 -L：[ -L "<link>/" ] 回假（尾斜線要求解析到目標），symlink 帶尾斜線會漏過 symlink 閘門，接著 readlink -f 解析到目標、目標被刪。
 # 「已不存在就算成功」是缺陷不是寬容（#251）：占位 2 填成不存在的合法名時，舊版會照刪占位 1 再回 0，看起來成功、實際漏刪。
 # 角色綁位：占位 1 只收 devflow-rev.??????、占位 2 只收 devflow-co.??????，兩者對調即失敗。
 # 守衛本體在 /usr/bin/env -i 造的空環境裡由 /bin/bash 執行，內層 PATH 固定；占位以位置參數 $1／$2 傳入，不再內插進指令字串。
@@ -165,28 +168,39 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
     *"$NL"*"$NL"*) echo "暫存根解析後路徑含換行，停" >&2; exit 1 ;;
   esac
   RR=${RR%"$NL"}
-  # 驗一個占位：$1 路徑、$2 該位的角色樣式、$3 占位序號（僅供訊息）。通過回 0 並把解析結果留在 CRP。
+  # 驗一個占位：$1 路徑、$2 角色代號（rev／co）、$3 占位序號（僅供訊息）。通過回 0 並把解析結果留在 CRP。
+  # 角色樣式不經參數傳遞：樣式字面只出現在 case 的 pattern 位置（該位置不做路徑展開），
+  # 故 cwd 內有字面同形目錄（例如 devflow-rev.******）時也無從把樣式換掉。
   chk() {
-    CP=$1; PAT=$2; IDX=$3; CRP=
+    CP=$1; ROLE=$2; IDX=$3; CRP=
     if [ -z "$CP" ]; then echo "占位 $IDX 為空路徑，停" >&2; return 1; fi
     case "$CP" in *"$NL"*) echo "占位 $IDX 原始路徑含換行，停" >&2; return 1 ;; esac
-    if [ -L "$CP" ]; then echo "占位 $IDX 是 symlink，停：$CP" >&2; return 1; fi
-    CRP=$(readlink -f -- "$CP" && printf x) || { echo "占位 $IDX 無法解析：$CP" >&2; CRP=; return 1; }
+    # 先剝盡尾斜線再測 -L：[ -L "<link>/" ] 會回假（尾斜線要求解析到目標），symlink 帶尾斜線就會漏過本閘門，
+    # 之後 readlink -f 解析到目標、目標被刪。剝到只剩 "/" 就停，不會剝成空字串。
+    CPS=$CP
+    while :; do
+      case "$CPS" in ?*/) CPS=${CPS%/} ;; *) break ;; esac
+    done
+    if [ -L "$CPS" ]; then echo "占位 $IDX 是 symlink，停：$CP" >&2; return 1; fi
+    CRP=$(readlink -f -- "$CPS" && printf x) || { echo "占位 $IDX 無法解析：$CP" >&2; CRP=; return 1; }
     CRP=${CRP%x}
     case "$CRP" in *"$NL"*"$NL"*) echo "占位 $IDX 解析後路徑含換行，停：$CP" >&2; CRP=; return 1 ;; esac
     CRP=${CRP%"$NL"}
     if [ "${CRP%/*}" != "$RR" ]; then echo "占位 $IDX 父目錄非本輪暫存根，停：$CP -> $CRP" >&2; CRP=; return 1; fi
-    case "${CRP##*/}" in
-      $PAT) : ;;
-      *) echo "占位 $IDX 名稱與該位角色不符（須 $PAT），停：$CP -> $CRP" >&2; CRP=; return 1 ;;
+    case "$ROLE" in
+      rev) case "${CRP##*/}" in devflow-rev.??????) : ;;
+             *) echo "占位 $IDX 名稱與該位角色不符（須 devflow-rev.??????），停：$CP -> $CRP" >&2; CRP=; return 1 ;; esac ;;
+      co)  case "${CRP##*/}" in devflow-co.??????) : ;;
+             *) echo "占位 $IDX 名稱與該位角色不符（須 devflow-co.??????），停：$CP -> $CRP" >&2; CRP=; return 1 ;; esac ;;
+      *) echo "占位 $IDX 角色代號有誤（只收 rev／co），停" >&2; CRP=; return 1 ;;
     esac
     if [ ! -d "$CRP" ]; then echo "占位 $IDX 不是現存目錄，停：$CP -> $CRP" >&2; CRP=; return 1; fi
     return 0
   }
   # 第一段：只驗證，不刪。兩個都驗（不短路）好讓人一次看到全部問題。
   BAD=; RP1=; RP2=
-  if chk "$1" devflow-rev.?????? 1; then RP1=$CRP; else BAD=1; fi
-  if chk "$2" devflow-co.?????? 2; then RP2=$CRP; else BAD=1; fi
+  if chk "$1" rev 1; then RP1=$CRP; else BAD=1; fi
+  if chk "$2" co 2; then RP2=$CRP; else BAD=1; fi
   # 相異性：角色樣式已使兩位不可能收到同一路徑，此檢查是第二道（樣式若日後放寬仍守得住），且明確拒絕而非靜默略過。
   if [ -n "$RP1" ] && [ "$RP1" = "$RP2" ]; then echo "兩占位指向同一目錄，停：$RP1" >&2; BAD=1; fi
   [ -z "$BAD" ] || { echo "有占位未通過驗證，零刪除中止" >&2; exit 1; }
