@@ -133,12 +133,12 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 ```bash
 # (0) 刪本輪暫存目錄。第 7 步建的 $T（devflow-rev.$TOKEN.??????）與 $D（devflow-co.$TOKEN.??????）在此回收。
 # 輸入格式白名單（不逐元件追查 symlink）：占位剝盡尾斜線後須恰為 <暫存根>/<該位的合法名>——最後一段命中該位角色樣式、去掉最後一段的前綴字面等於暫存根、該路徑本身非 symlink。三項全中才算合法。
-# 先持有暫存根的目錄 fd（exec 9<）再以 /proc/self/fd/9 釘住，之後碰檔案系統的動作（-L、-d、rm）全用相對名：$ROOT 可以是 symlink，若拿完整路徑去刪，symlink 可在驗證與 rm 之間被重新指向，rm 就打到另一個 root 底下同名而「從未驗證」的目錄（實測 bash 與 dash 皆可重現）。cd 綁的是當時那個目錄的 inode，事後改 symlink 不影響相對名解析——窗口是關掉，不是縮小。
+# 先以 cd -P 釘住暫存根（cwd 由核心持有該目錄的 inode 參照，#272），之後碰檔案系統的動作（-L、-d、rm）全用相對名：$ROOT 可以是 symlink，若拿完整路徑去刪，symlink 可在驗證與 rm 之間被重新指向，rm 就打到另一個 root 底下同名而「從未驗證」的目錄（實測 bash 與 dash 皆可重現）。cd 綁的是當時那個目錄的 inode，事後改 symlink 不影響相對名解析——窗口是關掉，不是縮小。
 # 為何走白名單不逐元件追查：readlink -f 會把 <symlink>/.、<symlink>/./、<中間 symlink>/<合法名> 都解析成同根下一個「合規的」目錄並刪掉它，而逐元件檢查須區分 <symlink>/. 與 <普通目錄>/.（兩者解析結果都合法），成本高且易誤擋合法邊界。占位本應由第 7 步原樣填入，迂迴寫法不是正常用法。
 # 行為收窄（刻意）：<合法名>/. 與 <合法名>/./ 即使是普通目錄也一律擋，因為最後一段是 . 不是合法名。<合法名>／<合法名>/／<合法名>/// 三種寫法仍可用——差一個 . 而已，別用會連尾斜線一起擋的粗判準。
 # 暫存根有兩個可接受的字面值：$ROOT 原值與「釘住後 pwd -P 給的真實路徑」（TMPDIR 指向 symlink 時兩者不同，都得接受，否則正常路徑會被誤擋）。兩者都要剝盡尾斜線：TMPDIR=/foo/ 時第 7 步產生的占位是 /foo//devflow-rev.$TOKEN.xxxxxx，前綴為 /foo/，不剝就比不等。
 # 後者務必在 cd 之後以 pwd -P 取，不可在 cd 之前用 readlink -f -- "$ROOT"：$ROOT 若在 readlink 與 cd 之間被改指（A→B），該值留著舊 root A 而 cwd 已是 B，指向 A 的占位會比對舊值通過驗證，-L／-d／rm 卻全打在 B，刪掉 B 底下從未驗證的目錄（實測 bash 與 dash 皆可重現）。pwd -P 問的是已釘住的 inode，不重走 $ROOT。
-# 「暫存根是否被換掉」用「持有的目錄 fd」與「此刻重新解析 $ROOT」兩個 inode 比對，不用 pathname 字串、也不用 cd 前後兩次路徑解析的 inode：同一性判定前後被推翻三次（canonical pathname 在 cd 前取→cd 前改指；pathname 字串→同名重建 inode 不同；inode 編號→rmdir 後核心立即重用同一 inode，ext4 實測三次皆重用），共通根因是每次 ls／readlink 都重新解析路徑、每次解析都是新的 TOCTOU 窗口，比對哪個屬性都只是把窗口推到下一個屬性。fd 在 open 當下綁定 inode 且只要不關就不放掉參照，新建目錄拿不到同一個 inode，這條路是結構性堵住的。/proc/self/fd 為 Linux 特有（守衛已依賴 GNU readlink -f、ls -di 等非 POSIX 行為，此依賴不新增負擔，但只保證在 Linux 成立）。
+# 「暫存根是否被換掉」用「釘住的 cwd」與「此刻重新解析 $ROOT」兩個 inode 比對，不用 pathname 字串、也不用 cd 前後兩次路徑解析的 inode：同一性判定前後被推翻三次（canonical pathname 在 cd 前取→cd 前改指；pathname 字串→同名重建 inode 不同；inode 編號→rmdir 後核心立即重用同一 inode，ext4 實測三次皆重用），共通根因是每次 ls／readlink 都重新解析路徑、每次解析都是新的 TOCTOU 窗口，比對哪個屬性都只是把窗口推到下一個屬性。cwd 在 cd 當下綁定 inode 且行程結束前不放掉參照，新建目錄拿不到同一個 inode，這條路是結構性堵住的（#272 受控對照：不持有 重用=Y ×3、持 cwd 重用=N ×3）。#253 原以 exec 9< 持有目錄 fd 達成同一效果，#272 改為 cwd：open(O_RDONLY) 需讀權限，mode 0311 的暫存根會被誤擋（N3），而 cd 只需 x 權限；且 cd 到 FIFO 立即失敗，不像 open 會掛住（N2）。/proc/self/cwd 為 Linux 特有（守衛已依賴 GNU readlink -f、ls -di 等非 POSIX 行為，此依賴不新增負擔，但只保證在 Linux 成立）。
 # 兩段式，先驗完再刪：兩個占位全部通過（非空、不含換行、合白名單、非 symlink、須為現存目錄、兩者相異）才進刪除；任一不合法 → 零刪除、rc 非 0。
 # 「零刪除」的範圍限於驗證階段：驗證未全過就一個都不刪。進入刪除階段後兩個 rm 都會執行，其一失敗（例如權限）只使 rc 非 0，不會回滾另一個已刪的——刪除本身不是交易。
 # 角色樣式寫死在 case 的 pattern 位置、不經參數傳遞：樣式若當參數傳，呼叫點會做 pathname expansion，cwd 內有字面同形目錄（devflow-rev.******）時樣式會被換成該目錄名，不合法的短名就會被放行。本輪 token 是唯一來自參數的樣式片段，故它在 pattern 位置必須加引號（devflow-rev."$TOKEN".??????）：加引號時其內容只當字面比對，不加引號時 TOKEN=* 會變成萬用樣式、同根下任何一輪的目錄全部放行——與上述同類的錯誤。
@@ -220,47 +220,48 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
       RABS=$CWD0/$ROOT
       ;;
   esac
-  # 持有暫存根的開啟檔案描述子，之後「釘住」與「同一性比對」都以這個 fd 為準。
-  # 為什麼是 fd 而不是再比對一個屬性：本守衛的同一性判定前後被推翻三次，每次都是「換一個屬性比對」——
+  # 以 cd -P 釘住暫存根，之後「同一性比對」與所有碰檔案系統的動作都以這個 cwd 為準。
+  # 為什麼是 cwd 而不是再比對一個屬性：本守衛的同一性判定前後被推翻三次，每次都是「換一個屬性比對」——
   #   canonical pathname（cd 前取）→ cd 前改指即用舊值比對通過；
   #   pathname 字串 → $ROOT 被 mv 走後同名重建，pathname 相同而目錄已換；
   #   inode 編號 → rmdir 後重建，核心立即重用剛釋放的 inode，編號相同而目錄已換（ext4 實測三次皆重用）。
   # 共通根因是 ls／readlink／test 每次都「重新解析路徑」，每次解析都是一個新的 TOCTOU 窗口，
-  # 所以比對哪個屬性都只是把窗口推到下一個屬性上。fd 不同：它在 open 當下就綁定了那個 inode，
-  # 之後不再經過路徑解析，且只要 fd 還開著，核心就不會釋放該 inode——
-  # inode 重用這條路是被「結構性」堵住的，不是靠比對某個易變屬性（受控對照：不持 fd 重用=Y ×3、持 fd 重用=N ×3）。
-  # fd 只在本行程有效，故 exec 必須在這個內層 shell 執行（守衛本體整段就是內層 shell）。
-  # fd 全程不關：關掉就放掉 inode 參照，刪除期間又會有重用空間。行程結束時自然回收。
-  exec 9< "$ROOT" || { echo "無法開啟暫存根：$ROOT" >&2; exit 1; }
-  # 釘住的對象是 fd 綁的那個 inode，不是 $ROOT 這個路徑。
-  # 這裡刻意不寫 cd -P -- "$ROOT"：那會讓 cd 再解析一次 $ROOT，等於把剛避開的 TOCTOU 窗口重新開回來
-  #（fd 指向 A、cd 卻可能落在 B）。/proc/self/fd/9 恆指向 fd 綁定的 inode，兩者必為同一個。
+  # 所以比對哪個屬性都只是把窗口推到下一個屬性上。cwd 不同：cd 當下就綁定了那個 inode，
+  # 之後不再經過路徑解析，且行程存活期間核心持有 cwd 的參照、不會釋放該 inode——
+  # inode 重用這條路是被「結構性」堵住的，不是靠比對某個易變屬性（#272 受控對照：不持有 重用=Y ×3、持 cwd 重用=N ×3）。
+  # #253 原以 exec 9< "$ROOT" 持有目錄 fd 達成同一效果（受控對照：持 fd 重用=N ×3），#272 改為 cwd，理由有二：
+  #   open(O_RDONLY) 需要讀權限，mode 0311（只可穿越）的暫存根會被誤擋（N3，實測 main rc=1 殘留=2）；cd 只需 x 權限。
+  #   $ROOT 為 FIFO 時 open 會阻塞到有寫端為止、守衛掛住（N2，實測 timeout 3 → rc=124）；cd 到非目錄立即失敗。
+  # cwd 只在本行程有效，故 cd 必須在這個內層 shell 執行（守衛本體整段就是內層 shell），且之後不再 cd 到別處。
+  # 釘住的對象是 cd 當下 $ROOT 解析到的那個 inode；這是整段守衛唯一一次解析 $ROOT 來「落腳」，
+  # 之後的同一性檢查再解析一次 $ROOT 只是拿來與釘住的 inode 比對，不據以落腳。
   # 釘住之後所有碰檔案系統的動作（-L、-d、rm）都用「相對名」對這個 cwd 做：
   #   $ROOT 可以是 symlink（T 明文允許），事後改指不會改變相對名的解析——窗口是關掉而不是縮小。
   # 判定「格式」仍只看占位字面（見 chk），故迂迴寫法照樣擋得住：釘住只換掉「碰檔案系統的路徑」，不換判定依據。
   # CDPATH= 顯式清零：cd 在 CDPATH 非空時可能跳到別處並把落腳路徑印到 stdout，不倚賴外層環境已清乾淨。
-  # /proc/self/fd 是 Linux 特有。本守衛已依賴 GNU readlink -f 與 ls -di 等非 POSIX 行為，
+  # -- 使 $ROOT 以 - 開頭時不被當成選項。
+  CDPATH= cd -P -- "$ROOT" || { echo "無法進入暫存根：$ROOT" >&2; exit 1; }
+  # 兩個 inode：IPIN＝釘住的 cwd（經 /proc/self/cwd 取，不經任何路徑解析）、IPATH＝此刻重新解析 $ROOT 得到的。
+  # /proc/self/cwd 是 Linux 特有。本守衛已依賴 GNU readlink -f 與 ls -di 等非 POSIX 行為，
   # 這不是新增的可攜性負擔，但明載於此：本守衛只保證在 Linux 上成立。
-  CDPATH= cd -P /proc/self/fd/9 || { echo "無法進入暫存根（fd）：$ROOT" >&2; exit 1; }
-  # 三個 inode：IFD＝fd 綁的、ICWD＝釘住後的 cwd、IPATH＝此刻重新解析 $ROOT 得到的。
-  inum /proc/self/fd/9/. || { echo "無法取得暫存根 inode（fd）：$ROOT" >&2; exit 1; }
-  IFD=$IN
+  inum /proc/self/cwd/. || { echo "無法取得暫存根 inode（cwd）：$ROOT" >&2; exit 1; }
+  IPIN=$IN
   inum . || { echo "無法取得釘住後的 inode，停" >&2; exit 1; }
   ICWD=$IN
-  # 自我檢查：cd 必須真的落在 fd 綁的那個目錄上。由建構保證，不等表示前提已經不成立。
-  if [ "$IFD" != "$ICWD" ]; then
-    echo "釘住的目錄與暫存根 fd 不一致（$IFD vs $ICWD），零刪除中止" >&2; exit 1
+  # 自我檢查：/proc/self/cwd 與相對名 . 必須是同一個 inode。由核心保證，不等表示 /proc 不可信或前提已經不成立。
+  if [ "$IPIN" != "$ICWD" ]; then
+    echo "釘住的目錄與 /proc/self/cwd 不一致（$IPIN vs $ICWD），零刪除中止" >&2; exit 1
   fi
-  # 同一性檢查：$ROOT 這個路徑此刻仍須指向 fd 綁的那個目錄。
+  # 同一性檢查：$ROOT 這個路徑此刻仍須指向釘住的那個目錄。
   # 被換掉的三種形式都在這裡落網，且都不依賴 inode 編號沒被重用：
-  #   rmdir／mv 後同名重建 → 路徑指向新目錄，fd 仍握著舊的，兩者必不同（持 fd 使新目錄拿不到舊 inode）；
-  #   symlink 改指 → 路徑解析到新目標，fd 仍是舊目標；
-  #   根被刪除且未重建 → ls 取不到 inode，inum 失敗，同樣中止（readlink /proc/self/fd/9 會帶 (deleted) 尾綴）。
-  # 反過來，未被換掉時 IPATH 必等於 IFD，$ROOT 為 symlink 時 ls -dLi 取的是目標 inode，故不誤擋。
+  #   rmdir／mv 後同名重建 → 路徑指向新目錄，cwd 仍握著舊的，兩者必不同（持 cwd 使新目錄拿不到舊 inode）；
+  #   symlink 改指 → 路徑解析到新目標，cwd 仍是舊目標；
+  #   根被刪除且未重建 → ls 取不到 inode，inum 失敗，同樣中止（readlink /proc/self/cwd 會帶 (deleted) 尾綴）。
+  # 反過來，未被換掉時 IPATH 必等於 IPIN，$ROOT 為 symlink 時 ls -dLi 取的是目標 inode，故不誤擋。
   inum "$RABS" || { echo "暫存根在守衛執行期間消失，零刪除中止：$ROOT" >&2; exit 1; }
   IPATH=$IN
-  if [ "$IFD" != "$IPATH" ]; then
-    echo "暫存根在守衛執行期間被換掉（fd inode $IFD、路徑此刻指向 inode $IPATH），零刪除中止" >&2; exit 1
+  if [ "$IPIN" != "$IPATH" ]; then
+    echo "暫存根在守衛執行期間被換掉（釘住 inode $IPIN、路徑此刻指向 inode $IPATH），零刪除中止" >&2; exit 1
   fi
   # RB 必須在 cd 之後才取，而且要問「已釘住的 cwd」而不是再解析一次 $ROOT。
   # pwd -P 回的是當前 cwd 那個 inode 的真實路徑，不重走 $ROOT，故與 RA 同樣不受事後改指影響。
