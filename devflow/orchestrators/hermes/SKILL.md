@@ -87,8 +87,9 @@ fresh context、異廠、丟棄式 checkout（`coders/codex.md` 「審查用法�
 
 ```bash
 mkdir -p -m 700 -- "${TMPDIR:-$HOME/.cache}"
-T=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-rev.XXXXXX")   # 本輪專用暫存目錄；`TMPDIR` 未設時落在 `$HOME/.cache`，不落 /tmp 本身（`TMPDIR` 指向 /tmp 時須先改設）；第 10 步 (0) 刪
-D=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-co.XXXXXX")    # 丟棄式 checkout，同上不落 /tmp 本身；第 10 步 (0) 刪
+TOKEN=<issue>r<round>          # 本輪 token，例：255r1；僅 [A-Za-z0-9]，由派工者填；嵌進下兩行的目錄名，第 10 步 (0) 以它核對「這兩個目錄屬本輪」
+T=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-rev.$TOKEN.XXXXXX")   # 本輪專用暫存目錄；`TMPDIR` 未設時落在 `$HOME/.cache`，不落 /tmp 本身（`TMPDIR` 指向 /tmp 時須先改設）；第 10 步 (0) 刪
+D=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-co.$TOKEN.XXXXXX")    # 丟棄式 checkout，同上不落 /tmp 本身；第 10 步 (0) 刪
 git clone --shared <repo> "$D" && git -C "$D" checkout <head sha>
 env TMPDIR="$T" codex exec -C "$D" --sandbox workspace-write -m <model> -c model_reasoning_effort=<level> \
   -c approval_policy="never" -c sandbox_workspace_write.exclude_slash_tmp=true \
@@ -127,26 +128,28 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 
 ### 10. 收尾（`C1`～`C4`、`F4`）
 
-`C1` 七步之前先執行 (0) 刪本輪暫存目錄——第 7 步建的 `$T`、`$D` 在此回收（`R12` 「隨暫存目錄丟棄」）。`$T`／`$D` 不跨段保留，路徑由執行者填入，**填錯就是 `rm -rf` 打在別處**，故刪除前逐一驗證：
+`C1` 七步之前先執行 (0) 刪本輪暫存目錄——第 7 步建的 `$T`、`$D` 在此回收（`R12` 「隨暫存目錄丟棄」）。`$T`／`$D` 不跨段保留，兩個路徑與第 7 步的 `$TOKEN` 由執行者填入，**填錯就是 `rm -rf` 打在別處**，故刪除前逐一驗證（token 嵌在目錄名裡，故另一輪的目錄會因 token 不符被擋）：
 
 ```bash
-# (0) 刪本輪暫存目錄。第 7 步建的 $T（devflow-rev.??????）與 $D（devflow-co.??????）在此回收。
+# (0) 刪本輪暫存目錄。第 7 步建的 $T（devflow-rev.$TOKEN.??????）與 $D（devflow-co.$TOKEN.??????）在此回收。
 # 輸入格式白名單（不逐元件追查 symlink）：占位剝盡尾斜線後須恰為 <暫存根>/<該位的合法名>——最後一段命中該位角色樣式、去掉最後一段的前綴字面等於暫存根、該路徑本身非 symlink。三項全中才算合法。
 # 先持有暫存根的目錄 fd（exec 9<）再以 /proc/self/fd/9 釘住，之後碰檔案系統的動作（-L、-d、rm）全用相對名：$ROOT 可以是 symlink，若拿完整路徑去刪，symlink 可在驗證與 rm 之間被重新指向，rm 就打到另一個 root 底下同名而「從未驗證」的目錄（實測 bash 與 dash 皆可重現）。cd 綁的是當時那個目錄的 inode，事後改 symlink 不影響相對名解析——窗口是關掉，不是縮小。
 # 為何走白名單不逐元件追查：readlink -f 會把 <symlink>/.、<symlink>/./、<中間 symlink>/<合法名> 都解析成同根下一個「合規的」目錄並刪掉它，而逐元件檢查須區分 <symlink>/. 與 <普通目錄>/.（兩者解析結果都合法），成本高且易誤擋合法邊界。占位本應由第 7 步原樣填入，迂迴寫法不是正常用法。
 # 行為收窄（刻意）：<合法名>/. 與 <合法名>/./ 即使是普通目錄也一律擋，因為最後一段是 . 不是合法名。<合法名>／<合法名>/／<合法名>/// 三種寫法仍可用——差一個 . 而已，別用會連尾斜線一起擋的粗判準。
-# 暫存根有兩個可接受的字面值：$ROOT 原值與「釘住後 pwd -P 給的真實路徑」（TMPDIR 指向 symlink 時兩者不同，都得接受，否則正常路徑會被誤擋）。兩者都要剝盡尾斜線：TMPDIR=/foo/ 時第 7 步產生的占位是 /foo//devflow-rev.xxxxxx，前綴為 /foo/，不剝就比不等。
+# 暫存根有兩個可接受的字面值：$ROOT 原值與「釘住後 pwd -P 給的真實路徑」（TMPDIR 指向 symlink 時兩者不同，都得接受，否則正常路徑會被誤擋）。兩者都要剝盡尾斜線：TMPDIR=/foo/ 時第 7 步產生的占位是 /foo//devflow-rev.$TOKEN.xxxxxx，前綴為 /foo/，不剝就比不等。
 # 後者務必在 cd 之後以 pwd -P 取，不可在 cd 之前用 readlink -f -- "$ROOT"：$ROOT 若在 readlink 與 cd 之間被改指（A→B），該值留著舊 root A 而 cwd 已是 B，指向 A 的占位會比對舊值通過驗證，-L／-d／rm 卻全打在 B，刪掉 B 底下從未驗證的目錄（實測 bash 與 dash 皆可重現）。pwd -P 問的是已釘住的 inode，不重走 $ROOT。
 # 「暫存根是否被換掉」用「持有的目錄 fd」與「此刻重新解析 $ROOT」兩個 inode 比對，不用 pathname 字串、也不用 cd 前後兩次路徑解析的 inode：同一性判定前後被推翻三次（canonical pathname 在 cd 前取→cd 前改指；pathname 字串→同名重建 inode 不同；inode 編號→rmdir 後核心立即重用同一 inode，ext4 實測三次皆重用），共通根因是每次 ls／readlink 都重新解析路徑、每次解析都是新的 TOCTOU 窗口，比對哪個屬性都只是把窗口推到下一個屬性。fd 在 open 當下綁定 inode 且只要不關就不放掉參照，新建目錄拿不到同一個 inode，這條路是結構性堵住的。/proc/self/fd 為 Linux 特有（守衛已依賴 GNU readlink -f、ls -di 等非 POSIX 行為，此依賴不新增負擔，但只保證在 Linux 成立）。
 # 兩段式，先驗完再刪：兩個占位全部通過（非空、不含換行、合白名單、非 symlink、須為現存目錄、兩者相異）才進刪除；任一不合法 → 零刪除、rc 非 0。
 # 「零刪除」的範圍限於驗證階段：驗證未全過就一個都不刪。進入刪除階段後兩個 rm 都會執行，其一失敗（例如權限）只使 rc 非 0，不會回滾另一個已刪的——刪除本身不是交易。
-# 角色樣式寫死在 case 的 pattern 位置、不經參數傳遞：樣式若當參數傳，呼叫點會做 pathname expansion，cwd 內有字面同形目錄（devflow-rev.******）時樣式會被換成該目錄名，不合法的短名就會被放行。
+# 角色樣式寫死在 case 的 pattern 位置、不經參數傳遞：樣式若當參數傳，呼叫點會做 pathname expansion，cwd 內有字面同形目錄（devflow-rev.******）時樣式會被換成該目錄名，不合法的短名就會被放行。本輪 token 是唯一來自參數的樣式片段，故它在 pattern 位置必須加引號（devflow-rev."$TOKEN".??????）：加引號時其內容只當字面比對，不加引號時 TOKEN=* 會變成萬用樣式、同根下任何一輪的目錄全部放行——與上述同類的錯誤。
 # 尾斜線先剝盡才測 -L：[ -L "<link>/" ] 回假（尾斜線要求解析到目標），symlink 帶尾斜線會漏過 symlink 閘門。
 # 「已不存在就算成功」是缺陷不是寬容（#251）：占位 2 填成不存在的合法名時，舊版會照刪占位 1 再回 0，看起來成功、實際漏刪。
-# 角色綁位：占位 1 只收 devflow-rev.??????、占位 2 只收 devflow-co.??????，兩者對調即失敗。
-# 守衛本體在 /usr/bin/env -i 造的空環境裡由 /bin/bash 執行，內層 PATH 固定；占位以位置參數 $1／$2 傳入，不再內插進指令字串。
+# 角色綁位：占位 1 只收 devflow-rev.$TOKEN.??????、占位 2 只收 devflow-co.$TOKEN.??????，兩者對調即失敗。
+# 守衛本體在 /usr/bin/env -i 造的空環境裡由 /bin/bash 執行，內層 PATH 固定；占位與本輪 token 以位置參數 $1／$2／$3 傳入，不再內插進指令字串。
 # 不加 command 前綴：BASH_FUNC_command%% 注入會穿透 command 前綴（實測），直接寫 /usr/bin/env 才擋得住。
-# 只辨角色樣式不辨輪次：同根下若有另一輪的 devflow-rev.??????／devflow-co.??????，填錯照樣會刪（跨輪身分核對需第 7 步的持久記錄，由 #255 承接）。
+# 跨輪核對靠目錄名裡的 token（#255）：第 7 步把本輪 token 嵌進兩個目錄名，守衛以第三個位置參數收到同一個 token 並當成角色樣式的一部分，故同根下另一輪的 devflow-rev.<別的 token>.??????／devflow-co.<別的 token>.?????? 不命中樣式、一律被擋。正面核對，不需任何持久記錄。
+# token 先驗字元集（非空且僅 [A-Za-z0-9]）再當 pattern 用，順序不可反：未驗就用時 TOKEN=* 會變萬用樣式（見上一條角色樣式的註解），而限死 [A-Za-z0-9] 也使 token 不可能夾帶斜線、點或 glob 字元去撐出額外的路徑層級。
+# token 填錯的假陽性（刻意接受）：填成別輪或打錯字時，本輪的合法目錄不命中樣式 → rc 非 0、兩個目錄都存活、清不掉，須改對 token 再跑。方向安全（不誤刪），代價是漏刪要人回頭處理。
 # 占位務必加引號（未加時含 glob 的路徑會展開，實測會多刪同根下別輪的目錄）。
 # 占位在雙引號內：路徑含 $、反引號、雙引號、反斜線時須先跳脫——指令替換會在任何判定之前執行（實測含 $(…) 的路徑會執行該指令，守衛擋得住刪除、擋不住執行）。
 # 反測本守衛時勿用 busybox sh：它以內建 applet 執行 rm，PATH 前置的 rm 攔截器完全不生效（實測 shim 零呼叫、目標真的被刪）；bash 與 dash 才會走 PATH。
@@ -168,7 +171,14 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
     HOME="$HOME" TMPDIR="${TMPDIR:-}" PATH=/usr/bin:/bin \
     /bin/bash --noprofile --norc -c '
   set -u
-  [ $# -eq 2 ] || { echo "須恰兩個占位路徑，停" >&2; exit 1; }
+  [ $# -eq 3 ] || { echo "須恰兩個占位路徑＋本輪 token，停" >&2; exit 1; }
+  # 本輪 token（第 7 步嵌進兩個目錄名的那一個）。字元集先驗、後用：它接著要進 case 的 pattern 位置，
+  # 未驗就用時 TOKEN=* 會被當成萬用樣式、同根下每一輪的目錄都命中（放行一切）；限死非空且僅 [A-Za-z0-9]
+  # 也使它不可能夾帶 /、. 或 glob 字元去改變樣式的結構。這道檢查在任何刪除之前，故不合格即零刪除。
+  TOKEN=$3
+  case "$TOKEN" in
+    "" | *[!A-Za-z0-9]*) echo "本輪 token 須非空且僅含 A-Za-z0-9，停：$TOKEN" >&2; exit 1 ;;
+  esac
   NL=$(printf "\nx"); NL=${NL%x}
   # 剝盡尾斜線。?*/ 要求「至少一字元＋斜線」才剝，故 "/" 剝不成空字串、"///" 剝到剩 "/" 就停。
   # 用迴圈不用單次 ${x%/}：三重尾斜線單次剝完仍以 / 收尾，後續 -L 與前綴比對都會走偏。
@@ -180,7 +190,7 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
   }
   ROOT="${TMPDIR:-$HOME/.cache}"
   # 暫存根有兩個可接受的字面值：RA＝環境給的 $ROOT 原值（可能本身是 symlink），RB＝釘住後那個 inode 的真實路徑。
-  # 兩者都剝盡尾斜線後才拿來比對：TMPDIR=/foo/ 時第 7 步的占位是 /foo//devflow-rev.xxxxxx，其前綴為 /foo/。
+  # 兩者都剝盡尾斜線後才拿來比對：TMPDIR=/foo/ 時第 7 步的占位是 /foo//devflow-rev.$TOKEN.xxxxxx，其前綴為 /foo/。
   # RA 在 cd 之前取沒有問題：它是字面值，不經任何解析，外部改指不會改變它。
   strip "$ROOT"; RA=$SS
   [ -n "$RA" ] || { echo "暫存根為空，停" >&2; exit 1; }
@@ -270,6 +280,8 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
   # 白名單：剝盡尾斜線後須恰為 <暫存根>/<該位合法名>。格式判定全走占位字面，不靠 readlink -f 的解析結果——
   # readlink -f 會把 <symlink>/.、<中間 symlink>/<合法名> 正規化成同根合規目錄，拿它當判定依據就是 BLOCK 3 的成因。
   # 角色樣式寫死在 case 的 pattern 位置、不經參數傳遞：pattern 位置不做 pathname expansion，cwd 內容與判定無關。
+  # 唯一的例外是本輪 token，它必須來自參數（第 7 步才知道值）；在 pattern 位置加引號使其只當字面比對，
+  # 不加引號時 TOKEN=* 會變萬用樣式、把同根下每一輪的目錄都放行，且字元集已在上面先驗過。
   chk() {
     CP=$1; ROLE=$2; IDX=$3; CRP=
     if [ -z "$CP" ]; then echo "占位 $IDX 為空路徑，停" >&2; return 1; fi
@@ -278,16 +290,16 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
     # 最後一段須命中該位角色樣式。"."、".."、空字串都不命中，迂迴寫法在此一併被擋。
     CPN=${CPS##*/}
     case "$ROLE" in
-      rev) case "$CPN" in devflow-rev.??????) : ;;
-             *) echo "占位 $IDX 末段非該位合法名（須 devflow-rev.??????），停：$CP" >&2; return 1 ;; esac ;;
-      co)  case "$CPN" in devflow-co.??????) : ;;
-             *) echo "占位 $IDX 末段非該位合法名（須 devflow-co.??????），停：$CP" >&2; return 1 ;; esac ;;
+      rev) case "$CPN" in devflow-rev."$TOKEN".??????) : ;;
+             *) echo "占位 $IDX 末段非該位合法名（須 devflow-rev.$TOKEN.??????），停：$CP" >&2; return 1 ;; esac ;;
+      co)  case "$CPN" in devflow-co."$TOKEN".??????) : ;;
+             *) echo "占位 $IDX 末段非該位合法名（須 devflow-co.$TOKEN.??????），停：$CP" >&2; return 1 ;; esac ;;
       *) echo "占位 $IDX 角色代號有誤（只收 rev／co），停" >&2; return 1 ;;
     esac
     # 去掉最後一段的前綴須字面等於暫存根。CPS 已剝盡尾斜線且末段非空，故 ${CPS%/*} 就是前綴；
-    # 前綴也要剝盡尾斜線：TMPDIR=/foo/ 時第 7 步的 mktemp -d "${TMPDIR:-…}/devflow-rev.XXXXXX"
-    # 產生的占位是 /foo//devflow-rev.xxxxxx，其 ${CPS%/*} 為 /foo/，不剝就與 /foo 比不等（實測會誤擋正常路徑）。
-    # 沒有斜線時（相對路徑如 devflow-rev.xxxxxx）${CPS%/*} 回原字串，與暫存根不等，一併被擋。
+    # 前綴也要剝盡尾斜線：TMPDIR=/foo/ 時第 7 步的 mktemp -d "${TMPDIR:-…}/devflow-rev.$TOKEN.XXXXXX"
+    # 產生的占位是 /foo//devflow-rev.$TOKEN.xxxxxx，其 ${CPS%/*} 為 /foo/，不剝就與 /foo 比不等（實測會誤擋正常路徑）。
+    # 沒有斜線時（相對路徑如 devflow-rev.$TOKEN.xxxxxx）${CPS%/*} 回原字串，與暫存根不等，一併被擋。
     strip "${CPS%/*}"; CPP=$SS
     if [ "$CPP" != "$RA" ] && [ "$CPP" != "$RB" ]; then
       echo "占位 $IDX 前綴非暫存根字面（須 $RA），停：$CP" >&2; return 1
@@ -311,7 +323,7 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
   rm -rf -- "$RP1" || { echo "刪除失敗：$RP1" >&2; RC=1; }
   rm -rf -- "$RP2" || { echo "刪除失敗：$RP2" >&2; RC=1; }
   exit $RC
-' _ "<第 7 步的 $T>" "<第 7 步的 $D>"
+' _ "<第 7 步的 $T>" "<第 7 步的 $D>" "<第 7 步的 $TOKEN>"
 )
 ```
 
