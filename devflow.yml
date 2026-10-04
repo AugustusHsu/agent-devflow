@@ -44,3 +44,10 @@ merge: human
 docs:
   site: mkdocs         # none | mkdocs
   versioning: mike     # none | mike
+
+# 自主度（WORKFLOW.md I8～I11）。獨立於 stage——ST4 明文「stage 不是權限開關」。
+#   manual    機械類與方向類阻擋項都問人；人按合併（未設時的預設）
+#   assisted  機械類由執行位自決；方向類由協調位技術判斷，改 scope／改 AC 要驗什麼才問人；人按合併
+#   auto      方向類也由協調位自決；合併依 M2（須有機械 guard 能驗 M1，否則視同 human）
+# 不可下放的事項不受本鍵影響（I11）：bypass 授權、L6、G2／G4 的唯一處置、S5。
+autonomy: assisted
