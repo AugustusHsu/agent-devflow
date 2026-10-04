@@ -108,10 +108,16 @@ env TMPDIR="$T" codex exec -C "$D" --sandbox workspace-write -m <model> -c model
 
 #### launch: agent
 
-派給協調平台上的具名實例（`devflow.yml` 的 `seats.reviewer.instance`），由轉播器喚醒；暫存目錄與 checkout 仍由派工者依上節的 `mktemp -d` 建好，路徑寫進審查稿的材料段。
+派給協調平台上的具名實例（`devflow.yml` 的 `seats.reviewer.instance`），由轉播器喚醒；暫存目錄與 checkout 由派工者照下方 block 建好，審查稿寫進 `$T`，兩個路徑寫進審查稿的材料段。
 
 ```bash
-~/.hermes/scripts/devflow_relay.py <thread> --file <審查稿> -p <instance> --issue <N> --fresh --pace quiet [-m <model> --provider <name>]
+mkdir -p -m 700 -- "${TMPDIR:-$HOME/.cache}"
+TOKEN=<issue>r<round>          # 同 cli：僅 [A-Za-z0-9]，由派工者填；第 10 步 (0) 以它核對目錄屬本輪
+T=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-rev.$TOKEN.XXXXXX")   # 本輪專用暫存目錄；審查稿、diff patch 等派工者產物一律寫在這裡；第 10 步 (0) 刪
+D=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-co.$TOKEN.XXXXXX")    # 丟棄式 checkout；第 10 步 (0) 刪
+git clone --shared <repo> "$D" && git -C "$D" checkout <head sha>
+env TMPDIR="$T" ~/.hermes/scripts/devflow_relay.py <thread> --file "$T/prompt.md" \
+  -p <instance> --issue <N> --fresh --pace quiet [-m <model> --provider <name>]
 ```
 
 - `--fresh` **不可省**：`R1` 要求每輪 fresh context。具名實例的 session 會累積，省掉即延續前一輪審查位的 context——前輪的判斷與取捨跟著進本輪，`R1` 要的「每輪全新」就不成立。
@@ -119,6 +125,8 @@ env TMPDIR="$T" codex exec -C "$D" --sandbox workspace-write -m <model> -c model
 - 沙箱依 `R12`：可寫根收斂到該 checkout ＋本輪暫存目錄；平台設不起可寫根收斂時，該輪改**唯讀**執行，並於派工 prompt 與 verdict 留言**雙方註明**（`R12`）——「不得自行升權」不因此豁免。
 - `-m`／`--provider` 只在換模型時帶。verdict 的受測環境依 `R10` 寫**當次實際使用的**模型與 provider，不得照抄 `devflow.yml` 的預設綁定。
 - 配額撞到時的形狀與判定依第七節（依 `launch` 分支）。
+- `env TMPDIR="$T"` **不可省**：被喚醒的實例預設把暫存寫進自己 profile 的 scratch，不符第 10 步 (0) 的命名約定，守衛刪不到。`TMPDIR` 經 `env` 傳給 `hermes … chat --oneshot`（含經轉播器）被遵從——受測環境依 `R10` 記在 #251 AC-4，**引用前自行複驗**。
+- `R12` 第 3 項的 `git diff` 另存位置是 `$T`，不是派工者自己的 scratch。`$D` 與 `$T` 同在第 10 步 (0) 被 `rm -rf`——verdict 之後 checkout 已不在是 `R12`「隨暫存目錄丟棄」要的行為，不是缺陷。
 
 #### prompt（兩段共用）
 
