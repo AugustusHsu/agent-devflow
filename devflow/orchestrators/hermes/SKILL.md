@@ -440,7 +440,7 @@ gh issue view <N> --json state --jq .state
   - `launch: agent`（具名實例經轉播器）`📝`：**本形狀僅一次觀測**（`coders/codex.md` 「配額中斷」格的第四次觀測，前三次皆為 `cli`），故以下寫的是**本次觀測為**何，不是所有 agent 配額中斷必然如此——引用前查該格狀態（`R9`）。本次觀測：事件流末則為 `{"type":"result","exit_code":1,…,"error":"HTTP 429: The usage limit has been reached"}`，**不是** `turn.failed`；恢復點載於 `Limit resets at 01:55 (in 33h 42m)`——**相對時距**（`in Nh Nm`），不是絕對時刻，換算基準是讀到該行的時間，隔夜再算就偏。⚠️ 轉播器把這個結束投影為「❌ 結束」而**非錯誤**，**派工者須讀事件流原文判定，不可只看投影**——只看投影會把配額耗盡當成正常收工，接著去等一個永遠不會出現的 verdict。來源：`#272`（2026-10-02，`hermes -p dfrev chat --oneshot --format stream-json`）https://github.com/AugustusHsu/agent-devflow/issues/272#issuecomment-5947986219 。
   - 兩者共同：配額綁**帳號**（訊息把恢復點與購買額度都指向 `chatgpt.com/codex/settings/usage`，非 thread 層級），換 context、換 thread、換具名實例都不會繞過。**日上限與週上限只有在訊息明示類型時才分類**，不以時距長短或恢復點落在哪一天推斷——時距與限制週期之間沒有觀測支持的對應關係：
     - `cli` 形狀（`try again at …`）：給**時刻**者為日上限（實例 `12:36 AM`）、給**日期**者為週上限（實例 `Sep 26th, 2026 8:02 PM`），依 `coders/codex.md` 「配額中斷」格既有觀測（`📝`）。
-    - `agent` 形狀（`Limit resets at HH:MM (in Nh Nm)`）：只給相對時距，**不含**週期資訊 ⇒ 一律視為**不確定**，不先套日／週處置。處置：查帳號頁面 `chatgpt.com/codex/settings/usage` 確認是日上限還是週上限後再依下列分支；查不到或讀不準就停下交人（issue 留言寫明被擋的位、訊息原文與恢復點，依 `L3`）。`#272` 當次即是人在帳號頁面確認後才改派。
+    - `agent` 形狀（`Limit resets at HH:MM (in Nh Nm)`）：只給相對時距，**不含**週期資訊 ⇒ 一律視為**不確定**，不先套日／週處置。處置：查帳號頁面 `chatgpt.com/codex/settings/usage` 確認是日上限還是週上限後再依下列分支；查不到或讀不準就停下交人（issue 留言寫明被擋的位、訊息原文與恢復點，依 `L3`）。
     - 確認為日上限：依第六節 sleep 到恢復再派。
     - 確認為週上限：不等。審查位依 `R2` 改派，分兩種情形——
       - `devflow.yml` 的 `seats.reviewer.fallback` **已宣告**：只用該組（`R2` 要求事先定下，不臨場選）。
