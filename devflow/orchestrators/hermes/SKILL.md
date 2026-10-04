@@ -25,6 +25,8 @@ metadata:
 
 固定序 1→10，不跳步；`ST0` 直推 main，不走此流程。任一步失敗依第 7 節（F）處置，不自行 bypass（`F3`）。
 
+**投影**：`launch: agent` 的填充者（`devflow.yml` 的 `seats.<位>.launch`）每一個工具呼叫，由協調平台的轉播機制即時投影到該單的對話通道——這是 runtime 行為，不依賴填充者自行播報，也不是誰要遵守的義務。派工者因此**不必**為進度另發訊息；需要人看見的只有里程碑：PR 開出、每輪 verdict、合併、收尾。投影的載體與格式（通道、訊息形狀、節奏）屬通道層 `channels/`（K4／`#258` 建），不在本檔規定。`launch: cli` 無投影——進度只落在 stdout 與 issue 留言，派工者要讓人看見什麼就得自己寫。
+
 ### 1. 開 issue（`L1`、`I4`）
 
 - 用 `templates/issue.md`，欄位依 `L1`；G 填 commit sha，T 填規格 commit sha 或（治理／流程類）T 留言 id。
@@ -83,7 +85,13 @@ gh pr create --base main --head <N>-<slug> --title "<gitmoji> <type>(<scope>): <
 
 ### 7. 派審（`R1`、`R2`、`R4`、`R6`）
 
-fresh context、異廠、丟棄式 checkout（`coders/codex.md` 「審查用法（`R1`）」格，引用前查狀態 `R9`）：
+**派審者依綁定**：`devflow.yml` 的 `seats.manager` 已綁定時由 manager 派（`seats/manager.md`），未綁定時該職責歸協調位，由協調位自派——不寫死為協調位。
+
+兩種 `launch` 共通的前置：fresh context、與實作位異廠——`R2` 的異廠是**建議**不是必需：只有一家可用時用同廠的全新 context，同廠時另建議所用模型與實作位（`seats.implementer.model`）不同、同廠只有一個堪用模型時全新 context 即滿足（`seats/reviewer.md` 的例外分支同此）、丟棄式 checkout（`R12`；`coders/codex.md` 「審查用法（`R1`）」格，引用前查狀態 `R9`）。**本輪專用暫存目錄與丟棄式 checkout 一律由派工者建立**，建好後把兩個路徑寫進 prompt 的材料段；**審查位不自建**，收到的就是派工者建好的路徑（第 10 步 (0) 的守衛即以此為前提）。
+
+以下依被派那一位的 `launch` 分支（`devflow.yml` 的 `seats.reviewer.launch`，省略時為 `cli`）。
+
+#### launch: cli
 
 ```bash
 mkdir -p -m 700 -- "${TMPDIR:-$HOME/.cache}"
@@ -97,6 +105,22 @@ env TMPDIR="$T" codex exec -C "$D" --sandbox workspace-write -m <model> -c model
   -c 'sandbox_workspace_write.writable_roots=["'"$D"'","'"$T"'"]' \
   -o "$T/verdict.md" - < "$T/prompt.txt"
 ```
+
+#### launch: agent
+
+派給協調平台上的具名實例（`devflow.yml` 的 `seats.reviewer.instance`），由轉播器喚醒；暫存目錄與 checkout 仍由派工者依上節的 `mktemp -d` 建好，路徑寫進審查稿的材料段。
+
+```bash
+~/.hermes/scripts/devflow_relay.py <thread> --file <審查稿> -p <instance> --issue <N> --fresh --pace quiet [-m <model> --provider <name>]
+```
+
+- `--fresh` **不可省**：`R1` 要求每輪 fresh context。具名實例的 session 會累積，省掉即延續前一輪審查位的 context——前輪的判斷與取捨跟著進本輪，`R1` 要的「每輪全新」就不成立。
+- `--pace quiet`：避免審查位的投影與派工者自己的投影在同一通道交錯（第二節「投影」）。
+- 沙箱依 `R12`：可寫根收斂到該 checkout ＋本輪暫存目錄；平台設不起可寫根收斂時，該輪改**唯讀**執行，並於派工 prompt 與 verdict 留言**雙方註明**（`R12`）——「不得自行升權」不因此豁免。
+- `-m`／`--provider` 只在換模型時帶。verdict 的受測環境依 `R10` 寫**當次實際使用的**模型與 provider，不得照抄 `devflow.yml` 的預設綁定。
+- 配額撞到時的形狀與判定依第七節（依 `launch` 分支）。
+
+#### prompt（兩段共用）
 
 prompt 以 `templates/review-prompt.md` 為底，另加：
 - 「已判通過不重審」清單（前輪 PASS 且該處 diff 未變）與「逐條要判」清單。
@@ -129,6 +153,8 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 ### 10. 收尾（`C1`～`C4`、`F4`）
 
 `C1` 七步之前先執行 (0) 刪本輪暫存目錄——第 7 步建的 `$T`、`$D` 在此回收（`R12` 「隨暫存目錄丟棄」）。`$T`／`$D` 不跨段保留，兩個路徑與第 7 步的 `$TOKEN` 由執行者填入，**填錯就是 `rm -rf` 打在別處**，故刪除前逐一驗證（token 嵌在目錄名裡，故另一輪的目錄會因 token 不符被擋）：
+
+本守衛的前提是**第 7 步**共用前置的「暫存與 checkout 由派工者建立」——兩個占位的值即該步 `mktemp -d` 的輸出，名稱因此必然帶 `devflow-rev.$TOKEN.`／`devflow-co.$TOKEN.` 前綴並落在同一個暫存根下。`launch` 不改變這個前提：`launch: agent` 的填充者在被喚醒時收到的是派工者建好的路徑，**不自建暫存根**（它自己的快取路徑不符本守衛的命名約定，若讓它自建，這整段檢查就無從套用）。
 
 ```bash
 # (0) 刪本輪暫存目錄。第 7 步建的 $T（devflow-rev.$TOKEN.??????）與 $D（devflow-co.$TOKEN.??????）在此回收。
@@ -391,10 +417,10 @@ gh issue view <N> --json state --jq .state
 
 ## 六、無人值守
 
-- 事先授權由人寫進 issue 或授權檔，逐項列：`APPROVE` 即按合併（仍依 `M1`、`M2`）、`R13` 升人與擱置的處置方式（第三節）、停止條件、Codex 額度撞到時 sleep 到恢復再派（日上限；週上限依第七節「Codex 配額耗盡」）。
+- 事先授權由人寫進 issue 或授權檔。授權的範圍與不可下放的事項依 `I8`～`I11`（`autonomy` 三檔的差異、機械／方向類的判準、一律由人處置的四項），不在本檔另行列舉；授權檔只需逐項指明本單取哪一檔、停止條件，以及 Codex 額度撞到時 sleep 到恢復再派（日上限；週上限依第七節依 `launch` 分支的配額條文）。
 - 每步邊界（派工、撞 turns、verdict、合併、收尾）在 issue 留狀態（`L3`）。
 - forge 回錯或逾時依 `F3`。
-- Codex 額度撞到（日上限）：一次性 cron 於恢復時間重派＋watchdog 每 3 分鐘看 verdict 檔；週上限依第七節「Codex 配額耗盡」。Claude 額度撞到：Hermes 自身靜默，人隔日看 issue 接手。
+- Codex 額度撞到（日上限）：一次性 cron 於恢復時間重派＋watchdog 每 3 分鐘看 verdict 檔；週上限依第七節依 `launch` 分支的配額條文。Claude 額度撞到：Hermes 自身靜默，人隔日看 issue 接手。
 - 全用 Hermes 追蹤的 background 進程（`terminal(background=true)` ＋ `systemd-run --scope`）；不用 `setsid`——會無聲死亡且無法讀回。
 
 ## 七、已知陷阱
@@ -409,4 +435,14 @@ gh issue view <N> --json state --jq .state
 - `ps | grep 'claude -p'` 對多行 prompt 不可靠——用 `pstree -p`／`/proc/<pid>/cmdline`（`hermes.md` 「派工（`L2`）」格）。
 - `systemctl --user is-active <unit>.scope` 對從未存在的 unit 也回 `inactive`——先證 scope 曾 `active`（`hermes.md` 「中斷交接」格）。
 - 對照表引用行號會漂移——引用格用「面向」名稱，不用 `file:line`。
-- Codex 配額耗盡：`codex exec` 以 `turn.failed` 收尾（稍早一則同句 `error`，其在事件流中的位置隨觀測而異）、exit 1、`-o` 不寫，恢復點只在訊息的 `try again at …`（觀測次數、`error` 的位置與受測環境以 `coders/codex.md` 「配額中斷」格為準，`📝`）。配額綁帳號（訊息把恢復點與購買額度都指向 `chatgpt.com/codex/settings/usage`，非 thread 層級），換 context 不會繞過。日上限（訊息給當日時刻）：依第六節 sleep 到恢復再派；週上限（訊息帶日期）：不等——審查位依 `R2` 處理；被擋的是 implementer 位時 `R2` 不適用，改派異廠或依第六節等恢復。
+- Codex 配額耗盡：形狀依派工時的 `launch` 分支（第 7 步），判定錯一邊就會把「配額擋住」誤讀成「審完了」。
+  - `launch: cli`（`codex exec`）：以 `turn.failed` 收尾（稍早一則同句 `error`，其在事件流中的位置隨觀測而異）、exit 1、`-o` 不寫，恢復點只在訊息的 `try again at …`（觀測次數、`error` 的位置與受測環境以 `coders/codex.md` 「配額中斷」格為準，`📝`）。
+  - `launch: agent`（具名實例經轉播器）`📝`：**本形狀僅一次觀測**（`coders/codex.md` 「配額中斷」格的第四次觀測，前三次皆為 `cli`），故以下寫的是**本次觀測為**何，不是所有 agent 配額中斷必然如此——引用前查該格狀態（`R9`）。本次觀測：事件流末則為 `{"type":"result","exit_code":1,…,"error":"HTTP 429: The usage limit has been reached"}`，**不是** `turn.failed`；恢復點載於 `Limit resets at 01:55 (in 33h 42m)`——**相對時距**（`in Nh Nm`），不是絕對時刻，換算基準是讀到該行的時間，隔夜再算就偏。⚠️ 轉播器把這個結束投影為「❌ 結束」而**非錯誤**，**派工者須讀事件流原文判定，不可只看投影**——只看投影會把配額耗盡當成正常收工，接著去等一個永遠不會出現的 verdict。來源：`#272`（2026-10-02，`hermes -p dfrev chat --oneshot --format stream-json`）https://github.com/AugustusHsu/agent-devflow/issues/272#issuecomment-5947986219 。
+  - 兩者共同：配額綁**帳號**（訊息把恢復點與購買額度都指向 `chatgpt.com/codex/settings/usage`，非 thread 層級），換 context、換 thread、換具名實例都不會繞過。**日上限與週上限只有在訊息明示類型時才分類**，不以時距長短或恢復點落在哪一天推斷——時距與限制週期之間沒有觀測支持的對應關係：
+    - `cli` 形狀（`try again at …`）：給**時刻**者為日上限（實例 `12:36 AM`）、給**日期**者為週上限（實例 `Sep 26th, 2026 8:02 PM`），依 `coders/codex.md` 「配額中斷」格既有觀測（`📝`）。
+    - `agent` 形狀（`Limit resets at HH:MM (in Nh Nm)`）：只給相對時距，**不含**週期資訊 ⇒ 一律視為**不確定**，不先套日／週處置。處置：查帳號頁面 `chatgpt.com/codex/settings/usage` 確認是日上限還是週上限後再依下列分支；查不到或讀不準就停下交人（issue 留言寫明被擋的位、訊息原文與恢復點，依 `L3`）。
+    - 確認為日上限：依第六節 sleep 到恢復再派。
+    - 確認為週上限：不等。審查位依 `R2` 改派，分兩種情形——
+      - `devflow.yml` 的 `seats.reviewer.fallback` **已宣告**：只用該組（`R2` 要求事先定下，不臨場選）。
+      - `fallback` **省略**（它是選填）：**不得**臨場新增 `devflow.yml` 未宣告的綁定候選（`I7`）——停下交人裁示（在 issue 留言寫明被擋的位、恢復點與候選方案，依 `L3`），或依第六節等恢復；兩者都不是自己挑一個工具就派。
+      - 被擋的是實作位時 `R2` 不適用（它只管審查位），改派異廠或依第六節等恢復。
