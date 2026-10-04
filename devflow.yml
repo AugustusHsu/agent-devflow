@@ -1,9 +1,13 @@
 # agent-devflow 專案設定。本 repo 自己也是第一個消費者。
-# 只有 forge 與 seats（各職位的綁定）是自變數；其餘（PR/MR、CLI、入口檔、skills 目錄、派工方式）
+# 只有 `forge`、`channel`、`autonomy` 與 `seats`（各職位的綁定）是自變數；其餘（PR/MR、CLI、入口檔、skills 目錄、派工方式）
 # 都是衍生值，由 devflow/ 下的對照表產生，不在這裡寫（唯一例外：implementer_filler 投影，見下）。
 # 規則本體：devflow/WORKFLOW.md。
 
 forge: github          # github | gitlab | gitea（gitea 全表 ⬜，無實例前不可選）
+
+# 對話通道（WORKFLOW.md 第 13 節 CH1～CH2；對照表 devflow/channels/）。值域：none | telegram；省略＝none。
+# 本 repo 實況：Telegram forum group（四個 seat 各一 bot），通道只承載通知、投影與提問，forge 是唯一權威（CH1）。
+channel: telegram
 
 # 職位綁定。職位名以 devflow/seats/ 的五個檔為準，不新增。每個職位一個 filler（填充者）：
 # 工具名（對照表在 devflow/coders/、orchestrators/）或 human（由人填）。
