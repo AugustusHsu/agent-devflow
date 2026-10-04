@@ -323,6 +323,154 @@ def _ac5():
     check("AC-5 thread 值不同不命中", not marker.has_topic(F1, "777"))
 
 
+# ── AC-5（第 2 輪補）BLOCK-1：反向查找遇 T>1 必須停下，不得續掃 ─────────────
+# 審查位 R1 第 1 輪的 BLOCK-1 反例：第 1 輪的 has_topic 遇 T>1 只印 stderr 後回 False，
+# 於是 issue_meta 的迴圈**繼續掃**，在下一張合法的 issue 命中同一 thread 並回傳它
+# ——匯出檔會掛到別人的單。T 的裁定表對 T>1／A>1 明寫「exit 非 0 ＋ stderr 印 INVALID
+# 與命中的所有行，停下不動 forge」，反向查找同樣適用。
+BLOCK1_ROWS = [
+    {"number": 285, "title": "invalid",
+     "body": "<!-- devflow:topic thread=2620 -->\n<!-- devflow:topic thread=999 -->\n",
+     "state": "OPEN"},
+    {"number": 286, "title": "other",
+     "body": "<!-- devflow:topic thread=2620 -->\n", "state": "OPEN"},
+]
+
+
+def _issue_meta_with(rows, *, has_topic=None):
+    """在假 gh 輸出與（可選）替換過的 has_topic 下跑 issue_meta，回傳值或擲出的例外。
+
+    `has_topic` 參數供鑑別力子測試注入「回 False 的舊版」——證明本測試真的在
+    檢驗停下的行為，而不是任何實作都會過。
+    """
+    def fake_run(cmd, *a, **kw):
+        assert cmd[:2] == ["gh", "issue"], cmd
+        return subprocess.CompletedProcess(cmd, 0, json.dumps(rows), "")
+
+    with tempfile.TemporaryDirectory() as td:
+        orig_cache, orig_run = archive.CACHE, subprocess.run
+        orig_has = marker.has_topic
+        archive.CACHE = Path(td) / "nonexistent.json"
+        subprocess.run = fake_run
+        if has_topic is not None:
+            marker.has_topic = has_topic          # issue_meta 經 `_marker.has_topic` 取用
+        try:
+            return ("return", archive.issue_meta("2620"))
+        except marker.InvalidMarker as e:
+            return ("raise", e)
+        finally:
+            archive.CACHE, subprocess.run = orig_cache, orig_run
+            marker.has_topic = orig_has
+
+
+@case("AC-5／BLOCK-1 issue_meta 遇 T>1：raise INVALID，不得回傳 ('286', …)")
+def _ac5_block1():
+    kind, val = _issue_meta_with(BLOCK1_ROWS)
+    check("AC-5／BLOCK-1 issue_meta 擲出 InvalidMarker（而非回傳值）",
+          kind == "raise", f"實得 {kind}={val!r}")
+    check("AC-5／BLOCK-1 不得回傳另一張 issue（#286）",
+          not (kind == "return" and val and val[0] == "286"),
+          f"實得 {val!r}")
+    check("AC-5／BLOCK-1 不得退回 fallback `thread 2620`",
+          not (kind == "return" and val == (None, "thread 2620", None)),
+          f"實得 {val!r}")
+    if kind == "raise":
+        msg = str(val)
+        check("AC-5／BLOCK-1 例外訊息含 INVALID 字樣", "INVALID" in msg, msg)
+        check("AC-5／BLOCK-1 例外訊息含兩行命中的字面",
+              all(ln in msg for ln in F3_LINES), msg)
+        check("AC-5／BLOCK-1 例外是模組共用的那個類別（與正向同一個）",
+              type(val) is marker.InvalidMarker
+              and isinstance(val, marker.InvalidMarker), f"{type(val)!r}")
+
+    # 鑑別力：換成第 1 輪「回 False」的 has_topic，本子測試必須 FAIL
+    def has_topic_returning_false(body, thread):
+        ids, lines = marker.find_topic(body)
+        if len(lines) > 1:
+            return False                      # ← 第 1 輪被 BLOCK-1 擋下的那個行為
+        return bool(ids) and ids[0] == str(thread)
+
+    kind2, val2 = _issue_meta_with(BLOCK1_ROWS, has_topic=has_topic_returning_false)
+    check("AC-5／BLOCK-1 鑑別力：換回『回 False』版後 issue_meta 不再 raise",
+          kind2 == "return", f"實得 {kind2}={val2!r}")
+    check("AC-5／BLOCK-1 鑑別力：且確實回傳了別人的單 #286（＝BLOCK-1 的危害）",
+          kind2 == "return" and val2 == ("286", "other", "OPEN"),
+          f"實得 {val2!r} —— 若此處不成立，上面的斷言就不是在檢驗停下的行為")
+
+    # 對照組：沒有 INVALID 的單時，issue_meta 照常回傳（修法不是一律 raise）
+    kind3, val3 = _issue_meta_with([BLOCK1_ROWS[1]])
+    check("AC-5／BLOCK-1 對照組：全部合法時照常回傳 #286",
+          (kind3, val3) == ("return", ("286", "other", "OPEN")),
+          f"實得 {kind3}={val3!r}")
+
+    # has_archived 同型處置
+    dup_arch = ("<!-- devflow:archived thread=2620 file=a.md -->\n"
+                "<!-- devflow:archived thread=999 file=b.md -->\n")
+    try:
+        marker.has_archived(dup_arch, "2620")
+    except marker.InvalidMarker as e:
+        check("AC-5／BLOCK-1 has_archived 遇 A>1 亦 raise 同一類別",
+              "INVALID" in str(e) and "file=a.md" in str(e) and "file=b.md" in str(e),
+              str(e))
+    else:
+        check("AC-5／BLOCK-1 has_archived 遇 A>1 亦 raise", False, "回傳了布林值")
+
+
+@case("AC-5／BLOCK-1 archive 腳本層：stderr 印 INVALID 與命中行、exit 非 0、無匯出檔")
+def _ac5_block1_script():
+    import sqlite3
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        home, bin_ = td / "home", td / "bin"
+        bin_.mkdir()
+        # 假 gh：#285 為 T=2 的 INVALID 單，#286 合法且持有同一 thread（審查位的反例）
+        fake = bin_ / "gh"
+        fake.write_text("#!/usr/bin/env python3\n"
+                        "import json, sys\n"
+                        "a = sys.argv[1:]\n"
+                        "if a[:2] == ['issue', 'list']:\n"
+                        f"    print(json.dumps({BLOCK1_ROWS!r}))\n"
+                        "    sys.exit(0)\n"
+                        "print('unexpected gh call', file=sys.stderr)\n"
+                        "sys.exit(8)\n")
+        fake.chmod(0o755)
+        # 種一則訊息，否則 _export 在 collect() 就 SystemExit，走不到 issue_meta
+        now = time.time()
+        for prof in ("dfcoord", "dfmgr", "dfrev", "dfimpl"):
+            d = home / ".hermes" / "profiles" / prof
+            d.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(d / "state.db")
+            conn.execute("create table sessions (id TEXT PRIMARY KEY, source TEXT, "
+                         "thread_id TEXT, started_at REAL)")
+            conn.execute("create table messages (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                         "session_id TEXT, role TEXT, content TEXT, tool_name TEXT, "
+                         "tool_calls TEXT, timestamp REAL, display_kind TEXT)")
+            if prof == "dfcoord":
+                conn.execute("insert into sessions (id,source,thread_id,started_at) "
+                             "values ('s1','telegram','2620',?)", (now,))
+                conn.execute("insert into messages (session_id,role,content,timestamp) "
+                             "values ('s1','user','誘餌訊息',?)", (now,))
+            conn.commit()
+            conn.close()
+        env = dict(os.environ, HOME=str(home),
+                   PATH=f"{bin_}:{os.environ.get('PATH', '')}",
+                   PYTHONDONTWRITEBYTECODE="1")
+        r = subprocess.run([PY, str(SCRIPTS / "devflow_archive.py"), "export", "2620"],
+                           capture_output=True, text=True, env=env,
+                           stdin=subprocess.DEVNULL, timeout=120)
+        detail = f"exit={r.returncode}\n--- stdout ---\n{r.stdout}--- stderr ---\n{r.stderr}"
+        check("AC-5／BLOCK-1 腳本 exit 非 0", r.returncode != 0, detail)
+        check("AC-5／BLOCK-1 stderr 含 INVALID 字樣", "INVALID" in r.stderr, detail)
+        check("AC-5／BLOCK-1 stderr 含兩行命中的字面",
+              all(ln in r.stderr for ln in F3_LINES), detail)
+        check("AC-5／BLOCK-1 stderr 不只是 traceback（有可讀的 INVALID 行）",
+              "Traceback" not in r.stderr, detail)
+        check("AC-5／BLOCK-1 未產生匯出檔（不得掛到 #286）",
+              not list((home / ".hermes" / "archives").rglob("*")),
+              detail + f"\n殘留：{[str(p) for p in (home / '.hermes' / 'archives').rglob('*')]}")
+
+
 # ── AC-6 grammar 單一來源且逐字相同 ────────────────────────────────────────
 def _readme_patterns() -> list[str]:
     """從 channels/README.md 抽出 `grep -cE '…'` 的 pattern 字串（條文側的權威字面）。"""
@@ -429,14 +577,25 @@ def _ac7():
                   marker.read_topic(body) is None
                   and not marker.has_topic(body, "2620"))
         else:
-            raised = False
+            # T>1：正向與反向都必須 raise 同一個類別（`BLOCK-1` 的處置）。
+            # 反向回 False 會讓呼叫端的掃描繼續，第 1 輪即因此被擋下。
+            raised_fwd = raised_rev = raised_rev2 = False
             try:
                 marker.read_topic(body)
             except marker.InvalidMarker:
-                raised = True
-            check(f"AC-7 {label}：T>1 時正向 raise、反向不主張擁有該 thread",
-                  raised and not marker.has_topic(body, "2620")
-                  and not marker.has_topic(body, "999"))
+                raised_fwd = True
+            try:
+                marker.has_topic(body, "2620")
+            except marker.InvalidMarker:
+                raised_rev = True
+            try:
+                marker.has_topic(body, "999")
+            except marker.InvalidMarker:
+                raised_rev2 = True
+            check(f"AC-7 {label}：T>1 時正向與反向皆 raise（反向不得回 False 續掃）",
+                  raised_fwd and raised_rev and raised_rev2,
+                  f"正向 raise={raised_fwd} 反向(2620) raise={raised_rev} "
+                  f"反向(999) raise={raised_rev2}")
 
     # 兩支腳本都用這同一個模組物件（不是各自複製一份）
     check("AC-7 devflow_topic 與 devflow_archive 用同一個 _marker 模組物件",

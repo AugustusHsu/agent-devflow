@@ -381,6 +381,11 @@ def issue_meta(thread: str) -> tuple[str | None, str, str | None]:
     封存完成後 cache 會被清掉，重跑 export/publish 就查不到 issue 號了 —— 改由 forge
     回填：marker (`<!-- devflow:topic thread=N -->`) 是 `ensure` 寫進 issue body 的，
     topic 刪除後仍留著。
+
+    掃到 `T>1` 的 issue 時 raise `_marker.InvalidMarker`——**不**退回 `thread NNNN`
+    的 fallback、**不**續掃。下面的 `except Exception` 是給「forge 不可用」用的，
+    INVALID 必須穿過它（`#285` `BLOCK-1`：續掃可能在另一張 issue 命中同一 thread
+    而把匯出檔掛到那張單）。
     """
     if CACHE.exists():
         data = json.loads(CACHE.read_text() or "{}")
@@ -398,6 +403,8 @@ def issue_meta(thread: str) -> tuple[str | None, str, str | None]:
         for item in json.loads(out or "[]"):
             if _marker.has_topic(item.get("body") or "", thread):
                 return str(item["number"]), item["title"], (item.get("state") or "").upper()
+    except _marker.InvalidMarker:
+        raise                      # INVALID 要停下，不是 forge 不可用——不得被下面吞掉
     except Exception:  # noqa: BLE001 — forge 不可用時退回 thread 命名
         pass
     return None, f"thread {thread}", None
@@ -576,4 +583,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except _marker.InvalidMarker as e:
+        # `CH3`：exit 非 0 ＋ stderr 印 INVALID 與命中的所有行，停下不動 forge。
+        # 這裡接住是為了不讓它只留一段 traceback——訊息本身已含全部命中行的字面。
+        print(str(e), file=sys.stderr)
+        sys.exit(1)

@@ -112,34 +112,28 @@ def read_archived(body: str, *, detail: str = "") -> int | None:
 def has_topic(body: str, thread) -> bool:
     """body 是否有**獨立一行**恰等於 `<!-- devflow:topic thread=<thread> -->`。
 
-    供 `devflow_archive.py:394` 的反向查找（thread → issue）。只認獨立一行：
+    供 `devflow_archive.py` 的反向查找（thread → issue）。只認獨立一行：
     表格列內、散文旁註、縮排的同形字串一律不算，否則匯出檔會掛到錯的 issue。
 
-    `T>1`（INVALID）回 `False` 並印 stderr——該單的分區沒有單一答案，故它
-    **不主張**擁有這個 thread。選 `False` 而非 raise 的理由：反向查找是在
-    「掃全 repo 的 issue」的迴圈裡用的，raise 會讓一張 INVALID 的單連帶廢掉
-    其他所有單的查找；回 `False` 把後果限制在該單身上，而「不得把匯出檔掛到
-    該單」這個要求同樣達成。不靜默：命中行一律印到 stderr。
+    `T>1` → raise `InvalidMarker`（與正向的 `read_topic`／`upsert_topic` **同一個
+    類別**）。`#285` 第 1 輪曾選「回 `False` 續掃」，被 `R1` 以 `BLOCK-1` 擋下：
+    T 的裁定表對 `T>1`／`A>1` 明寫「exit 非 0 ＋ stderr 印 INVALID 與命中的所有行，
+    停下不動 forge」，反向查找同樣適用。回 `False` 不是「把後果限制在該單身上」，
+    而是**讓掃描繼續**——審查位的反例：#285 的 body 有 `thread=2620` 與 `thread=999`
+    兩行而 #286 的 body 有 `thread=2620` 一行時，續掃會在 #286 命中並回傳它，
+    匯出檔就掛到了另一張單。停下才是 `CH3` 要的行為。
     """
     ids, lines = find_topic(body)
     if len(lines) > 1:
-        import sys
-        print(
-            f"# INVALID: 某 issue body 有 {len(lines)} 個分區標記，"
-            f"反向查找 thread={thread} 時略過該單（依 CH3 不得視為任一態）：",
-            file=sys.stderr,
-        )
-        for ln in lines:
-            print(f"#   {ln}", file=sys.stderr)
-        return False
+        raise InvalidMarker("topic", lines, f"反向查找 thread={thread}")
     return bool(ids) and ids[0] == str(thread)
 
 
 def has_archived(body: str, thread) -> bool:
-    """同 has_topic，對封存標記（`file=` 欄不限）。"""
+    """同 has_topic，對封存標記（`file=` 欄不限）。`A>1` → raise `InvalidMarker`。"""
     ids, lines = find_archived(body)
     if len(lines) > 1:
-        return False
+        raise InvalidMarker("archived", lines, f"反向查找 thread={thread}")
     return bool(ids) and ids[0] == str(thread)
 
 
