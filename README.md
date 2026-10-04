@@ -10,7 +10,7 @@
 
 ## 設計要點
 
-- **自變數**（`devflow.yml`）：`forge`（github｜gitlab｜gitea；平台，不是職位。`gitea` 全表 `⬜`，無實例前不可選）與 `seats`——四個職位（`devflow/seats/`：implementer｜reviewer｜coordinator｜approver）各綁一個 `filler`（填充者：工具名，或 `human`＝由人填），選填 `model` 與 `reasoning`（思考程度；未填＝用工具預設）。其餘都是衍生值，由 `devflow/forges/`、`coders/`、`orchestrators/` 對照表提供，每格標實測狀態。
+- **自變數**（`devflow.yml`）：`forge`（github｜gitlab｜gitea；平台，不是職位。`gitea` 全表 `⬜`，無實例前不可選）與 `seats`——五個職位（`devflow/seats/`：implementer｜reviewer｜manager｜coordinator｜approver）各綁一個 `filler`（填充者：工具名，或 `human`＝由人填），選填 `launch`（啟動機制：cli｜agent｜subagent｜human；省略 ＝ cli）、`instance`、`model` 與 `reasoning`（思考程度；未填＝用工具預設）。其餘都是衍生值，由 `devflow/forges/`、`coders/`、`orchestrators/` 對照表提供，每格標實測狀態。
 - **工單只住 forge**；PR/MR 是審查與合併的載體；repo 內不放工單檔或審查報告副本。
 - **規格先建版**：規格文檔獨立 PR 合入，版本＝merge commit，文內四碼版本欄，不打 spec tag。任務由 diff＋影響分析推導，不由版本位數推導。
 - **兩個基準**：每個任務記錄治理基準 G（WORKFLOW.md 的 commit）與開發目標 T（規格的 commit）。規則變更依舊規則審查，合入後在下一個任務／session 邊界啟用——這是避免「改流程卡死自己」的核心機制。
@@ -40,7 +40,7 @@ devflow/                  kit 本體：安裝時整個目錄鏡像到消費者�
   WORKFLOW.md             規則本體（規則帶 ID）
   VERSION                 kit 的四碼版本，依 `V7` 隨 devflow/** 的變更進位
   install.py              安裝器：鏡像 devflow/、建 devflow.local/、插入口區塊
-  seats/                  四個職位的職責定義（implementer / reviewer / coordinator / approver）
+  seats/                  五個職位的職責定義（implementer / reviewer / manager / coordinator / approver）
   forges/ coders/ orchestrators/   衍生值對照表，每格標實測狀態
   templates/              devflow.yml / spec / issue / pr / review-prompt / entry-block / local-README
 devflow.local/            消費者自己的本機證據（具名 instance 的事實）；不存在才建、且只放 README.md，已存在則整棵不碰

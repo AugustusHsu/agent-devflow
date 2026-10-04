@@ -5,9 +5,10 @@
 
 forge: github          # github | gitlab | gitea（gitea 全表 ⬜，無實例前不可選）
 
-# 職位綁定。職位名以 devflow/seats/ 的四個檔為準，不新增。每個職位一個 filler（填充者）：
+# 職位綁定。職位名以 devflow/seats/ 的五個檔為準，不新增。每個職位一個 filler（填充者）：
 # 工具名（對照表在 devflow/coders/、orchestrators/）或 human（由人填）。
 # model／reasoning 選填，未填＝用該工具的預設；旗標怎麼寫住對照表，這裡只記意圖。
+# filler 只指模型與能力的來源，啟動機制是 launch（值域見 devflow/templates/devflow.yml；省略 ＝ cli）。
 # model 是 R10 受測環境的一部分：換模型後，舊模型下驗證的格子依 R9 降為 📝（#17 裁決 4）。
 seats:
   implementer:               # 實作位
@@ -15,11 +16,17 @@ seats:
     model: claude-opus-5[1m] # 顯式 pin：別名 opus 於 2026-09-23T18:55Z 起靜默漂移到 claude-opus-5-5；[1m] 為 1M context 窗
   reviewer:                  # 審查位；建議與 implementer 異廠（R2）。本 repo 審查一律顯式 pin，不讀工具的全域設定
     filler: codex            # codex | claude-code
+    launch: agent            # 啟動機制：cli | agent | subagent | human
+    instance: dfrev          # launch=agent 時，協調平台上的具名實例
     model: gpt-5.6-sol
     reasoning: high          # 思考程度；值的寫法依工具
     fallback:                # 選填；主 filler 不可用（配額耗盡等）時改用這組，事先定下而非臨場選（R2）
-      filler: claude-code    # 與 implementer 同廠，所以下面那行的 model 適用 R2 的模型建議
-      model: claude-fable-5-1  # R2 建議 ≠ seats.implementer.model；能力證據另見對照表，pin 不等於 ✅
+      model: claude-fable-5-1  # filler 省略＝沿用主綁定的 filler 與 launch，只換 model／provider
+  manager:                   # 執行位；省略＝本位職責歸協調位（seats/manager.md）
+    filler: claude-code
+    launch: agent
+    instance: dfmgr
+    model: claude-fable-5-1
   coordinator:               # 協調位；省略＝human（無工具，各步由人執行；對照表 orchestrators/none.md）
     filler: hermes           # hermes | paperclip | human
   approver:                  # 裁決位；人（seats/approver.md），無 model／reasoning

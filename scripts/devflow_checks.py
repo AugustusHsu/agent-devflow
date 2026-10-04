@@ -1110,11 +1110,11 @@ V7_VERSION_FILE = "devflow/VERSION"
 # issue #222 起同一個事實多一個持久來源：`.devflow-local` 的 `v7_base`（見該節的順序）。
 V7_BASE_ENV = "DEVFLOW_V7_BASE"
 
-# seatoblig／orphan（issue #213）的定義域：四個已知檔、一個段落標題、一個正則，
+# seatoblig／orphan（issue #213）的定義域：五個已知檔、一個段落標題、一個正則，
 # 加上一份**從 repo 讀出來**的豁免清單。四樣都是字面事實，沒有啟發式。
 SEAT_DIR = "devflow/seats/"
 SEAT_FILES = tuple(SEAT_DIR + n + ".md"
-                   for n in ("coordinator", "implementer", "reviewer", "approver"))
+                   for n in ("coordinator", "implementer", "reviewer", "approver", "manager"))
 SEAT_README = SEAT_DIR + "README.md"
 # 段落標題逐字比對（四個職位檔都寫成這一行，`git grep -c '^## 規則義務' devflow/seats`
 # 每檔恰一）。不套 section_name() 的寬鬆判讀：那是 R9 為了 `## **通用**` 開的口子，
@@ -3060,7 +3060,7 @@ else:
 
 print()
 print("── seat 規則義務段 ↔ 同檔其餘段的引用雙向一致（%s）" % tag("seatoblig"))
-# 定義域封閉在三個字面事實上：**四個已知檔**（SEAT_FILES）、**一個段落標題**
+# 定義域封閉在三個字面事實上：**五個已知檔**（SEAT_FILES）、**一個段落標題**
 # （SEAT_OBLIG_HEADING，逐字比對）、**一個正則**（SEAT_ID_RE，由 ID_RE 包一層反引號
 # 而成）。判定只有集合差，沒有啟發式、沒有門檻、沒有「意圖」的猜測。
 #
