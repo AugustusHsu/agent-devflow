@@ -87,7 +87,15 @@ gh pr create --base main --head <N>-<slug> --title "<gitmoji> <type>(<scope>): <
 
 **派審者依綁定**：`devflow.yml` 的 `seats.manager` 已綁定時由 manager 派（`seats/manager.md`），未綁定時該職責歸協調位，由協調位自派——不寫死為協調位。
 
-兩種 `launch` 共通的前置：fresh context、與實作位異廠——`R2` 的異廠是**建議**不是必需：只有一家可用時用同廠的全新 context，同廠時另建議所用模型與實作位（`seats.implementer.model`）不同、同廠只有一個堪用模型時全新 context 即滿足（`seats/reviewer.md` 的例外分支同此）、丟棄式 checkout（`R12`；`coders/codex.md` 「審查用法（`R1`）」格，引用前查狀態 `R9`）。**本輪專用暫存目錄與丟棄式 checkout 一律由派工者建立**，建好後把兩個路徑寫進 prompt 的材料段；**審查位不自建**，收到的就是派工者建好的路徑（第 10 步 (0) 的守衛即以此為前提）。
+兩種 `launch` 共通的前置：fresh context、與實作位異廠——`R2` 的異廠是**建議**不是必需：只有一家可用時用同廠的全新 context，同廠時另建議所用模型與實作位（`seats.implementer.model`）不同、同廠只有一個堪用模型時全新 context 即滿足（`seats/reviewer.md` 的例外分支同此）、丟棄式 checkout（`R12`；`coders/codex.md` 「審查用法（`R1`）」格，引用前查狀態 `R9`）。**單級暫存目錄、本輪專用暫存目錄與丟棄式 checkout 一律由派工者建立**，建好後把三個路徑寫進 prompt 的材料段；**審查位不自建**，收到的就是派工者建好的路徑（第 10 步守衛即以此為前提）。
+
+三個暫存目錄的尺度不同，建立與回收的時點也不同——混用就是 `#251`／`#258` 兩輪「驗收腳本放第 1 輪的輪級目錄、第 2 輪沒得用」的來由：
+
+| 變數 | 尺度 | 目錄名 | 建於 | 回收於 |
+|---|---|---|---|---|
+| `$W` | 單級（整張 issue，跨輪復用） | `devflow-task.$ISSUE.??????` | 第 1 輪的第 7 步，其後各輪沿用 | 第 10 步守衛 |
+| `$T` | 輪級（本輪） | `devflow-rev.$TOKEN.??????` | 每輪的第 7 步 | 該輪的第 8 步 |
+| `$D` | 輪級（本輪，丟棄式 checkout） | `devflow-co.$TOKEN.??????` | 每輪的第 7 步 | 該輪的第 8 步 |
 
 以下依被派那一位的 `launch` 分支（`devflow.yml` 的 `seats.reviewer.launch`，省略時為 `cli`）。
 
@@ -95,26 +103,30 @@ gh pr create --base main --head <N>-<slug> --title "<gitmoji> <type>(<scope>): <
 
 ```bash
 mkdir -p -m 700 -- "${TMPDIR:-$HOME/.cache}"
-TOKEN=<issue>r<round>          # 本輪 token，例：255r1；僅 [A-Za-z0-9]，由派工者填；嵌進下兩行的目錄名，第 10 步 (0) 以它核對「這兩個目錄屬本輪」
-T=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-rev.$TOKEN.XXXXXX")   # 本輪專用暫存目錄；`TMPDIR` 未設時落在 `$HOME/.cache`，不落 /tmp 本身（`TMPDIR` 指向 /tmp 時須先改設）；第 10 步 (0) 刪
-D=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-co.$TOKEN.XXXXXX")    # 丟棄式 checkout，同上不落 /tmp 本身；第 10 步 (0) 刪
+ISSUE=<issue>                  # 本單 issue 號，例：255；僅 [0-9]，由派工者填；嵌進 $W 的目錄名，第 10 步守衛以它核對「這個目錄屬本單」
+TOKEN=<issue>r<round>          # 本輪 token，例：255r1；僅 [A-Za-z0-9]，由派工者填；嵌進下兩行的目錄名，第 8 步與第 10 步守衛以它核對「這兩個目錄屬本輪」
+W=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-task.$ISSUE.XXXXXX")  # 單級暫存目錄；整張單共用、跨輪沿用（第 2 輪起沿用第 1 輪建的那個，不重建）；第 8 步不回收，第 10 步守衛刪
+T=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-rev.$TOKEN.XXXXXX")   # 本輪專用暫存目錄；`TMPDIR` 未設時落在 `$HOME/.cache`，不落 /tmp 本身（`TMPDIR` 指向 /tmp 時須先改設）；第 8 步刪
+D=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-co.$TOKEN.XXXXXX")    # 丟棄式 checkout，同上不落 /tmp 本身；第 8 步刪
 git clone --shared <repo> "$D" && git -C "$D" checkout <head sha>
 env TMPDIR="$T" codex exec -C "$D" --sandbox workspace-write -m <model> -c model_reasoning_effort=<level> \
   -c approval_policy="never" -c sandbox_workspace_write.exclude_slash_tmp=true \
   -c sandbox_workspace_write.network_access=false \
-  -c 'sandbox_workspace_write.writable_roots=["'"$D"'","'"$T"'"]' \
+  -c 'sandbox_workspace_write.writable_roots=["'"$D"'","'"$T"'","'"$W"'"]' \
   -o "$T/verdict.md" - < "$T/prompt.txt"
 ```
 
 #### launch: agent
 
-派給協調平台上的具名實例（`devflow.yml` 的 `seats.reviewer.instance`），由轉播器喚醒；暫存目錄與 checkout 由派工者照下方 block 建好，審查稿寫進 `$T`，兩個路徑寫進審查稿的材料段。
+派給協調平台上的具名實例（`devflow.yml` 的 `seats.reviewer.instance`），由轉播器喚醒；三個暫存目錄與 checkout 由派工者照下方 block 建好，審查稿寫進 `$T`，三個路徑寫進審查稿的材料段。
 
 ```bash
 mkdir -p -m 700 -- "${TMPDIR:-$HOME/.cache}"
-TOKEN=<issue>r<round>          # 同 cli：僅 [A-Za-z0-9]，由派工者填；第 10 步 (0) 以它核對目錄屬本輪
-T=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-rev.$TOKEN.XXXXXX")   # 本輪專用暫存目錄；審查稿、diff patch 等派工者產物一律寫在這裡；第 10 步 (0) 刪
-D=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-co.$TOKEN.XXXXXX")    # 丟棄式 checkout；第 10 步 (0) 刪
+ISSUE=<issue>                  # 同 cli：僅 [0-9]，由派工者填；第 10 步守衛以它核對 $W 屬本單
+TOKEN=<issue>r<round>          # 同 cli：僅 [A-Za-z0-9]，由派工者填；第 8 步與第 10 步守衛以它核對兩個輪級目錄屬本輪
+W=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-task.$ISSUE.XXXXXX")  # 單級暫存目錄；跨輪沿用，第 2 輪起沿用既有那個；第 10 步守衛刪
+T=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-rev.$TOKEN.XXXXXX")   # 本輪專用暫存目錄；第 8 步刪
+D=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-co.$TOKEN.XXXXXX")    # 丟棄式 checkout；第 8 步刪
 git clone --shared <repo> "$D" && git -C "$D" checkout <head sha>
 env TMPDIR="$T" ~/.hermes/scripts/devflow_relay.py <thread> --file "$T/prompt.md" \
   -p <instance> --issue <N> --fresh --pace quiet [-m <model> --provider <name>]
@@ -125,8 +137,20 @@ env TMPDIR="$T" ~/.hermes/scripts/devflow_relay.py <thread> --file "$T/prompt.md
 - 沙箱依 `R12`：可寫根收斂到該 checkout ＋本輪暫存目錄；平台設不起可寫根收斂時，該輪改**唯讀**執行，並於派工 prompt 與 verdict 留言**雙方註明**（`R12`）——「不得自行升權」不因此豁免。
 - `-m`／`--provider` 只在換模型時帶。verdict 的受測環境依 `R10` 寫**當次實際使用的**模型與 provider，不得照抄 `devflow.yml` 的預設綁定。
 - 配額撞到時的形狀與判定依第七節（依 `launch` 分支）。
-- `env TMPDIR="$T"` **不可省**：被喚醒的實例預設把暫存寫進自己 profile 的 scratch，不符第 10 步 (0) 的命名約定，守衛刪不到。`TMPDIR` 經 `env` 傳給 `hermes … chat --oneshot`（含經轉播器）被遵從——受測環境依 `R10` 記在 #251 AC-4，**引用前自行複驗**。
-- `R12` 第 3 項的 `git diff` 另存位置是 `$T`，不是派工者自己的 scratch。`$D` 與 `$T` 同在第 10 步 (0) 被 `rm -rf`——verdict 之後 checkout 已不在是 `R12`「隨暫存目錄丟棄」要的行為，不是缺陷。
+- `env TMPDIR="$T"` **不可省**：被喚醒的實例預設把暫存寫進自己 profile 的 scratch，不符第 10 步守衛的命名約定，守衛刪不到。`TMPDIR` 經 `env` 傳給 `hermes … chat --oneshot`（含經轉播器）被遵從——受測環境依 `R10` 記在 #251 AC-4，**引用前自行複驗**。
+- `R12` 第 3 項的 `git diff` 另存位置是 `$T`，不是派工者自己的 scratch。`$D` 與 `$T` 同在第 8 步被 `rm -rf`——verdict 之後 checkout 已不在是 `R12`「隨暫存目錄丟棄」要的行為，不是缺陷。
+
+#### 產物落點（反向規則）
+
+本次執行期間產生的**任何**檔案，一律寫在 `$W`（單級）或 `$T`（輪級）之下。只有三類例外：
+(1) 被審 checkout `$D` 與任務 worktree 內的工作樹改動；
+(2) 寫進 forge 的留言與 PR 內容；
+(3) `.hermes/plans/` 下的提案檔（本 repo 慣例，不 commit）。
+判斷方式：不問「這是什麼類型的產物」，只問「這是我這次執行產生的嗎」。是，就在上述兩個目錄裡；在上述目錄外且不屬三類例外的，即違規。
+
+尺度的選法只看「下一輪還要不要用」：整張單共用的（驗收腳本、交接稿、工作 clone、突變對照）寫 `$W`，只有本輪意義的（prompt、verdict、本輪 diff patch）寫 `$T`。
+
+本規則是**反向**的，取代舊的正向列舉（原措辭只逐字列了審查稿與 diff patch 兩項）。理由：`#251`／`#258` 兩輪實測下來，派工者把條文列出的那兩項放進輪級目錄、其餘全落自己 profile 的 scratch（兩輪共清出 28 項，含完整 repo clone `devflow-probe.258.*`），而把列舉從兩項擴成七項只是把邊界推到第七項之後。規則因此規定「什麼不必寫進去」，而非「什麼要寫進去」——例外是封閉集合，可逐項機械檢查；落點的判定是二元問題，不需派工者推論產物的類型。
 
 #### prompt（兩段共用）
 
@@ -145,6 +169,17 @@ prompt 以 `templates/review-prompt.md` 為底，另加：
   - T 的漏洞 → 依 `F2`。Hermes 側：問人、答案寫回原 issue（`L3` 通道）→ T 修訂作為新任務走步驟 1～10（新 issue／分支／worktree；原分支已承載開啟中的 PR，不再開第二張；原任務 coder 已停、worktree 依 `C3` 保留）→ 合入後把原 issue 的 T 更新為新 commit、影響分析留言 → 重派原任務。
 - head 變更後重審（`R3`）；下一輪 prompt 縮窄到變更處＋未通過的 AC。
 - `APPROVE` → 步驟 9。
+- **回收本輪的輪級暫存目錄**：verdict 處理完畢（上列各項都已做完、下一輪尚未派出）即刪第 7 步建的 `$T`（`devflow-rev.$TOKEN.??????`）與 `$D`（`devflow-co.$TOKEN.??????`），`R12` 的「隨暫存目錄丟棄」在此生效。**`$W` 不在本步回收**——它是單級的，下一輪要沿用（驗收腳本、交接稿、工作 clone 都在裡面），其回收在第 10 步守衛。回收與否不影響續審：下一輪 prompt 的「已判通過不重審」清單是 prompt 的一部分、由派工者派審時寫進去，不是 `$T` 裡的檔案（`R3`）。需留存的 verdict 原文此時已貼成 PR 留言（`R5`），forge 是權威。
+
+```bash
+# 本輪的輪級回收。執行第 10 步的守衛本體（原文見該步，整段照抄，本步不另寫一支），
+# 末四個位置參數填 "<第 7 步的 $T>" "<第 7 步的 $D>" "-" "<第 7 步的 $TOKEN>"：
+# 第三個占位填 `-` 即「本步不回收 $W」，守衛對它不驗、不刪，其餘兩位的白名單三項判準照常。
+# 不在本步另寫一支 rm -rf：那會是第二條、且較弱的刪除路徑（守衛存在的理由就是占位填錯＝rm -rf 打在別處）。
+ls -1Ad "${TMPDIR:-$HOME/.cache}"/devflow-rev."$TOKEN".?????? \
+         "${TMPDIR:-$HOME/.cache}"/devflow-co."$TOKEN".??????   # 期望兩者皆 No such file（rc 非 0）＝本輪已回收
+ls -1Ad "${TMPDIR:-$HOME/.cache}"/devflow-task."${TOKEN%%r*}".??????  # 期望仍在（rc 0）＝ $W 未被本步誤收
+```
 
 ### 9. 合併（`M1`～`M4`、`I3`、`R5`）
 
@@ -160,28 +195,37 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
 
 ### 10. 收尾（`C1`～`C4`、`F4`）
 
-`C1` 七步之前先執行 (0) 刪本輪暫存目錄——第 7 步建的 `$T`、`$D` 在此回收（`R12` 「隨暫存目錄丟棄」）。`$T`／`$D` 不跨段保留，兩個路徑與第 7 步的 `$TOKEN` 由執行者填入，**填錯就是 `rm -rf` 打在別處**，故刪除前逐一驗證（token 嵌在目錄名裡，故另一輪的目錄會因 token 不符被擋）：
+`C1` 七步之前先執行 (0) 刪本單與本輪的暫存目錄——第 7 步建的 `$W`、`$T`、`$D` 在此回收（`R12` 「隨暫存目錄丟棄」）。正常路徑下 `$T`／`$D` 已在第 8 步回收，本步只會刪到 `$W`；`$T`／`$D` 仍在表示某輪的第 8 步漏做（多輪時尤易，依 `F4` 補），故本步仍收這兩位。三者皆不跨段保留，三個路徑與第 7 步的 `$TOKEN` 由執行者填入，**填錯就是 `rm -rf` 打在別處**，故刪除前逐一驗證（token 嵌在輪級目錄名裡，故另一輪的目錄會因 token 不符被擋；`$W` 的 issue 號由 token 推導，故他單的 `$W` 一律不命中）：
 
-本守衛的前提是**第 7 步**共用前置的「暫存與 checkout 由派工者建立」——兩個占位的值即該步 `mktemp -d` 的輸出，名稱因此必然帶 `devflow-rev.$TOKEN.`／`devflow-co.$TOKEN.` 前綴並落在同一個暫存根下。`launch` 不改變這個前提：`launch: agent` 的填充者在被喚醒時收到的是派工者建好的路徑，**不自建暫存根**（它自己的快取路徑不符本守衛的命名約定，若讓它自建，這整段檢查就無從套用）。
+本守衛的前提是**第 7 步**共用前置的「暫存與 checkout 由派工者建立」——三個占位的值即該步 `mktemp -d` 的輸出，名稱因此必然帶 `devflow-task.$ISSUE.`／`devflow-rev.$TOKEN.`／`devflow-co.$TOKEN.` 前綴並落在同一個暫存根下。`launch` 不改變這個前提：`launch: agent` 的填充者在被喚醒時收到的是派工者建好的路徑，**不自建暫存根**（它自己的快取路徑不符本守衛的命名約定，若讓它自建，這整段檢查就無從套用）。
 
 ```bash
-# (0) 刪本輪暫存目錄。第 7 步建的 $T（devflow-rev.$TOKEN.??????）與 $D（devflow-co.$TOKEN.??????）在此回收。
-# 輸入格式白名單（不逐元件追查 symlink）：占位剝盡尾斜線後須恰為 <暫存根>/<該位的合法名>——最後一段命中該位角色樣式、去掉最後一段的前綴字面等於暫存根、該路徑本身非 symlink。三項全中才算合法。
+# (0) 刪本單與本輪的暫存目錄。第 7 步建的 $W（devflow-task.$ISSUE.??????）、
+#     $T（devflow-rev.$TOKEN.??????）與 $D（devflow-co.$TOKEN.??????）在此回收。
+# 三個占位的角色綁位：占位 1 只收 rev、占位 2 只收 co、占位 3 只收 task；任兩者對調即失敗。
+# 占位 3 的 issue 號不另傳參數，由本輪 token 推導（ISSUE=${TOKEN%%r*}）：另傳一個 issue 號會讓
+#   「占位 3 屬於哪張單」變成可獨立填錯的一項——填成別單時刪掉的是他單仍在用的 $W（跨輪復用，無從重建）。
+#   由 token 推導使「$W 與 $T／$D 同屬一張單」成為結構保證，不靠執行者填對兩個相容的值。
+# 輪級占位可整位略去：占位 3 填 `-` 時本次不回收 $W（第 8 步的輪級回收即如此呼叫），
+#   對它不驗、不刪；`-` 只在占位 3 接受，且三位不得同時為 `-`。這是明示的「本步不收這一位」，
+#   不是「已不存在就算成功」（後者是 #251 判定的缺陷：占位填成不存在的合法名時照刪其餘位再回 0）。
+# 輸入格式白名單（不逐元件追查 symlink）：占位剝盡尾斜線後須恰為 <暫存根>/<該位的合法名>——最後一段命中該位角色樣式、去掉最後一段的前綴字面等於暫存根、該路徑本身非 symlink。三項全中才算合法，對三個占位一律套用。
 # 先以 cd -P 釘住暫存根（cwd 由核心持有該目錄的 inode 參照，#272），之後碰檔案系統的動作（-L、-d、rm）全用相對名：$ROOT 可以是 symlink，若拿完整路徑去刪，symlink 可在驗證與 rm 之間被重新指向，rm 就打到另一個 root 底下同名而「從未驗證」的目錄（實測 bash 與 dash 皆可重現）。cd 綁的是當時那個目錄的 inode，事後改 symlink 不影響相對名解析——窗口是關掉，不是縮小。
 # 為何走白名單不逐元件追查：readlink -f 會把 <symlink>/.、<symlink>/./、<中間 symlink>/<合法名> 都解析成同根下一個「合規的」目錄並刪掉它，而逐元件檢查須區分 <symlink>/. 與 <普通目錄>/.（兩者解析結果都合法），成本高且易誤擋合法邊界。占位本應由第 7 步原樣填入，迂迴寫法不是正常用法。
 # 行為收窄（刻意）：<合法名>/. 與 <合法名>/./ 即使是普通目錄也一律擋，因為最後一段是 . 不是合法名。<合法名>／<合法名>/／<合法名>/// 三種寫法仍可用——差一個 . 而已，別用會連尾斜線一起擋的粗判準。
 # 暫存根有兩個可接受的字面值：$ROOT 原值與「釘住後 pwd -P 給的真實路徑」（TMPDIR 指向 symlink 時兩者不同，都得接受，否則正常路徑會被誤擋）。兩者都要剝盡尾斜線：TMPDIR=/foo/ 時第 7 步產生的占位是 /foo//devflow-rev.$TOKEN.xxxxxx，前綴為 /foo/，不剝就比不等。
 # 後者務必在 cd 之後以 pwd -P 取，不可在 cd 之前用 readlink -f -- "$ROOT"：$ROOT 若在 readlink 與 cd 之間被改指（A→B），該值留著舊 root A 而 cwd 已是 B，指向 A 的占位會比對舊值通過驗證，-L／-d／rm 卻全打在 B，刪掉 B 底下從未驗證的目錄（實測 bash 與 dash 皆可重現）。pwd -P 問的是已釘住的 inode，不重走 $ROOT。
 # 「暫存根是否被換掉」用「釘住的 cwd」與「此刻重新解析 $ROOT」兩個 inode 比對，不用 pathname 字串、也不用 cd 前後兩次路徑解析的 inode：同一性判定前後被推翻三次（canonical pathname 在 cd 前取→cd 前改指；pathname 字串→同名重建 inode 不同；inode 編號→rmdir 後核心立即重用同一 inode，ext4 實測三次皆重用），共通根因是每次 ls／readlink 都重新解析路徑、每次解析都是新的 TOCTOU 窗口，比對哪個屬性都只是把窗口推到下一個屬性。cwd 在 cd 當下綁定 inode 且行程結束前不放掉參照，新建目錄拿不到同一個 inode，這條路是結構性堵住的（#272 受控對照：不持有 重用=Y ×3、持 cwd 重用=N ×3）。#253 原以 exec 9< 持有目錄 fd 達成同一效果，#272 改為 cwd：open(O_RDONLY) 需讀權限，mode 0311 的暫存根會被誤擋（N3），而 cd 只需 x 權限；且 cd 到 FIFO 立即失敗，不像 open 會掛住（N2）。/proc/self/cwd 為 Linux 特有（守衛已依賴 GNU readlink -f、ls -di 等非 POSIX 行為，此依賴不新增負擔，但只保證在 Linux 成立）。
-# 兩段式，先驗完再刪：兩個占位全部通過（非空、不含換行、合白名單、非 symlink、須為現存目錄、兩者相異）才進刪除；任一不合法 → 零刪除、rc 非 0。
-# 「零刪除」的範圍限於驗證階段：驗證未全過就一個都不刪。進入刪除階段後兩個 rm 都會執行，其一失敗（例如權限）只使 rc 非 0，不會回滾另一個已刪的——刪除本身不是交易。
-# 角色樣式寫死在 case 的 pattern 位置、不經參數傳遞：樣式若當參數傳，呼叫點會做 pathname expansion，cwd 內有字面同形目錄（devflow-rev.******）時樣式會被換成該目錄名，不合法的短名就會被放行。本輪 token 是唯一來自參數的樣式片段，故它在 pattern 位置必須加引號（devflow-rev."$TOKEN".??????）：加引號時其內容只當字面比對，不加引號時 TOKEN=* 會變成萬用樣式、同根下任何一輪的目錄全部放行——與上述同類的錯誤。
+# 兩段式，先驗完再刪：三個占位全部通過（非空、不含換行、合白名單、非 symlink、須為現存目錄、兩兩相異；填 `-` 的那位略過驗證與刪除）才進刪除；任一不合法 → 零刪除、rc 非 0。
+# 「零刪除」的範圍限於驗證階段：驗證未全過就一個都不刪。進入刪除階段後各 rm 都會執行，其一失敗（例如權限）只使 rc 非 0，不會回滾另一個已刪的——刪除本身不是交易。
+# 角色樣式寫死在 case 的 pattern 位置、不經參數傳遞：樣式若當參數傳，呼叫點會做 pathname expansion，cwd 內有字面同形目錄（devflow-rev.******）時樣式會被換成該目錄名，不合法的短名就會被放行。本輪 token 與由它推導的 issue 號是唯二來自參數的樣式片段，故它們在 pattern 位置必須加引號（devflow-rev."$TOKEN".??????、devflow-task."$ISSUE".??????）：加引號時其內容只當字面比對，不加引號時 TOKEN=* 會變成萬用樣式、同根下任何一輪的目錄全部放行——與上述同類的錯誤。
 # 尾斜線先剝盡才測 -L：[ -L "<link>/" ] 回假（尾斜線要求解析到目標），symlink 帶尾斜線會漏過 symlink 閘門。
 # 「已不存在就算成功」是缺陷不是寬容（#251）：占位 2 填成不存在的合法名時，舊版會照刪占位 1 再回 0，看起來成功、實際漏刪。
-# 角色綁位：占位 1 只收 devflow-rev.$TOKEN.??????、占位 2 只收 devflow-co.$TOKEN.??????，兩者對調即失敗。
-# 守衛本體在 /usr/bin/env -i 造的空環境裡由 /bin/bash 執行，內層 PATH 固定；占位與本輪 token 以位置參數 $1／$2／$3 傳入，不再內插進指令字串。
+# 角色綁位：占位 1 只收 devflow-rev.$TOKEN.??????、占位 2 只收 devflow-co.$TOKEN.??????、占位 3 只收 devflow-task.$ISSUE.??????，任兩者對調即失敗。
+# 守衛本體在 /usr/bin/env -i 造的空環境裡由 /bin/bash 執行，內層 PATH 固定；三個占位與本輪 token 以位置參數 $1／$2／$3／$4 傳入，不再內插進指令字串。
 # 不加 command 前綴：BASH_FUNC_command%% 注入會穿透 command 前綴（實測），直接寫 /usr/bin/env 才擋得住。
-# 跨輪核對靠目錄名裡的 token（#255）：第 7 步把本輪 token 嵌進兩個目錄名，守衛以第三個位置參數收到同一個 token 並當成角色樣式的一部分，故同根下另一輪的 devflow-rev.<別的 token>.??????／devflow-co.<別的 token>.?????? 不命中樣式、一律被擋。正面核對，不需任何持久記錄。
+# 跨輪核對靠目錄名裡的 token（#255）：第 7 步把本輪 token 嵌進兩個輪級目錄名，守衛以第四個位置參數收到同一個 token 並當成角色樣式的一部分，故同根下另一輪的 devflow-rev.<別的 token>.??????／devflow-co.<別的 token>.?????? 不命中樣式、一律被擋。正面核對，不需任何持久記錄。
+# 跨單核對靠目錄名裡的 issue 號：占位 3 的樣式用 ISSUE=${TOKEN%%r*}，故他單的 devflow-task.<別的 issue>.?????? 不命中樣式、一律被擋（`C3` 「只清本次任務擁有的資源」在本步的落實）。
 # token 先驗字元集（非空且僅 [A-Za-z0-9]）再當 pattern 用，順序不可反：未驗就用時 TOKEN=* 會變萬用樣式（見上一條角色樣式的註解），而限死 [A-Za-z0-9] 也使 token 不可能夾帶斜線、點或 glob 字元去撐出額外的路徑層級。
 # token 填錯的假陽性（刻意接受）：填成別輪或打錯字時，本輪的合法目錄不命中樣式 → rc 非 0、兩個目錄都存活、清不掉，須改對 token 再跑。方向安全（不誤刪），代價是漏刪要人回頭處理。
 # 占位務必加引號（未加時含 glob 的路徑會展開，實測會多刪同根下別輪的目錄）。
@@ -205,13 +249,21 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
     HOME="$HOME" TMPDIR="${TMPDIR:-}" PATH=/usr/bin:/bin \
     /bin/bash --noprofile --norc -c '
   set -u
-  [ $# -eq 3 ] || { echo "須恰兩個占位路徑＋本輪 token，停" >&2; exit 1; }
-  # 本輪 token（第 7 步嵌進兩個目錄名的那一個）。字元集先驗、後用：它接著要進 case 的 pattern 位置，
+  [ $# -eq 4 ] || { echo "須恰三個占位路徑＋本輪 token，停" >&2; exit 1; }
+  # 本輪 token（第 7 步嵌進兩個輪級目錄名的那一個）。字元集先驗、後用：它接著要進 case 的 pattern 位置，
   # 未驗就用時 TOKEN=* 會被當成萬用樣式、同根下每一輪的目錄都命中（放行一切）；限死非空且僅 [A-Za-z0-9]
   # 也使它不可能夾帶 /、. 或 glob 字元去改變樣式的結構。這道檢查在任何刪除之前，故不合格即零刪除。
-  TOKEN=$3
+  TOKEN=$4
   case "$TOKEN" in
     "" | *[!A-Za-z0-9]*) echo "本輪 token 須非空且僅含 A-Za-z0-9，停：$TOKEN" >&2; exit 1 ;;
+  esac
+  # 占位 3（$W）的 issue 號由 token 推導，不另收參數：token 的形狀是 <issue>r<round>，剝掉第一個 r 起的
+  # 尾段即 issue 號。另收一個參數會讓「$W 屬於哪張單」變成可獨立填錯的一項，填錯就刪掉他單仍在用的 $W。
+  # 同樣先驗字元集後用（它也要進 pattern 位置）：須非空且僅 [0-9]。token 不含 r 時 ${TOKEN%%r*} 回 token 原值，
+  # 那時它必含非數字（否則 token 就是純 issue 號、缺輪次）或恰為 issue 號，兩種都由這道檢查判。
+  ISSUE=${TOKEN%%r*}
+  case "$ISSUE" in
+    "" | *[!0-9]*) echo "由 token 推導的 issue 號須非空且僅含 0-9，停：$ISSUE（token=$TOKEN）" >&2; exit 1 ;;
   esac
   NL=$(printf "\nx"); NL=${NL%x}
   # 剝盡尾斜線。?*/ 要求「至少一字元＋斜線」才剝，故 "/" 剝不成空字串、"///" 剝到剩 "/" 就停。
@@ -311,12 +363,12 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
   esac
   case "$RB" in *"$NL"*) echo "暫存根真實路徑含換行，停" >&2; exit 1 ;; esac
   strip "$RB"; RB=$SS
-  # 驗一個占位：$1 路徑、$2 角色代號（rev／co）、$3 占位序號（僅供訊息）。通過回 0 並把「相對名」留在 CRP。
+  # 驗一個占位：$1 路徑、$2 角色代號（rev／co／task）、$3 占位序號（僅供訊息）。通過回 0 並把「相對名」留在 CRP。
   # 白名單：剝盡尾斜線後須恰為 <暫存根>/<該位合法名>。格式判定全走占位字面，不靠 readlink -f 的解析結果——
   # readlink -f 會把 <symlink>/.、<中間 symlink>/<合法名> 正規化成同根合規目錄，拿它當判定依據就是 BLOCK 3 的成因。
   # 角色樣式寫死在 case 的 pattern 位置、不經參數傳遞：pattern 位置不做 pathname expansion，cwd 內容與判定無關。
-  # 唯一的例外是本輪 token，它必須來自參數（第 7 步才知道值）；在 pattern 位置加引號使其只當字面比對，
-  # 不加引號時 TOKEN=* 會變萬用樣式、把同根下每一輪的目錄都放行，且字元集已在上面先驗過。
+  # 唯二的例外是本輪 token 與由它推導的 issue 號，它們必須來自參數（第 7 步才知道值）；在 pattern 位置加引號使其只當字面比對，
+  # 不加引號時 TOKEN=* 會變萬用樣式、把同根下每一輪的目錄都放行，且兩者的字元集已在上面先驗過。
   chk() {
     CP=$1; ROLE=$2; IDX=$3; CRP=
     if [ -z "$CP" ]; then echo "占位 $IDX 為空路徑，停" >&2; return 1; fi
@@ -329,7 +381,9 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
              *) echo "占位 $IDX 末段非該位合法名（須 devflow-rev.$TOKEN.??????），停：$CP" >&2; return 1 ;; esac ;;
       co)  case "$CPN" in devflow-co."$TOKEN".??????) : ;;
              *) echo "占位 $IDX 末段非該位合法名（須 devflow-co.$TOKEN.??????），停：$CP" >&2; return 1 ;; esac ;;
-      *) echo "占位 $IDX 角色代號有誤（只收 rev／co），停" >&2; return 1 ;;
+      task) case "$CPN" in devflow-task."$ISSUE".??????) : ;;
+             *) echo "占位 $IDX 末段非該位合法名（須 devflow-task.$ISSUE.??????），停：$CP" >&2; return 1 ;; esac ;;
+      *) echo "占位 $IDX 角色代號有誤（只收 rev／co／task），停" >&2; return 1 ;;
     esac
     # 去掉最後一段的前綴須字面等於暫存根。CPS 已剝盡尾斜線且末段非空，故 ${CPS%/*} 就是前綴；
     # 前綴也要剝盡尾斜線：TMPDIR=/foo/ 時第 7 步的 mktemp -d "${TMPDIR:-…}/devflow-rev.$TOKEN.XXXXXX"
@@ -346,19 +400,29 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
     CRP=$CPN
     return 0
   }
-  # 第一段：只驗證，不刪。兩個都驗（不短路）好讓人一次看到全部問題。
-  BAD=; RP1=; RP2=
-  if chk "$1" rev 1; then RP1=$CRP; else BAD=1; fi
-  if chk "$2" co 2; then RP2=$CRP; else BAD=1; fi
-  # 相異性：角色樣式已使兩位不可能收到同一路徑，此檢查是第二道（樣式若日後放寬仍守得住），且明確拒絕而非靜默略過。
-  if [ -n "$RP1" ] && [ "$RP1" = "$RP2" ]; then echo "兩占位指向同一目錄，停：$RP1" >&2; BAD=1; fi
+  # 第一段：只驗證，不刪。三個都驗（不短路）好讓人一次看到全部問題。
+  # 填 `-` 的那位整位略去（第 8 步的輪級回收以 "-" 傳占位 3）：SKIPn 記下該位被略去，
+  # 刪除階段跳過它。`-` 不可能是合法占位（末段須命中角色樣式），故不與正常值混淆；
+  # 三位同時為 `-` 時沒有任何要回收的對象，視為呼叫錯誤而非 no-op。
+  BAD=; RP1=; RP2=; RP3=; SKIP1=; SKIP2=; SKIP3=
+  if [ "$1" = "-" ]; then SKIP1=1; else if chk "$1" rev 1; then RP1=$CRP; else BAD=1; fi; fi
+  if [ "$2" = "-" ]; then SKIP2=1; else if chk "$2" co 2; then RP2=$CRP; else BAD=1; fi; fi
+  if [ "$3" = "-" ]; then SKIP3=1; else if chk "$3" task 3; then RP3=$CRP; else BAD=1; fi; fi
+  if [ -n "$SKIP1" ] && [ -n "$SKIP2" ] && [ -n "$SKIP3" ]; then
+    echo "三個占位都填 -，沒有要回收的對象，停" >&2; BAD=1
+  fi
+  # 相異性：角色樣式已使三位不可能收到同一路徑，此檢查是第二道（樣式若日後放寬仍守得住），且明確拒絕而非靜默略過。
+  if [ -n "$RP1" ] && [ "$RP1" = "$RP2" ]; then echo "占位 1 與 2 指向同一目錄，停：$RP1" >&2; BAD=1; fi
+  if [ -n "$RP1" ] && [ "$RP1" = "$RP3" ]; then echo "占位 1 與 3 指向同一目錄，停：$RP1" >&2; BAD=1; fi
+  if [ -n "$RP2" ] && [ "$RP2" = "$RP3" ]; then echo "占位 2 與 3 指向同一目錄，停：$RP2" >&2; BAD=1; fi
   [ -z "$BAD" ] || { echo "有占位未通過驗證，零刪除中止" >&2; exit 1; }
-  # 第二段：全數通過才刪。以相對名刪，對象即驗證時看到的那兩個目錄（cwd 已釘住），不受 root symlink 事後改指影響。
+  # 第二段：全數通過才刪。以相對名刪，對象即驗證時看到的那些目錄（cwd 已釘住），不受 root symlink 事後改指影響。
   RC=0
-  rm -rf -- "$RP1" || { echo "刪除失敗：$RP1" >&2; RC=1; }
-  rm -rf -- "$RP2" || { echo "刪除失敗：$RP2" >&2; RC=1; }
+  [ -n "$SKIP1" ] || rm -rf -- "$RP1" || { echo "刪除失敗：$RP1" >&2; RC=1; }
+  [ -n "$SKIP2" ] || rm -rf -- "$RP2" || { echo "刪除失敗：$RP2" >&2; RC=1; }
+  [ -n "$SKIP3" ] || rm -rf -- "$RP3" || { echo "刪除失敗：$RP3" >&2; RC=1; }
   exit $RC
-' _ "<第 7 步的 $T>" "<第 7 步的 $D>" "<第 7 步的 $TOKEN>"
+' _ "<第 7 步的 $T>" "<第 7 步的 $D>" "<第 7 步的 $W>" "<第 7 步的 $TOKEN>"
 )
 ```
 
