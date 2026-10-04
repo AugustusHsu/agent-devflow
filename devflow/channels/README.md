@@ -1,6 +1,6 @@
 # devflow/channels — 通道層
 
-kit 的第五層。`forges/` 定工作產物住哪、`orchestrators/` 定誰驅動流程、`coders/` 定用什麼工具實作、`seats/` 定職位；**本層定 seat 與人之間的對話介面住哪**。由 `devflow.yml` 的頂層鍵 `channel` 選用（值域 `none | telegram`，省略＝`none`），每個值對應本目錄一個說明檔：`none.md`、`telegram.md`。規則本體在 `WORKFLOW.md` 第 13 節（`CH1`、`CH2`），行為人是協調位（`seats/coordinator.md`）。
+kit 的第五層。`forges/` 定工作產物住哪、`orchestrators/` 定誰驅動流程、`coders/` 定用什麼工具實作、`seats/` 定職位；**本層定 seat 與人之間的對話介面住哪**。由 `devflow.yml` 的頂層鍵 `channel` 選用（值域 `none | telegram`，省略＝`none`），每個值對應本目錄一個說明檔：`none.md`、`telegram.md`。規則本體在 `WORKFLOW.md` 第 13 節（`CH1`、`CH2`、`CH3`），行為人是協調位（`seats/coordinator.md`）。
 
 ## 四職能
 
@@ -33,8 +33,32 @@ kit 的第五層。`forges/` 定工作產物住哪、`orchestrators/` 定誰驅�
 - **邊界**：子目錄以平台命名（`scripts/telegram/`），內容是**該通道的參考實作，非通用**；換平台的消費者不拿它跑，照對照表另寫。腳本本身不是規範，`I7` 對它同樣適用：只能收窄或細化 `devflow.yml` 與 `WORKFLOW.md`。
 - **本單狀態**：目錄已建、腳本未搬（`scripts/telegram/README.md`）；搬入與缺陷修正屬 K4c。
 
+## 通道側收尾（`C5`、`CH3`）
+
+單結束時通道側也有收尾：**該單的分區要封存**。這是 `C5` 的一項，不是收尾之外的附加動作——**分區未封存即收尾未完成**，不得回報完成（補做依 `F4`）。本節定分區封存與分區狀態；本機工作檔的收斂不在本層（`profile`、暫存目錄是協調平台的概念，換 orchestrator 就沒有，依 `I6` 歸 `orchestrators/`）。
+
+條文層的義務在 `WORKFLOW.md` 的 `C5` 與 `CH3`；各平台的封存步驟與留痕形狀在本目錄的對照表（`telegram.md`、`none.md`）。`channel` 為 `none` 時通道側無分區可封存，該項自動滿足。
+
+### 分區三態
+
+分區只有三態。**權威一律在 issue body 的機器可讀標記**（`CH3`、職能 4）：
+
+| 態 | 機械判準（權威一律在 issue body） |
+|---|---|
+| 未開始 | issue body 無 `<!-- devflow:topic … -->` 標記 |
+| active | 有 `thread=NN` 標記，且**無**封存標記 |
+| 已封存 | 有 `thread=NN` 標記，**且**有封存標記（記載匯出檔位置） |
+
+兩件事由此得到保證：
+
+- **已封存與未開始機械可區分**，差別是有沒有 `thread=NN` 標記。封存會刪掉平台上的分區、也會清掉本機快取，若不另留封存標記，從未建分區的單與已封存的單在通道側與快取皆為空——`#279` 即因此被重做封存、覆寫原始匯出檔。封存標記使該單**不回到無標記的狀態**。
+- **本機快取不是權威**。它會殘留已刪除的分區（`#251` 的 `state` 欄即錯過一次），也會在封存的最後一步被清掉；它只是加速用的，判定態一律回 issue body 讀。平台側同樣不是權威：Bot API 無列出分區的方法（`telegram.md`），分區與 issue 的對應一旦只存在於通道側就無法重建。
+
+### 為什麼不是四態
+
+原定的第四態「關閉」沒有機械判準，三項實測如下：Bot API 無 `getForumTopic`；`sendMessage` 測不到（bot 是 administrator，關閉中的分區也能發）；本機快取的 `state` 欄在 `#251` 已錯過一次。關閉只是封存程序的中間步驟（先停止寫入、再移除），不是需要外部判定的態——所以它不入三態。
+
 ## 本層不管的事
 
-- 單結束時通道側的收尾（分區封存、狀態機）：K4b。
 - 腳本與其缺陷：K4c。
 - bot 替換、環境結帳、人格檔範本：K4d。
