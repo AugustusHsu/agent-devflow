@@ -1,6 +1,6 @@
 # devflow/channels — 通道層
 
-kit 的第五層。`forges/` 定工作產物住哪、`orchestrators/` 定誰驅動流程、`coders/` 定用什麼工具實作、`seats/` 定職位；**本層定 seat 與人之間的對話介面住哪**。由 `devflow.yml` 的頂層鍵 `channel` 選用（值域 `none | telegram`，省略＝`none`），每個值對應本目錄一張對照表：`none.md`、`telegram.md`。規則本體在 `WORKFLOW.md` 第 13 節（`CH1`、`CH2`），行為人是協調位（`seats/coordinator.md`）。
+kit 的第五層。`forges/` 定工作產物住哪、`orchestrators/` 定誰驅動流程、`coders/` 定用什麼工具實作、`seats/` 定職位；**本層定 seat 與人之間的對話介面住哪**。由 `devflow.yml` 的頂層鍵 `channel` 選用（值域 `none | telegram`，省略＝`none`），每個值對應本目錄一個說明檔：`none.md`、`telegram.md`。規則本體在 `WORKFLOW.md` 第 13 節（`CH1`、`CH2`），行為人是協調位（`seats/coordinator.md`）。
 
 ## 四職能
 

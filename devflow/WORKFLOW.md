@@ -9,7 +9,7 @@ version: 1.14.0.0
 
 ## 0. 變數與基準
 
-- 自變數住 `devflow.yml`：`forge`，以及 `seats` 下各職位（`seats/`）的綁定——`filler`（填充者：工具名，或 `human`）與選填的 `model`、`reasoning`；`reviewer` 另有選填的 `fallback`（`filler`、`model`；依 `R2`）；`coordinator` 省略＝`human`。其餘皆衍生值，見 `forges/`、`coders/`、`orchestrators/` 對照表；對照表每格標狀態（`R9`），非 `✅` 不得當作可用；實測狀態的認定依 `R7`、`R8`，不因 `stage` 放寬。
+- 自變數住 `devflow.yml`：`forge`、`channel`（第 13 節 `CH1`；省略＝`none`）、`autonomy`（`I8`；省略＝`manual`），以及 `seats` 下各職位（`seats/`）的綁定——`filler`（填充者：工具名，或 `human`）與選填的 `model`、`reasoning`；`reviewer` 另有選填的 `fallback`（`filler`、`model`；依 `R2`）；`coordinator` 省略＝`human`。其餘皆衍生值，見 `forges/`、`coders/`、`orchestrators/`、`channels/` 對照表；對照表每格標狀態（`R9`），非 `✅` 不得當作可用；實測狀態的認定依 `R7`、`R8`，不因 `stage` 放寬。
 - 每個任務固定兩個基準，寫在 issue 與 PR：
   - **治理基準 G**：本任務遵守的 `devflow/WORKFLOW.md` commit。
   - **開發目標 T**：本任務要實現的規格 commit 與 AC 清單。

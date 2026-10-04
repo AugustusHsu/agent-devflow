@@ -1,6 +1,6 @@
 # <專案名> 的 agent-devflow 設定。複製到 repo 根目錄後編輯這一份，不要改 devflow/ 下的任何檔
 # ——`devflow/**` 是 kit 的，下一次安裝或升級會把你的修改覆寫或刪除。
-# 只有 forge 與 seats（各職位的綁定）是自變數；其餘（PR/MR、CLI、入口檔、skills 目錄、派工方式）
+# 只有 `forge`、`channel`、`autonomy` 與 `seats`（各職位的綁定）是自變數；其餘（PR/MR、CLI、入口檔、skills 目錄、派工方式）
 # 都是衍生值，由 devflow/ 下的對照表產生，不在這裡寫（唯一例外：implementer_filler 投影，見下）。
 # 規則本體：devflow/WORKFLOW.md。
 
