@@ -384,8 +384,21 @@ def issue_meta(thread: str) -> tuple[str | None, str, str | None]:
 
     掃到 `T>1` 的 issue 時 raise `_marker.InvalidMarker`——**不**退回 `thread NNNN`
     的 fallback、**不**續掃。下面的 `except Exception` 是給「forge 不可用」用的，
-    INVALID 必須穿過它（`#285` `BLOCK-1`：續掃可能在另一張 issue 命中同一 thread
-    而把匯出檔掛到那張單）。
+    INVALID 必須穿過它（`#285` `BLOCK-1` 第 2 輪：續掃可能在另一張 issue 命中同一
+    thread 而把匯出檔掛到那張單）。
+
+    迴圈**掃完整個列表才回傳**，不在第一個命中就 return（`#285` `BLOCK-1` 第 3 輪）：
+    早退使「停不停下」取決於 `gh issue list` 的回傳順序——INVALID 的單排在命中之後
+    就不會被 `has_topic` 看到。同一份資料只改順序就改變判定，那不是判定。
+    掃完才決定也使下述「多張單主張同一 thread」得以被發現。
+
+    兩種 INVALID 都停下：
+      * 任一張 issue 的 body 自身 `T>1`（由 `has_topic` raise）
+      * 掃完有**多張不同 issue** 都合法命中同一 thread（本函式 raise）。
+        理論上不該發生（`ensure` 的 upsert 對單張單維持 `T=1`，而 thread id 由
+        Telegram 配發、不重複），但真的發生時「該 thread 屬哪一張單」沒有單一答案，
+        與 `T>1` 同型，故同樣停下而非取第一個——取第一個就是把匯出檔掛到
+        「排序上剛好在前」的那張單，正是本單在修的病。
     """
     if CACHE.exists():
         data = json.loads(CACHE.read_text() or "{}")
@@ -400,9 +413,21 @@ def issue_meta(thread: str) -> tuple[str | None, str, str | None]:
             ["gh", "issue", "list", "-R", "AugustusHsu/agent-devflow", "--state", "all",
              "--limit", "300", "--json", "number,title,body,state"],
             capture_output=True, stdin=subprocess.DEVNULL, timeout=60, text=True).stdout
+        hits = []
         for item in json.loads(out or "[]"):
+            # 掃完才回傳：不在第一個命中就 return，否則排在後面的 T>1 不會被看到。
             if _marker.has_topic(item.get("body") or "", thread):
-                return str(item["number"]), item["title"], (item.get("state") or "").upper()
+                hits.append(item)
+        if len(hits) > 1:
+            raise _marker.InvalidMarker(
+                "topic",
+                [f"#{h['number']} {h.get('title', '')}".rstrip() for h in hits],
+                f"反向查找 thread={thread}",
+                summary=f"thread={thread} 被 {len(hits)} 張不同的 issue 主張",
+            )
+        if hits:
+            return (str(hits[0]["number"]), hits[0]["title"],
+                    (hits[0].get("state") or "").upper())
     except _marker.InvalidMarker:
         raise                      # INVALID 要停下，不是 forge 不可用——不得被下面吞掉
     except Exception:  # noqa: BLE001 — forge 不可用時退回 thread 命名

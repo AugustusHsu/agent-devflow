@@ -57,14 +57,18 @@ class InvalidMarker(Exception):
     供腳本層原樣印到 stderr。
     """
 
-    def __init__(self, kind: str, lines: list[str], detail: str = ""):
+    def __init__(self, kind: str, lines: list[str], detail: str = "",
+                 summary: str = ""):
         self.kind = kind            # "topic" / "archived"
         self.lines = list(lines)    # 全部命中行的字面
         body = "\n".join(f"  {ln}" for ln in self.lines)
         self.detail = detail
         suffix = f"（{detail}）" if detail else ""
+        # `summary` 供「同一 thread 被多張 issue 主張」這種跨 issue 的歧義改寫開頭句；
+        # 省略時用預設的「標記出現 N 次」（單一 body 內 T>1／A>1 的情形）。
+        head = summary or f"{kind} 標記出現 {len(self.lines)} 次"
         super().__init__(
-            f"INVALID: {kind} 標記出現 {len(self.lines)} 次，"
+            f"INVALID: {head}，"
             f"依 CH3（channels/README.md:61）不得視為任一態{suffix}\n{body}"
         )
 

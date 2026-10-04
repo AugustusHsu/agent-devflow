@@ -416,59 +416,235 @@ def _ac5_block1():
         check("AC-5／BLOCK-1 has_archived 遇 A>1 亦 raise", False, "回傳了布林值")
 
 
-@case("AC-5／BLOCK-1 archive 腳本層：stderr 印 INVALID 與命中行、exit 非 0、無匯出檔")
-def _ac5_block1_script():
+def _seed_home(home: Path):
+    """種一則 thread=2620 的訊息，否則 _export 在 collect() 就 SystemExit，走不到 issue_meta。"""
     import sqlite3
     import time
+    now = time.time()
+    for prof in ("dfcoord", "dfmgr", "dfrev", "dfimpl"):
+        d = home / ".hermes" / "profiles" / prof
+        d.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(d / "state.db")
+        conn.execute("create table sessions (id TEXT PRIMARY KEY, source TEXT, "
+                     "thread_id TEXT, started_at REAL)")
+        conn.execute("create table messages (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                     "session_id TEXT, role TEXT, content TEXT, tool_name TEXT, "
+                     "tool_calls TEXT, timestamp REAL, display_kind TEXT)")
+        if prof == "dfcoord":
+            conn.execute("insert into sessions (id,source,thread_id,started_at) "
+                         "values ('s1','telegram','2620',?)", (now,))
+            conn.execute("insert into messages (session_id,role,content,timestamp) "
+                         "values ('s1','user','誘餌訊息',?)", (now,))
+        conn.commit()
+        conn.close()
+
+
+def _fake_gh(bin_: Path, rows):
+    """假 gh：`issue list` 回 rows，其餘呼叫一律失敗。"""
+    fake = bin_ / "gh"
+    fake.write_text("#!/usr/bin/env python3\n"
+                    "import json, sys\n"
+                    "a = sys.argv[1:]\n"
+                    "if a[:2] == ['issue', 'list']:\n"
+                    f"    print(json.dumps({rows!r}))\n"
+                    "    sys.exit(0)\n"
+                    "print('unexpected gh call', file=sys.stderr)\n"
+                    "sys.exit(8)\n")
+    fake.chmod(0o755)
+
+
+def _run_archive_cli(rows, label: str, *, script: Path | None = None,
+                     expect_stop: bool = True):
+    """以子程序跑 `devflow_archive.py export 2620`，斷言停下（或在突變下不停）。
+
+    `script` 可指向突變複本（鑑別力子測試用）；`expect_stop=False` 時反向斷言
+    ——證明這些斷言真的在檢驗停下的行為。
+    """
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
         home, bin_ = td / "home", td / "bin"
         bin_.mkdir()
-        # 假 gh：#285 為 T=2 的 INVALID 單，#286 合法且持有同一 thread（審查位的反例）
-        fake = bin_ / "gh"
-        fake.write_text("#!/usr/bin/env python3\n"
-                        "import json, sys\n"
-                        "a = sys.argv[1:]\n"
-                        "if a[:2] == ['issue', 'list']:\n"
-                        f"    print(json.dumps({BLOCK1_ROWS!r}))\n"
-                        "    sys.exit(0)\n"
-                        "print('unexpected gh call', file=sys.stderr)\n"
-                        "sys.exit(8)\n")
-        fake.chmod(0o755)
-        # 種一則訊息，否則 _export 在 collect() 就 SystemExit，走不到 issue_meta
-        now = time.time()
-        for prof in ("dfcoord", "dfmgr", "dfrev", "dfimpl"):
-            d = home / ".hermes" / "profiles" / prof
-            d.mkdir(parents=True, exist_ok=True)
-            conn = sqlite3.connect(d / "state.db")
-            conn.execute("create table sessions (id TEXT PRIMARY KEY, source TEXT, "
-                         "thread_id TEXT, started_at REAL)")
-            conn.execute("create table messages (id INTEGER PRIMARY KEY AUTOINCREMENT, "
-                         "session_id TEXT, role TEXT, content TEXT, tool_name TEXT, "
-                         "tool_calls TEXT, timestamp REAL, display_kind TEXT)")
-            if prof == "dfcoord":
-                conn.execute("insert into sessions (id,source,thread_id,started_at) "
-                             "values ('s1','telegram','2620',?)", (now,))
-                conn.execute("insert into messages (session_id,role,content,timestamp) "
-                             "values ('s1','user','誘餌訊息',?)", (now,))
-            conn.commit()
-            conn.close()
+        _fake_gh(bin_, rows)
+        _seed_home(home)
         env = dict(os.environ, HOME=str(home),
                    PATH=f"{bin_}:{os.environ.get('PATH', '')}",
                    PYTHONDONTWRITEBYTECODE="1")
-        r = subprocess.run([PY, str(SCRIPTS / "devflow_archive.py"), "export", "2620"],
+        r = subprocess.run([PY, str(script or (SCRIPTS / "devflow_archive.py")),
+                            "export", "2620"],
                            capture_output=True, text=True, env=env,
                            stdin=subprocess.DEVNULL, timeout=120)
-        detail = f"exit={r.returncode}\n--- stdout ---\n{r.stdout}--- stderr ---\n{r.stderr}"
-        check("AC-5／BLOCK-1 腳本 exit 非 0", r.returncode != 0, detail)
-        check("AC-5／BLOCK-1 stderr 含 INVALID 字樣", "INVALID" in r.stderr, detail)
-        check("AC-5／BLOCK-1 stderr 含兩行命中的字面",
-              all(ln in r.stderr for ln in F3_LINES), detail)
-        check("AC-5／BLOCK-1 stderr 不只是 traceback（有可讀的 INVALID 行）",
-              "Traceback" not in r.stderr, detail)
-        check("AC-5／BLOCK-1 未產生匯出檔（不得掛到 #286）",
-              not list((home / ".hermes" / "archives").rglob("*")),
-              detail + f"\n殘留：{[str(p) for p in (home / '.hermes' / 'archives').rglob('*')]}")
+        leftovers = [str(p) for p in (home / ".hermes" / "archives").rglob("*")
+                     if p.is_file()]
+        detail = (f"exit={r.returncode}\n--- stdout ---\n{r.stdout}"
+                  f"--- stderr ---\n{r.stderr}")
+        if expect_stop:
+            check(f"{label} 腳本 exit 非 0", r.returncode != 0, detail)
+            check(f"{label} stderr 含 INVALID 字樣", "INVALID" in r.stderr, detail)
+            check(f"{label} stderr 含兩行命中的字面",
+                  all(ln in r.stderr for ln in F3_LINES), detail)
+            check(f"{label} stderr 不只是 traceback（有可讀的 INVALID 行）",
+                  "Traceback" not in r.stderr, detail)
+            check(f"{label} 未產生匯出檔（不得掛到 #286）",
+                  not leftovers, detail + f"\n殘留：{leftovers}")
+        else:
+            check(f"{label} 鑑別力：突變版確實不停下（exit 0 ＋ 產生匯出檔）",
+                  r.returncode == 0 and leftovers, detail + f"\n殘留：{leftovers}")
+            check(f"{label} 鑑別力：突變版把匯出檔掛到了 #286",
+                  any(Path(p).name.startswith("286.") for p in leftovers),
+                  f"殘留：{leftovers}")
+        return r, leftovers
+
+
+@case("AC-5／BLOCK-1 archive 腳本層：stderr 印 INVALID 與命中行、exit 非 0、無匯出檔")
+def _ac5_block1_script():
+    _run_archive_cli(BLOCK1_ROWS, "AC-5／BLOCK-1")
+
+
+# ── AC-5（第 3 輪補）BLOCK-1：停不停下不得取決於 gh 的回傳順序 ───────────────
+# 審查位 R1 第 2 輪的 BLOCK-1 反例：第 2 輪的 issue_meta 在第一個合法命中就 return，
+# 於是排在它後面的 T>1 單根本不會送進 has_topic。同一份資料只把順序反轉，
+# 「停下」就變成「回傳 ('286','valid-first','OPEN')、exit 0」——那不是判定。
+# 處置：掃完整個列表才回傳。
+# 標題與審查位反例逐字相同（valid-first／invalid-after），body 與 BLOCK1_ROWS 同。
+BLOCK1_ROWS_REVERSED = [
+    {"number": 286, "title": "valid-first",
+     "body": BLOCK1_ROWS[1]["body"], "state": "OPEN"},
+    {"number": 285, "title": "invalid-after",
+     "body": BLOCK1_ROWS[0]["body"], "state": "OPEN"},
+]
+
+# 多張不同 issue 都合法主張同一 thread（掃完才可能發現；本實作視為 INVALID）
+MULTI_CLAIM_ROWS = [
+    {"number": 286, "title": "claim-A",
+     "body": "<!-- devflow:topic thread=2620 -->\n", "state": "OPEN"},
+    {"number": 287, "title": "claim-B",
+     "body": "<!-- devflow:topic thread=2620 -->\n", "state": "CLOSED"},
+]
+
+
+def _early_return_copy(td: Path) -> Path:
+    """`issue_meta` 恢復第 2 輪「第一個命中就 return」的突變複本。
+
+    與 `_marker.py` 放同一個暫存目錄，故突變複本的 `import _marker` 仍解析得到
+    （受測的是 archive 的迴圈，不是 grammar）。
+    """
+    src = (SCRIPTS / "devflow_archive.py").read_text()
+    mutated = src.replace(
+        """        hits = []
+        for item in json.loads(out or "[]"):
+            # 掃完才回傳：不在第一個命中就 return，否則排在後面的 T>1 不會被看到。
+            if _marker.has_topic(item.get("body") or "", thread):
+                hits.append(item)""",
+        """        for item in json.loads(out or "[]"):
+            if _marker.has_topic(item.get("body") or "", thread):
+                return str(item["number"]), item["title"], (item.get("state") or "").upper()
+        hits = []""",
+    )
+    assert mutated != src, "突變未套用——early-return 的目標字串已變，鑑別力子測試失效"
+    out = td / "devflow_archive.py"
+    out.write_text(mutated)
+    (td / "_marker.py").write_text((SCRIPTS / "_marker.py").read_text())
+    return out
+
+
+@case("AC-5／BLOCK-1(3) 反序 fixture：合法 #286 在前、INVALID #285 在後 → 仍 raise")
+def _ac5_block1_order():
+    kind, val = _issue_meta_with(BLOCK1_ROWS_REVERSED)
+    check("AC-5／BLOCK-1(3) 反序時 issue_meta 仍 raise InvalidMarker",
+          kind == "raise", f"實得 {kind}={val!r}")
+    check("AC-5／BLOCK-1(3) 反序時不得回傳 ('286', …)",
+          not (kind == "return" and val and val[0] == "286"), f"實得 {val!r}")
+    if kind == "raise":
+        msg = str(val)
+        check("AC-5／BLOCK-1(3) 反序的例外訊息含 INVALID 與兩行字面",
+              "INVALID" in msg and all(ln in msg for ln in F3_LINES), msg)
+
+    # 順序無關性：正序與反序必須得到同一種結果（同一份資料，只改順序）
+    kind_f, val_f = _issue_meta_with(BLOCK1_ROWS)
+    check("AC-5／BLOCK-1(3) 正序與反序結果一致（順序不改變判定）",
+          kind_f == kind == "raise" and str(val_f) == str(val),
+          f"正序 {kind_f}={val_f!r}\n        反序 {kind}={val!r}")
+
+
+@case("AC-5／BLOCK-1(3) 反序 fixture 的 CLI 層：rc 非 0、stderr 含 INVALID 與兩行、無匯出檔")
+def _ac5_block1_order_cli():
+    _run_archive_cli(BLOCK1_ROWS_REVERSED, "AC-5／BLOCK-1(3) 反序")
+
+
+@case("AC-5／BLOCK-1(3) 鑑別力：恢復 early return 後反序子測試須 FAIL")
+def _ac5_block1_order_mutation():
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        mut_path = _early_return_copy(td)
+        # 函式層：載入突變複本，反序時它會回傳 #286（＝BLOCK-1 的危害）
+        spec = importlib.util.spec_from_file_location("devflow_archive_mut", mut_path)
+        mut = importlib.util.module_from_spec(spec)
+        sys.modules["devflow_archive_mut"] = mut
+        spec.loader.exec_module(mut)
+
+        def fake_run(cmd, *a, **kw):
+            return subprocess.CompletedProcess(
+                cmd, 0, json.dumps(BLOCK1_ROWS_REVERSED), "")
+
+        orig_run = subprocess.run
+        mut.CACHE = td / "nonexistent.json"
+        subprocess.run = fake_run
+        try:
+            got = ("return", mut.issue_meta("2620"))
+        except marker.InvalidMarker as e:
+            got = ("raise", e)
+        finally:
+            subprocess.run = orig_run
+        check("AC-5／BLOCK-1(3) 鑑別力：突變版在反序下回傳 ('286','valid-first','OPEN')",
+              got == ("return", ("286", "valid-first", "OPEN")),
+              f"實得 {got[0]}={got[1]!r} —— 若此處不成立，反序斷言就不是在檢驗順序無關性")
+        # 突變版在正序下仍 raise——正是「同一份資料只改順序就改變判定」的證明
+        subprocess.run = lambda cmd, *a, **kw: subprocess.CompletedProcess(
+            cmd, 0, json.dumps(BLOCK1_ROWS), "")
+        try:
+            got2 = ("return", mut.issue_meta("2620"))
+        except marker.InvalidMarker as e:
+            got2 = ("raise", e)
+        finally:
+            subprocess.run = orig_run
+        check("AC-5／BLOCK-1(3) 鑑別力：突變版正序 raise、反序 return（順序改變判定）",
+              got2[0] == "raise" and got[0] == "return",
+              f"正序 {got2[0]}　反序 {got[0]}")
+
+        # CLI 層：突變複本在反序下 exit 0 且把匯出檔掛到 #286
+        _run_archive_cli(BLOCK1_ROWS_REVERSED, "AC-5／BLOCK-1(3) 反序",
+                         script=mut_path, expect_stop=False)
+
+
+@case("AC-5／BLOCK-1(3) 多張不同 issue 主張同一 thread → 視為 INVALID 停下")
+def _ac5_multi_claim():
+    kind, val = _issue_meta_with(MULTI_CLAIM_ROWS)
+    check("AC-5／BLOCK-1(3) 兩張單都合法命中 2620 時 raise（不取第一個）",
+          kind == "raise", f"實得 {kind}={val!r}")
+    if kind == "raise":
+        msg = str(val)
+        check("AC-5／BLOCK-1(3) 訊息含 INVALID 與兩張單號",
+              "INVALID" in msg and "#286" in msg and "#287" in msg, msg)
+        check("AC-5／BLOCK-1(3) 例外是模組共用的那個類別",
+              type(val) is marker.InvalidMarker, f"{type(val)!r}")
+    # 三張時數目正確
+    kind3, val3 = _issue_meta_with(MULTI_CLAIM_ROWS + [
+        {"number": 288, "title": "claim-C",
+         "body": "<!-- devflow:topic thread=2620 -->\n", "state": "OPEN"}])
+    check("AC-5／BLOCK-1(3) 三張時訊息回報 3 張",
+          kind3 == "raise" and "3 張" in str(val3) and "#288" in str(val3),
+          f"實得 {kind3}={val3!r}")
+    # 對照組：恰一張命中時照常回傳（多張判定不影響正常路徑）
+    kind1, val1 = _issue_meta_with([MULTI_CLAIM_ROWS[0]])
+    check("AC-5／BLOCK-1(3) 對照組：恰一張命中時照常回傳",
+          (kind1, val1) == ("return", ("286", "claim-A", "OPEN")),
+          f"實得 {kind1}={val1!r}")
+    # 對照組：無命中時仍退回 thread 命名（fallback 未被破壞）
+    kind0, val0 = _issue_meta_with([
+        {"number": 286, "title": "無關", "body": "# 沒有標記\n", "state": "OPEN"}])
+    check("AC-5／BLOCK-1(3) 對照組：無命中時退回 `thread 2620`",
+          (kind0, val0) == ("return", (None, "thread 2620", None)),
+          f"實得 {kind0}={val0!r}")
 
 
 # ── AC-6 grammar 單一來源且逐字相同 ────────────────────────────────────────
