@@ -87,7 +87,7 @@ gh pr create --base main --head <N>-<slug> --title "<gitmoji> <type>(<scope>): <
 
 **派審者依綁定**：`devflow.yml` 的 `seats.manager` 已綁定時由 manager 派（`seats/manager.md`），未綁定時該職責歸協調位，由協調位自派——不寫死為協調位。
 
-兩種 `launch` 共通的前置：fresh context、與實作位異廠（`R2`）、丟棄式 checkout（`R12`；`coders/codex.md` 「審查用法（`R1`）」格，引用前查狀態 `R9`）。**本輪專用暫存目錄與丟棄式 checkout 一律由派工者建立**，建好後把兩個路徑寫進 prompt 的材料段；**審查位不自建**，收到的就是派工者建好的路徑（第 10 步 (0) 的守衛即以此為前提）。
+兩種 `launch` 共通的前置：fresh context、與實作位異廠——`R2` 的異廠是**建議**不是必需：只有一家可用時用同廠的全新 context，同廠時另建議所用模型與實作位（`seats.implementer.model`）不同、同廠只有一個堪用模型時全新 context 即滿足（`seats/reviewer.md` 的例外分支同此）、丟棄式 checkout（`R12`；`coders/codex.md` 「審查用法（`R1`）」格，引用前查狀態 `R9`）。**本輪專用暫存目錄與丟棄式 checkout 一律由派工者建立**，建好後把兩個路徑寫進 prompt 的材料段；**審查位不自建**，收到的就是派工者建好的路徑（第 10 步 (0) 的守衛即以此為前提）。
 
 以下依被派那一位的 `launch` 分支（`devflow.yml` 的 `seats.reviewer.launch`，省略時為 `cli`）。
 
@@ -114,7 +114,7 @@ env TMPDIR="$T" codex exec -C "$D" --sandbox workspace-write -m <model> -c model
 ~/.hermes/scripts/devflow_relay.py <thread> --file <審查稿> -p <instance> --issue <N> --fresh --pace quiet [-m <model> --provider <name>]
 ```
 
-- `--fresh` **不可省**：`R1` 要求 fresh context，同一 session 不得對自己的工作簽 verdict。具名實例的 session 會累積，省掉就是讓上一輪的審查位（或實作位）接著審自己。
+- `--fresh` **不可省**：`R1` 要求每輪 fresh context。具名實例的 session 會累積，省掉即延續前一輪審查位的 context——前輪的判斷與取捨跟著進本輪，`R1` 要的「每輪全新」就不成立。
 - `--pace quiet`：避免審查位的投影與派工者自己的投影在同一通道交錯（第二節「投影」）。
 - 沙箱依 `R12`：可寫根收斂到該 checkout ＋本輪暫存目錄；平台設不起可寫根收斂時，該輪改**唯讀**執行，並於派工 prompt 與 verdict 留言**雙方註明**（`R12`）——「不得自行升權」不因此豁免。
 - `-m`／`--provider` 只在換模型時帶。verdict 的受測環境依 `R10` 寫**當次實際使用的**模型與 provider，不得照抄 `devflow.yml` 的預設綁定。
@@ -437,5 +437,10 @@ gh issue view <N> --json state --jq .state
 - 對照表引用行號會漂移——引用格用「面向」名稱，不用 `file:line`。
 - Codex 配額耗盡：形狀依派工時的 `launch` 分支（第 7 步），判定錯一邊就會把「配額擋住」誤讀成「審完了」。
   - `launch: cli`（`codex exec`）：以 `turn.failed` 收尾（稍早一則同句 `error`，其在事件流中的位置隨觀測而異）、exit 1、`-o` 不寫，恢復點只在訊息的 `try again at …`（觀測次數、`error` 的位置與受測環境以 `coders/codex.md` 「配額中斷」格為準，`📝`）。
-  - `launch: agent`（具名實例經轉播器）：事件流末則是 `{"type":"result","exit_code":1,…,"error":"HTTP 429: The usage limit has been reached"}`，**不是** `turn.failed`；恢復點載於 `Limit resets at 01:55 (in 33h 42m)`——**相對時距**（`in Nh Nm`），不是絕對時刻，換算基準是讀到該行的時間，隔夜再算就偏。⚠️ 轉播器把這個結束投影為「❌ 結束」而**非錯誤**，**派工者須讀事件流原文判定，不可只看投影**——只看投影會把配額耗盡當成正常收工，接著去等一個永遠不會出現的 verdict。來源：`#272`（2026-10-02，`hermes -p dfrev chat --oneshot --format stream-json`）https://github.com/AugustusHsu/agent-devflow/issues/272#issuecomment-5947986219 。
-  - 兩者共同：配額綁**帳號**（訊息把恢復點與購買額度都指向 `chatgpt.com/codex/settings/usage`，非 thread 層級），換 context、換 thread、換具名實例都不會繞過。日上限（給當日時刻或短時距）：依第六節 sleep 到恢復再派；週上限（給日期或長時距）：不等——審查位依 `R2` 改派，用 `devflow.yml` 的 `seats.reviewer.fallback` 事先定下的那組，**不臨場選替代**（`I7` 不得新增 `devflow.yml` 未宣告的綁定候選、`R2` 要事先定下）；被擋的是實作位時 `R2` 不適用（它只管審查位），改派異廠或依第六節等恢復。
+  - `launch: agent`（具名實例經轉播器）`📝`：**本形狀僅一次觀測**（`coders/codex.md` 「配額中斷」格的第四次觀測，前三次皆為 `cli`），故以下寫的是**本次觀測為**何，不是所有 agent 配額中斷必然如此——引用前查該格狀態（`R9`）。本次觀測：事件流末則為 `{"type":"result","exit_code":1,…,"error":"HTTP 429: The usage limit has been reached"}`，**不是** `turn.failed`；恢復點載於 `Limit resets at 01:55 (in 33h 42m)`——**相對時距**（`in Nh Nm`），不是絕對時刻，換算基準是讀到該行的時間，隔夜再算就偏。⚠️ 轉播器把這個結束投影為「❌ 結束」而**非錯誤**，**派工者須讀事件流原文判定，不可只看投影**——只看投影會把配額耗盡當成正常收工，接著去等一個永遠不會出現的 verdict。來源：`#272`（2026-10-02，`hermes -p dfrev chat --oneshot --format stream-json`）https://github.com/AugustusHsu/agent-devflow/issues/272#issuecomment-5947986219 。
+  - 兩者共同：配額綁**帳號**（訊息把恢復點與購買額度都指向 `chatgpt.com/codex/settings/usage`，非 thread 層級），換 context、換 thread、換具名實例都不會繞過。日上限與週上限**依訊息語意分**，不靠未定義的時距長短：給當日時刻（`try again at 12:36 AM`）或 `in Nh Nm` 且當日可到者為**日上限**；給日期（`Sep 26th, 2026 8:02 PM`）或換算後跨日者為**週上限**（本次 agent 實例的 `in 33h 42m` 跨日，屬週上限）。拿不準時以帳號頁面 `chatgpt.com/codex/settings/usage` 為準，不自行猜。
+    - 日上限：依第六節 sleep 到恢復再派。
+    - 週上限：不等。審查位依 `R2` 改派，分兩種情形——
+      - `devflow.yml` 的 `seats.reviewer.fallback` **已宣告**：只用該組（`R2` 要求事先定下，不臨場選）。
+      - `fallback` **省略**（它是選填）：**不得**臨場新增 `devflow.yml` 未宣告的綁定候選（`I7`）——停下交人裁示（在 issue 留言寫明被擋的位、恢復點與候選方案，依 `L3`），或依第六節等恢復；兩者都不是自己挑一個工具就派。
+      - 被擋的是實作位時 `R2` 不適用（它只管審查位），改派異廠或依第六節等恢復。
