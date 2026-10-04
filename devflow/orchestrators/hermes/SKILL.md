@@ -169,13 +169,134 @@ prompt 以 `templates/review-prompt.md` 為底，另加：
   - T 的漏洞 → 依 `F2`。Hermes 側：問人、答案寫回原 issue（`L3` 通道）→ T 修訂作為新任務走步驟 1～10（新 issue／分支／worktree；原分支已承載開啟中的 PR，不再開第二張；原任務 coder 已停、worktree 依 `C3` 保留）→ 合入後把原 issue 的 T 更新為新 commit、影響分析留言 → 重派原任務。
 - head 變更後重審（`R3`）；下一輪 prompt 縮窄到變更處＋未通過的 AC。
 - `APPROVE` → 步驟 9。
-- **回收本輪的輪級暫存目錄**：verdict 處理完畢（上列各項都已做完、下一輪尚未派出）即刪第 7 步建的 `$T`（`devflow-rev.$TOKEN.??????`）與 `$D`（`devflow-co.$TOKEN.??????`），`R12` 的「隨暫存目錄丟棄」在此生效。**`$W` 不在本步回收**——它是單級的，下一輪要沿用（驗收腳本、交接稿、工作 clone 都在裡面），其回收在第 10 步守衛。回收與否不影響續審：下一輪 prompt 的「已判通過不重審」清單是 prompt 的一部分、由派工者派審時寫進去，不是 `$T` 裡的檔案（`R3`）。需留存的 verdict 原文此時已貼成 PR 留言（`R5`），forge 是權威。
+- **回收本輪的輪級暫存目錄**：verdict 處理完畢（上列各項都已做完、下一輪尚未派出）即刪第 7 步建的 `$T`（`devflow-rev.$TOKEN.??????`）與 `$D`（`devflow-co.$TOKEN.??????`），`R12` 的「隨暫存目錄丟棄」在此生效。下方區塊可直接照抄實跑，它是第 10 步守衛本體的可執行副本（程式碼逐行相同，只有呼叫參數不同），**不是另寫一支 `rm -rf`**——那會是第二條、且較弱的刪除路徑，而守衛存在的理由就是占位填錯＝`rm -rf` 打在別處。**`$W` 不在本步回收**——它是單級的，下一輪要沿用（驗收腳本、交接稿、工作 clone 都在裡面），其回收在第 10 步守衛。回收與否不影響續審：下一輪 prompt 的「已判通過不重審」清單是 prompt 的一部分、由派工者派審時寫進去，不是 `$T` 裡的檔案（`R3`）。需留存的 verdict 原文此時已貼成 PR 留言（`R5`），forge 是權威。
 
 ```bash
-# 本輪的輪級回收。執行第 10 步的守衛本體（原文見該步，整段照抄，本步不另寫一支），
-# 末四個位置參數填 "<第 7 步的 $T>" "<第 7 步的 $D>" "-" "<第 7 步的 $TOKEN>"：
-# 第三個占位填 `-` 即「本步不回收 $W」，守衛對它不驗、不刪，其餘兩位的白名單三項判準照常。
-# 不在本步另寫一支 rm -rf：那會是第二條、且較弱的刪除路徑（守衛存在的理由就是占位填錯＝rm -rf 打在別處）。
+# 本輪的輪級回收。下面是第 10 步 (0) 守衛本體的**可執行副本**：程式碼逐行相同，
+#   唯一的差異是末行的呼叫參數——占位 1、2 填本輪的 $T／$D，占位 3 填 `-`（$W 跨輪沿用、
+#   不在本步回收，其回收在第 10 步）。每一項判準的理由、符號與反例原文見第 10 步，此處不重述。
+# 為何整段複製而非在本步只留一行指引：第 8 步要能照抄實跑（前一版只有兩個 ls 後置檢查，照它執行不刪任何東西，
+#   PR #284 第 1 輪 BLOCK 1），而 kit 不帶可 source 的腳本檔（SKILL.md 是條文，不是套件），故副本是唯一能
+#   同時滿足「本步自身可執行」與「不另立第二條較弱的刪除路徑」的形狀。代價是兩份要同步，以機械核對綁住：
+#   兩份的非註解行必須逐行相同、差異只許出現在呼叫行（' _ 那行）。核對指令：
+#   /usr/bin/python3 - devflow/orchestrators/hermes/SKILL.md <<'PY'
+#   import re,sys
+#   d=open(sys.argv[1]).read()
+#   def g(n):
+#       s=re.search(r"^### %d\..*?(?=^### \d+\.|\Z)"%n, d, re.S|re.M).group(0)
+#       b=[x for x in re.findall(r"```bash\n(.*?)\n```", s, re.S) if "/usr/bin/env -i" in x][0]
+#       v=[l for l in b.split(chr(10)) if not l.lstrip().startswith("#")]
+#       return v[:v.index(")")+1]   # 只比守衛本體，不含其後的後置檢查
+#   a,b=g(8),g(10)
+#   diff=[(x,y) for x,y in zip(a,b) if x!=y]
+#   ok = len(a)==len(b) and len(diff)==1 and diff[0][0].startswith("' _ ")
+#   print("一致（差異僅呼叫行）" if ok else "已漂移：%r"%(diff or (len(a),len(b))))
+#   PY
+(
+  /usr/bin/env -i \
+    HOME="$HOME" TMPDIR="${TMPDIR:-}" PATH=/usr/bin:/bin \
+    /bin/bash --noprofile --norc -c '
+  set -u
+  [ $# -eq 4 ] || { echo "須恰三個占位路徑＋本輪 token，停" >&2; exit 1; }
+  TOKEN=$4
+  case "$TOKEN" in
+    "" | *[!A-Za-z0-9]*) echo "本輪 token 須非空且僅含 A-Za-z0-9，停：$TOKEN" >&2; exit 1 ;;
+  esac
+  ISSUE=${TOKEN%%r*}
+  case "$ISSUE" in
+    "" | *[!0-9]*) echo "由 token 推導的 issue 號須非空且僅含 0-9，停：$ISSUE（token=$TOKEN）" >&2; exit 1 ;;
+  esac
+  NL=$(printf "\nx"); NL=${NL%x}
+  strip() {
+    SS=$1
+    while :; do
+      case "$SS" in ?*/) SS=${SS%/} ;; *) break ;; esac
+    done
+  }
+  ROOT="${TMPDIR:-$HOME/.cache}"
+  strip "$ROOT"; RA=$SS
+  [ -n "$RA" ] || { echo "暫存根為空，停" >&2; exit 1; }
+  inum() {
+    IN=$(ls -dLi -- "$1" 2>/dev/null) || { IN=; return 1; }
+    while :; do case "$IN" in " "*|"	"*) IN=${IN#?} ;; *) break ;; esac; done
+    IN=${IN%% *}
+    case "$IN" in "" | *[!0-9]*) IN=; return 1 ;; esac
+    return 0
+  }
+  case "$ROOT" in
+    /*) RABS=$ROOT ;;
+    *)
+      CWD0=$(pwd -P && printf x) && CWD0=${CWD0%x} || CWD0=
+      [ -n "$CWD0" ] || { echo "無法取得目前工作目錄，停" >&2; exit 1; }
+      CWD0=${CWD0%"$NL"}
+      RABS=$CWD0/$ROOT
+      ;;
+  esac
+  CDPATH= cd -P -- "$ROOT" || { echo "無法進入暫存根：$ROOT" >&2; exit 1; }
+  inum /proc/self/cwd/. || { echo "無法取得暫存根 inode（cwd）：$ROOT" >&2; exit 1; }
+  IPIN=$IN
+  inum . || { echo "無法取得釘住後的 inode，停" >&2; exit 1; }
+  ICWD=$IN
+  if [ "$IPIN" != "$ICWD" ]; then
+    echo "釘住的目錄與 /proc/self/cwd 不一致（$IPIN vs $ICWD），零刪除中止" >&2; exit 1
+  fi
+  inum "$RABS" || { echo "暫存根在守衛執行期間消失，零刪除中止：$ROOT" >&2; exit 1; }
+  IPATH=$IN
+  if [ "$IPIN" != "$IPATH" ]; then
+    echo "暫存根在守衛執行期間被換掉（釘住 inode $IPIN、路徑此刻指向 inode $IPATH），零刪除中止" >&2; exit 1
+  fi
+  RB=$(pwd -P && printf x) && RB=${RB%x} || RB=
+  [ -n "$RB" ] || { echo "無法取得暫存根的真實路徑，停" >&2; exit 1; }
+  RB=${RB%"$NL"}
+  case "$RB" in
+    /*) : ;;
+    *) echo "暫存根真實路徑非絕對路徑，停：$RB" >&2; exit 1 ;;
+  esac
+  case "$RB" in *"$NL"*) echo "暫存根真實路徑含換行，停" >&2; exit 1 ;; esac
+  strip "$RB"; RB=$SS
+  chk() {
+    CP=$1; ROLE=$2; IDX=$3; CRP=
+    if [ -z "$CP" ]; then echo "占位 $IDX 為空路徑，停" >&2; return 1; fi
+    case "$CP" in *"$NL"*) echo "占位 $IDX 路徑含換行，停" >&2; return 1 ;; esac
+    strip "$CP"; CPS=$SS
+    CPN=${CPS##*/}
+    case "$ROLE" in
+      rev) case "$CPN" in devflow-rev."$TOKEN".??????) : ;;
+             *) echo "占位 $IDX 末段非該位合法名（須 devflow-rev.$TOKEN.??????），停：$CP" >&2; return 1 ;; esac ;;
+      co)  case "$CPN" in devflow-co."$TOKEN".??????) : ;;
+             *) echo "占位 $IDX 末段非該位合法名（須 devflow-co.$TOKEN.??????），停：$CP" >&2; return 1 ;; esac ;;
+      task) case "$CPN" in devflow-task."$ISSUE".??????) : ;;
+             *) echo "占位 $IDX 末段非該位合法名（須 devflow-task.$ISSUE.??????），停：$CP" >&2; return 1 ;; esac ;;
+      *) echo "占位 $IDX 角色代號有誤（只收 rev／co／task），停" >&2; return 1 ;;
+    esac
+    strip "${CPS%/*}"; CPP=$SS
+    if [ "$CPP" != "$RA" ] && [ "$CPP" != "$RB" ]; then
+      echo "占位 $IDX 前綴非暫存根字面（須 $RA），停：$CP" >&2; return 1
+    fi
+    if [ -L "$CPN" ]; then echo "占位 $IDX 是 symlink，停：$CP" >&2; return 1; fi
+    if [ ! -d "$CPN" ]; then echo "占位 $IDX 不是現存目錄，停：$CP" >&2; return 1; fi
+    CRP=$CPN
+    return 0
+  }
+  BAD=; RP1=; RP2=; RP3=; SKIP1=; SKIP2=; SKIP3=
+  if [ "$1" = "-" ]; then SKIP1=1; else if chk "$1" rev 1; then RP1=$CRP; else BAD=1; fi; fi
+  if [ "$2" = "-" ]; then SKIP2=1; else if chk "$2" co 2; then RP2=$CRP; else BAD=1; fi; fi
+  if [ "$3" = "-" ]; then SKIP3=1; else if chk "$3" task 3; then RP3=$CRP; else BAD=1; fi; fi
+  if [ -n "$SKIP1" ] && [ -n "$SKIP2" ] && [ -n "$SKIP3" ]; then
+    echo "三個占位都填 -，沒有要回收的對象，停" >&2; BAD=1
+  fi
+  if [ -n "$RP1" ] && [ "$RP1" = "$RP2" ]; then echo "占位 1 與 2 指向同一目錄，停：$RP1" >&2; BAD=1; fi
+  if [ -n "$RP1" ] && [ "$RP1" = "$RP3" ]; then echo "占位 1 與 3 指向同一目錄，停：$RP1" >&2; BAD=1; fi
+  if [ -n "$RP2" ] && [ "$RP2" = "$RP3" ]; then echo "占位 2 與 3 指向同一目錄，停：$RP2" >&2; BAD=1; fi
+  [ -z "$BAD" ] || { echo "有占位未通過驗證，零刪除中止" >&2; exit 1; }
+  RC=0
+  [ -n "$SKIP1" ] || rm -rf -- "$RP1" || { echo "刪除失敗：$RP1" >&2; RC=1; }
+  [ -n "$SKIP2" ] || rm -rf -- "$RP2" || { echo "刪除失敗：$RP2" >&2; RC=1; }
+  [ -n "$SKIP3" ] || rm -rf -- "$RP3" || { echo "刪除失敗：$RP3" >&2; RC=1; }
+  exit $RC
+' _ "<第 7 步的 $T>" "<第 7 步的 $D>" "-" "<本輪的 $TOKEN>"
+)
+# 後置檢查（本步刪對了沒）：
 ls -1Ad "${TMPDIR:-$HOME/.cache}"/devflow-rev."$TOKEN".?????? \
          "${TMPDIR:-$HOME/.cache}"/devflow-co."$TOKEN".??????   # 期望兩者皆 No such file（rc 非 0）＝本輪已回收
 ls -1Ad "${TMPDIR:-$HOME/.cache}"/devflow-task."${TOKEN%%r*}".??????  # 期望仍在（rc 0）＝ $W 未被本步誤收
