@@ -6,20 +6,41 @@
 
 forge: github          # github | gitlab | gitea（gitea 全表 ⬜，無實例前不可選）
 
-# 職位綁定。職位名以 devflow/seats/ 的四個檔為準，不新增。每個職位一個 filler（填充者）：
+# 職位綁定。職位名以 devflow/seats/ 的五個檔為準，不新增。每個職位一個 filler（填充者）：
 # 工具名（對照表在 devflow/coders/、orchestrators/）或 human（由人填）。
 # model／reasoning 選填，未填＝用該工具的預設；旗標怎麼寫住對照表，這裡只記意圖。
 # model 是 R10 受測環境的一部分：換模型後，舊模型下驗證的格子依 R9 降為 📝。
+#
+# filler 只指**模型與能力的來源**（對照表在 devflow/coders/），不指啟動機制；啟動機制是 launch。
+# 同一個 filler 可由不同 launch 啟動；launch: agent 時 filler 指能力對照表的歸屬，不表示實際
+# 執行的是該 CLI（詳見 devflow/seats/README.md）。launch 的值域與語意：
+#
+#   | launch | 語意 | 可續接 | 能向人提問 | 對照表 |
+#   |---|---|---|---|---|
+#   | cli（省略時的預設） | 直接起 CLI 子程序（codex exec、claude -p） | ✅ | ✅ | coders/<filler>.md |
+#   | agent | 協調平台上的具名實例，由平台機制喚醒；需 instance 欄 | ✅ | ✅ | orchestrators/<平台>.md |
+#   | subagent | 平台內建的臨時子代理 | ❌ | ❌ | 同上 |
+#   | human | 人親自執行 | — | — | orchestrators/none.md |
+#
+# 向後相容：launch 省略 ＝ cli，既有設定不受影響。值域刻意平台中立——平台已由
+# seats.coordinator.filler 宣告，seat 欄位不重複它。
 seats:
   implementer:               # 實作位
     filler: human            # claude-code | codex | human
   reviewer:                  # 審查位；建議與 implementer 異廠（R2）
     filler: human            # codex | claude-code | human
+    # launch: cli            # 啟動機制：cli | agent | subagent | human
+    # instance: <具名實例>     # 只在 launch: agent 時需要；平台上那個實例的名字
     # model: <工具的模型 ID>
     # reasoning: high        # 思考程度；值的寫法依工具
     # fallback:              # 選填；主 filler 不可用（配額耗盡等）時改用這組，事先定下而非臨場選（R2）
-    #   filler: <工具名>
-    #   model: <工具的模型 ID>   # filler 與 implementer 同廠時，R2 建議此值 ≠ seats.implementer.model
+    #   model: <工具的模型 ID>   # `filler` 省略＝沿用主綁定的 filler 與 launch，只換 model／provider
+    #   filler: <工具名>        # 要換廠才寫；與 implementer 同廠時，R2 建議上面的 model ≠ seats.implementer.model
+  # manager:                 # 執行位（seats/manager.md）；省略＝本位職責歸協調位
+  #   filler: <工具名>
+  #   launch: agent
+  #   instance: <具名實例>
+  #   model: <工具的模型 ID>
   coordinator:               # 協調位；human＝無工具，各步由人執行（對照表 orchestrators/none.md）
     filler: human            # hermes | paperclip | human
   approver:                  # 裁決位；人（seats/approver.md），無 model／reasoning

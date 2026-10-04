@@ -1110,13 +1110,13 @@ V7_VERSION_FILE = "devflow/VERSION"
 # issue #222 起同一個事實多一個持久來源：`.devflow-local` 的 `v7_base`（見該節的順序）。
 V7_BASE_ENV = "DEVFLOW_V7_BASE"
 
-# seatoblig／orphan（issue #213）的定義域：四個已知檔、一個段落標題、一個正則，
+# seatoblig／orphan（issue #213）的定義域：五個已知檔、一個段落標題、一個正則，
 # 加上一份**從 repo 讀出來**的豁免清單。四樣都是字面事實，沒有啟發式。
 SEAT_DIR = "devflow/seats/"
 SEAT_FILES = tuple(SEAT_DIR + n + ".md"
-                   for n in ("coordinator", "implementer", "reviewer", "approver"))
+                   for n in ("coordinator", "implementer", "reviewer", "approver", "manager"))
 SEAT_README = SEAT_DIR + "README.md"
-# 段落標題逐字比對（四個職位檔都寫成這一行，`git grep -c '^## 規則義務' devflow/seats`
+# 段落標題逐字比對（五個職位檔都寫成這一行，`git grep -c '^## 規則義務' devflow/seats`
 # 每檔恰一）。不套 section_name() 的寬鬆判讀：那是 R9 為了 `## **通用**` 開的口子，
 # 這裡沒有那個需求，收緊反而讓定義域小一點。
 SEAT_OBLIG_HEADING = "## 規則義務"
@@ -1125,7 +1125,7 @@ SEAT_OBLIG_HEADING = "## 規則義務"
 # group(2) 是家族前綴（來自 ID_RE 自己的括號）。
 SEAT_ID_RE = re.compile("`(%s)`" % ID_RE.pattern)
 # README 裡「刻意不分配」那句的辨識詞。豁免哪幾條是**規則決定**（現行那句寫的是
-# 「`V1`、`V2`、`V3`、`V5`、`V6` 的行為人，四個職位檔都不分配」，其中前四條待 #63
+# 「`V1`、`V2`、`V3`、`V5`、`V6` 的行為人，五個職位檔都不分配」，其中前四條待 #63
 # 裁定、`V6` 來源是 #214），機讀它而不是
 # 把 ID 抄進本檔：抄進來等於檢查器自己發明豁免（見檔頭「不發明規則」）。
 SEAT_EXEMPT_MARK = "不分配"
@@ -3060,12 +3060,12 @@ else:
 
 print()
 print("── seat 規則義務段 ↔ 同檔其餘段的引用雙向一致（%s）" % tag("seatoblig"))
-# 定義域封閉在三個字面事實上：**四個已知檔**（SEAT_FILES）、**一個段落標題**
+# 定義域封閉在三個字面事實上：**五個已知檔**（SEAT_FILES）、**一個段落標題**
 # （SEAT_OBLIG_HEADING，逐字比對）、**一個正則**（SEAT_ID_RE，由 ID_RE 包一層反引號
 # 而成）。判定只有集合差，沒有啟發式、沒有門檻、沒有「意圖」的猜測。
 #
 # 逐行找標題而不走 markdown-it：本項要的是**段的行範圍**（要把該段從全文裡扣掉再比），
-# 那是行的事實不是 token 的事實；四個職位檔一個 code fence 都沒有
+# 那是行的事實不是 token 的事實；五個職位檔一個 code fence 都沒有
 # （`git grep -c '```' devflow/seats` 全零，且上面 `fence` 那一項在驗每個 md 的 fence 成對），
 # 所以「行首是 `## `」不可能落在程式碼區塊裡。同 d2 逐行找標記的理由，見那一節。
 #
@@ -3082,7 +3082,7 @@ def seat_oblig_span(lines):
     `end` 是其後第一個 `## ` 開頭的行索引，沒有就是檔尾。找不到標題回 None。
 
     標題行自己不屬於任何一側——它既不是義務清單的內容，也不該讓「規則義務」四個字
-    出現在另一側。四個職位檔各恰一個這樣的標題，取第一個。"""
+    出現在另一側。五個職位檔各恰一個這樣的標題，取第一個。"""
     head = None
     for i, line in enumerate(lines):
         if line.rstrip() == SEAT_OBLIG_HEADING:
@@ -3161,7 +3161,7 @@ print("── 規則 ID 至少有一個 seat 認領（%s）" % tag("orphan"))
 # 定義域的三段都是**已經在別處機讀出來的事實**，本項一個都不自己發明：
 #   * 定義：上面 `dupid` 算好的 defined（rule_definitions 的三條件判準，issue #96／#98）。
 #     不另寫一份「什麼算定義」——同 v7 沿用安裝器 VERSION_RE 的理由。
-#   * 認領：上一項算好的 seat_claimed（四個職位檔「規則義務」段的聯集）。
+#   * 認領：上一項算好的 seat_claimed（五個職位檔「規則義務」段的聯集）。
 #   * 豁免：**從 devflow/seats/README.md 機讀**——取含「不分配」的行裡的 `ID`。
 #     豁免哪幾條是規則決定（現行那句是 `V1`／`V2`／`V3`／`V5`／`V6` 都不分配，
 #     其中前四條待 #63 裁定、`V6` 來源是 #214），
