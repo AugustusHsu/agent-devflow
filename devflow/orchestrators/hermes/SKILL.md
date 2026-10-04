@@ -397,8 +397,10 @@ gitmoji 依變更性質選。對照 `forges/github.md` 「合併（`I3`）」格
   esac
   # 占位 3（$W）的 issue 號由 token 推導，不另收參數：token 的形狀是 <issue>r<round>，剝掉第一個 r 起的
   # 尾段即 issue 號。另收一個參數會讓「$W 屬於哪張單」變成可獨立填錯的一項，填錯就刪掉他單仍在用的 $W。
-  # 同樣先驗字元集後用（它也要進 pattern 位置）：須非空且僅 [0-9]。token 不含 r 時 ${TOKEN%%r*} 回 token 原值，
-  # 那時它必含非數字（否則 token 就是純 issue 號、缺輪次）或恰為 issue 號，兩種都由這道檢查判。
+  # 同樣先驗字元集後用（它也要進 pattern 位置）：須非空且僅 [0-9]。token 不含 r 時 ${TOKEN%%r*} 回 token 原值：
+  # 它若全數字（例如 TOKEN=283），這道檢查放行，推出的 issue 號就是 283——缺輪次不在此擋，而是由占位 1、2 的
+  # 樣式比對擋下（devflow-rev."$TOKEN".?????? 要求目錄名嵌的是完整 token，第 7 步建的名字帶輪次故不命中）；
+  # 它若含非數字（例如 TOKEN=abc），在此擋下。
   ISSUE=${TOKEN%%r*}
   case "$ISSUE" in
     "" | *[!0-9]*) echo "由 token 推導的 issue 號須非空且僅含 0-9，停：$ISSUE（token=$TOKEN）" >&2; exit 1 ;;
