@@ -25,6 +25,7 @@ import pathlib
 import re
 import sqlite3
 import sys
+import tempfile
 import urllib.parse
 import urllib.request
 
@@ -549,6 +550,27 @@ def cmd_publish(args) -> int:
 
 
 def cmd_archive(args) -> int:
+    """`publish` → close → delete → **寫封存標記** → 清 cache。
+
+    第四步（寫封存標記，`CH3`／`telegram.md:14`）的三個順序約束，每一個都有代價：
+
+    * `issue_meta` 在 **delete 之前**取。它先讀 cache，命中就不打 forge；放到清
+      cache 之後會退回 `gh issue list` 掃全 repo（多一次 API，且任一張單 `T>1`
+      時 raise，使封存的最後一步失敗）。
+    * 寫標記在 **delete 成功之後**。「刪成功才算封存，先寫標記而刪失敗會留下
+      『已封存』的假象」（`telegram.md:14` 逐字）。
+    * 寫標記在 **清 cache 之前**（同第一點：此時 cache 還在）。
+
+    設計決定（匯出檔不存在或查不到 issue 號時）：**印 ❌、rc 非 0，但 cache 仍清**。
+    兩邊都不好，取其輕——
+      - 不寫指向不存在檔的標記：`file=` 欄是「封存的實體所在」（`README.md:51`），
+        指向空氣的標記會讓重做封存前「先看到已經有一份」這個保證變成謊。
+      - 仍清 cache：分區此刻**已經刪掉了**，cache 的殘影會讓下一次建分區拿到
+        死 thread（`telegram.md:13`「封存程序」格第 (4) 步的理由）。rc 非 0
+        已經把「這次封存沒走完」講出來，不必再留一個會害下一次的殘影。
+    該單會停在 `T=1 A=0`（active），依 `F4` 人工補寫標記即可——那是可修的，
+    而死 thread 的 cache 殘影要等到下一次建分區失敗才會被發現。
+    """
     if not args.yes:
         print("⚠️ archive 會刪除 topic 及其所有訊息（不可逆）。確認後加 --yes 重跑。")
         return 2
@@ -558,6 +580,13 @@ def cmd_archive(args) -> int:
         print("（--no-publish：沿用先前 publish 的檔案，不重送）")
     elif cmd_publish(args) != 0:
         return 1
+    # 第四步要用的兩個值在這裡就取齊（delete 與清 cache **之前**）：
+    # `--no-publish` 會跳過 cmd_publish，而 issue 號與匯出檔路徑原本只在
+    # `_export`／`cmd_publish` 內算得出來，故這裡自己取。
+    # 變數不叫 `num`：下面清 cache 的迴圈用的就是那個名字（既有碼），
+    # 共用一個名字會讓「第四步在清 cache 之前」這個順序約束變得不明顯。
+    issue_num, _title, _state = issue_meta(args.thread)
+    md_path = OUT / f"{stem_for(args.thread, issue_num)}.md"
     # close 再 delete。實測（3 次複驗）開啟中的 topic 也能直接刪除，close 不是 API 前置條件；
     # 保留它是為了「封存＝先停止寫入，再移除」這個語意順序，並讓中途失敗留下可辨識的狀態。
     closed = api("closeForumTopic", chat_id=CHAT, message_thread_id=int(args.thread))
@@ -571,6 +600,49 @@ def cmd_archive(args) -> int:
     print(f"  {'✅ 已刪除 topic' if res.get('ok') else '❌ ' + str(res.get('description'))}")
     if not res.get("ok"):
         return 1
+    # ── 第四步：寫封存標記（CH3）──開始（#291；此標記供測試的突變複本切除本段）──
+    marker_rc = 0
+    if issue_num is None:
+        print("  ❌ 查不到該 thread 對應的 issue 號，不寫封存標記"
+              "（該單在 forge 上維持 T=1 A=0 ＝ active，依 F4 人工補寫）")
+        marker_rc = 1
+    elif not md_path.is_file():
+        print(f"  ❌ 匯出檔不存在，不寫指向不存在檔的封存標記：{md_path}")
+        marker_rc = 1
+    else:
+        import subprocess
+        try:
+            # repo 與 issue_meta 的 `gh issue list` 同一個字面（該函式本單不得改，
+            # 故此處重寫一次而非抽常數——`#291` `AC-7` 的 AST 比對要求）。
+            body = json.loads(subprocess.run(
+                ["gh", "issue", "view", str(issue_num), "-R", "AugustusHsu/agent-devflow",
+                 "--json", "body"],
+                capture_output=True, stdin=subprocess.DEVNULL, timeout=60,
+                text=True, check=True).stdout)["body"]
+            # upsert：A=0 追加獨立一行、A=1 只取代那一行、A>1 raise（不動 forge）。
+            # file= 寫絕對路徑（OUT 在 ~/.hermes 下），形狀同 #283／#285 的先例。
+            body = _marker.upsert_archived(body, args.thread, md_path,
+                                           detail=f"issue #{issue_num}")
+            tmp = pathlib.Path(tempfile.gettempdir()) / f"devflow-archived-{issue_num}.md"
+            tmp.write_text(body)
+            subprocess.run(
+                ["gh", "issue", "edit", str(issue_num), "-R", "AugustusHsu/agent-devflow",
+                 "-F", str(tmp)],
+                capture_output=True, stdin=subprocess.DEVNULL, timeout=60,
+                text=True, check=True)
+            tmp.unlink(missing_ok=True)
+            print(f"  ✅ 已寫封存標記到 #{issue_num}"
+                  f"（thread={args.thread} file={md_path}）")
+        except _marker.InvalidMarker as exc:
+            # `CH3`：INVALID 印全部命中行到 stderr、rc 非 0、不動 forge。
+            # 但 cache 仍要清——分區已刪，殘影會害下一次建分區（見 docstring）。
+            print(str(exc), file=sys.stderr)
+            print("  ❌ 封存標記寫入停下（INVALID），依 F4 人工處置")
+            marker_rc = 1
+        except Exception as exc:  # noqa: BLE001 — forge 不可用／grammar 不合都在此收容
+            print(f"  ❌ 寫封存標記失敗：{type(exc).__name__}: {exc}", file=sys.stderr)
+            marker_rc = 1
+    # ── 第四步結束 ──────────────────────────────────────────────────────────
     if CACHE.exists():
         data = json.loads(CACHE.read_text() or "{}")
         drop = [n for n, r in data.items() if str(r.get("thread_id")) == str(args.thread)]
@@ -579,7 +651,7 @@ def cmd_archive(args) -> int:
         if drop:
             CACHE.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
             print(f"  ✅ cache 移除 {', '.join('#' + n for n in drop)}")
-    return 0
+    return marker_rc
 
 
 def main() -> int:

@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import os
@@ -790,6 +791,616 @@ def _ac7():
     check("AC-7 封存標記：file= 含空白不算",
           marker.read_archived(
               "<!-- devflow:archived thread=2620 file=a b -->\n") is None)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# `#291`／K4c-4：寫側對稱（`archived_line`／`upsert_archived`）＋ archive 第四步
+# ════════════════════════════════════════════════════════════════════════════
+# 本單的 AC 編號獨立於上方 `#285` 的 AC-1～AC-7，標籤一律帶 `#291` 前綴。
+
+MARKER_SRC = (SCRIPTS / "_marker.py").read_text()
+ARCHIVE_SRC = (SCRIPTS / "devflow_archive.py").read_text()
+
+
+# ── #291 AC-1 archived_line 產出合規字面，三個反例各自 raise ──────────────────
+@case("#291 AC-1 archived_line 產出恰匹配 ARCHIVED_RE，三個反例 raise")
+def _p291_ac1():
+    line = marker.archived_line(2620, "/home/augustushsu/.hermes/archives/topics/285.md")
+    check("#291 AC-1 產出 re.fullmatch(ARCHIVED_RE)",
+          bool(re.fullmatch(marker.ARCHIVED_RE, line)), repr(line))
+    check("#291 AC-1 產出的字面與條文形狀逐字相符",
+          line == ("<!-- devflow:archived thread=2620 "
+                   "file=/home/augustushsu/.hermes/archives/topics/285.md -->"),
+          repr(line))
+    # 以條文的 grep -cE 複驗（A=1）——不靠模組自己的計數
+    pats = _readme_patterns()
+    if len(pats) == 2:
+        g = subprocess.run(["grep", "-cE", pats[1]], input=line + "\n",
+                           capture_output=True, text=True)
+        check("#291 AC-1 條文的 grep -cE 對該行計得 A=1",
+              (g.stdout or "0").strip() == "1", f"grep 輸出 {g.stdout!r}")
+    # thread 接受 str 與 int（呼叫端從 argparse 拿到的是 str）
+    check("#291 AC-1 thread 給字串 '2620' 亦合規",
+          bool(re.fullmatch(marker.ARCHIVED_RE, marker.archived_line("2620", "/a/b.md"))))
+    # pathlib.Path 也要能直接餵（cmd_archive 的 md_path 是 Path）
+    check("#291 AC-1 file 給 pathlib.Path 亦合規",
+          bool(re.fullmatch(marker.ARCHIVED_RE,
+                            marker.archived_line(2620, Path("/a/b.md")))))
+
+    # 三個反例：不得放寬 grammar（不得引號包裹、不得百分號編碼），一律 raise
+    bad_cases = [
+        ("file 含空白", (2620, "/a path/285.md")),
+        ("file 含 >", (2620, "/a/b>c.md")),
+        ("thread 非數字", ("abc", "/a/b.md")),
+    ]
+    for label, (th, fi) in bad_cases:
+        try:
+            got = marker.archived_line(th, fi)
+        except ValueError as e:
+            check(f"#291 AC-1 反例（{label}）raise ValueError", True)
+            check(f"#291 AC-1 反例（{label}）訊息說明原因（含 grammar 或欄位值）",
+                  marker.ARCHIVED_RE in str(e) or repr(fi) in str(e) or repr(th) in str(e),
+                  str(e))
+        else:
+            check(f"#291 AC-1 反例（{label}）raise", False,
+                  f"竟回傳 {got!r} —— 不得放寬 grammar（CH3 的 [^ >]+ 是字面）")
+    # 鑑別力：三個反例若「硬拼字串不驗」會產出不合規字面（A=0），正是本單在修的病
+    for label, (th, fi) in bad_cases:
+        naive = f"<!-- devflow:archived thread={th} file={fi} -->"
+        check(f"#291 AC-1 鑑別力：硬拼（{label}）確實不合 ARCHIVED_RE（會落回 A=0）",
+              not re.fullmatch(marker.ARCHIVED_RE, naive), repr(naive))
+    # 不得以引號包裹／百分號編碼「繞過」：那兩種形狀本身也不合 grammar
+    check("#291 AC-1 引號包裹不是合法出路（含空白仍不合）",
+          not re.fullmatch(marker.ARCHIVED_RE,
+                           '<!-- devflow:archived thread=2620 file="/a path/b.md" -->'))
+    # 跨行的 file= 值：fullmatch 會接受（`[^ >]+` 不排除 \n），但條文的 A 是逐行比對
+    try:
+        marker.archived_line(2620, "/a\n/b.md")
+    except ValueError as e:
+        check("#291 AC-1 反例（file 含換行）raise ValueError", True, str(e).splitlines()[0])
+    else:
+        check("#291 AC-1 反例（file 含換行）raise", False,
+              "跨行字面寫進 body 會裂成兩行、兩行都不合 grammar（A=0）")
+
+
+# ── #291 AC-2 upsert_archived 三分支與 upsert_topic 同形 ────────────────────
+P291_F_A0 = """# 某單
+
+| 形態 | 字面 |
+|---|---|
+| 表格列內 | `<!-- devflow:archived thread=123 file=/t/123.md -->` |
+
+散文也提一次 <!-- devflow:archived thread=123 file=/t/123.md --> 如上。
+  <!-- devflow:archived thread=123 file=/t/indent.md -->
+
+<!-- devflow:topic thread=2620 -->
+"""
+
+P291_F_A1 = P291_F_A0 + "<!-- devflow:archived thread=2620 file=/t/old.md -->\n"
+
+P291_F_A2 = (P291_F_A0
+             + "<!-- devflow:archived thread=2620 file=/t/one.md -->\n"
+             + "<!-- devflow:archived thread=999 file=/t/two.md -->\n")
+
+P291_A2_LINES = [
+    "<!-- devflow:archived thread=2620 file=/t/one.md -->",
+    "<!-- devflow:archived thread=999 file=/t/two.md -->",
+]
+
+P291_ANCHOR_DECOYS = [
+    "| 表格列內 | `<!-- devflow:archived thread=123 file=/t/123.md -->` |",
+    "散文也提一次 <!-- devflow:archived thread=123 file=/t/123.md --> 如上。",
+    "  <!-- devflow:archived thread=123 file=/t/indent.md -->",
+]
+
+
+@case("#291 AC-2 upsert_archived：A=0 追加、A=1 取代、A>1 raise；錨定同 upsert_topic")
+def _p291_ac2():
+    new_file = "/home/augustushsu/.hermes/archives/topics/291.md"
+
+    # A=0 → 尾端追加獨立一行
+    out0 = marker.upsert_archived(P291_F_A0, 2620, new_file)
+    ids0, lines0 = marker.find_archived(out0)
+    check("#291 AC-2 A=0 時在尾端追加獨立一行",
+          len(lines0) == 1 and ids0 == ["2620"]
+          and out0.startswith(P291_F_A0.rstrip()), repr(out0))
+    check("#291 AC-2 A=0 追加後 topic 標記未受影響（T 仍為 1）",
+          marker.read_topic(out0) == 2620)
+    for decoy in P291_ANCHOR_DECOYS:
+        check(f"#291 AC-2 A=0 同形字串一字不動：{decoy[:28]}…", decoy in out0, repr(out0))
+
+    # A=1 → 只取代那一行，不新增第二行
+    out1 = marker.upsert_archived(P291_F_A1, 2620, new_file)
+    ids1, lines1 = marker.find_archived(out1)
+    check("#291 AC-2 A=1 時恰一個標記（取代而非新增）",
+          len(lines1) == 1 and ids1 == ["2620"], f"A={len(lines1)} {lines1!r}")
+    check("#291 AC-2 A=1 取代後舊的 file=/t/old.md 不存在",
+          "<!-- devflow:archived thread=2620 file=/t/old.md -->" not in out1.splitlines(),
+          repr(out1))
+    check("#291 AC-2 A=1 取代後 file= 欄為新值", f"file={new_file} -->" in out1, repr(out1))
+    check("#291 AC-2 A=1 時 body 其餘內容未被改寫（只差那一行）",
+          [l for l in P291_F_A1.splitlines()
+           if l != "<!-- devflow:archived thread=2620 file=/t/old.md -->"]
+          == [l for l in out1.splitlines() if l != marker.archived_line(2620, new_file)],
+          repr(out1))
+    for decoy in P291_ANCHOR_DECOYS:
+        check(f"#291 AC-2 A=1 同形字串一字不動：{decoy[:28]}…", decoy in out1, repr(out1))
+
+    # A>1 → raise InvalidMarker，不回傳 body
+    try:
+        got = marker.upsert_archived(P291_F_A2, 2620, new_file, detail="issue #291")
+    except marker.InvalidMarker as e:
+        check("#291 AC-2 A>1 raise InvalidMarker（不回傳 body）", True)
+        check("#291 AC-2 A>1 例外訊息含 INVALID 與兩行命中的字面",
+              "INVALID" in str(e) and all(ln in str(e) for ln in P291_A2_LINES), str(e))
+        check("#291 AC-2 A>1 例外物件帶全部命中行且 kind=archived",
+              e.lines == P291_A2_LINES and e.kind == "archived", f"{e.kind} {e.lines!r}")
+        check("#291 AC-2 A>1 例外訊息含 detail（呼叫端的上下文）",
+              "issue #291" in str(e), str(e))
+    else:
+        check("#291 AC-2 A>1 raise InvalidMarker", False, f"竟回傳 {got!r}")
+
+    # 不合 grammar 時 raise 且 body 不動（呼叫端拿不到半成品去寫 forge）
+    for label, fi in (("含空白", "/a path/291.md"), ("含 >", "/a/b>c.md")):
+        try:
+            marker.upsert_archived(P291_F_A0, 2620, fi)
+        except ValueError:
+            check(f"#291 AC-2 file {label} 時 upsert 亦 raise ValueError", True)
+        else:
+            check(f"#291 AC-2 file {label} 時 upsert 亦 raise", False, "竟回傳了 body")
+
+    # 鑑別力：未錨定的 re.sub（原實作的病）會改掉表格列、散文與縮排
+    bad = re.sub(r"<!-- devflow:archived thread=\d+ file=[^>]* -->",
+                 marker.archived_line(2620, new_file), P291_F_A1)
+    check("#291 AC-2 鑑別力：未錨定 re.sub 確實會改掉同形字串",
+          all(d not in bad for d in P291_ANCHOR_DECOYS), repr(bad))
+
+    # 與 upsert_topic 的同形性：兩者對 T/A=0 的追加形狀一致（空行＋一行＋換行）
+    t0 = marker.upsert_topic("# x\n\n內容。\n", 7)
+    a0 = marker.upsert_archived("# x\n\n內容。\n", 7, "/t/7.md")
+    check("#291 AC-2 與 upsert_topic 的追加形狀一致（尾端空一行、標記獨立一行）",
+          t0 == "# x\n\n內容。\n\n" + marker.topic_line(7) + "\n"
+          and a0 == "# x\n\n內容。\n\n" + marker.archived_line(7, "/t/7.md") + "\n",
+          f"{t0!r}\n        {a0!r}")
+
+
+# ── #291 AC-3 公開 API 的 topic／archived 名稱對稱 ──────────────────────────
+def _public_funcs(src: str) -> list[str]:
+    """`_marker.py` 源碼的公開函式名（`^def [a-z]`，`_` 開頭者自然被排除）。
+
+    取源碼而非 `dir(module)`：鑑別力子測試要對**源碼字串**做突變（不改真檔），
+    兩者必須走同一個抽取函式，否則突變證明不了斷言的鑑別力。
+    """
+    return re.findall(r"^def ([a-z][A-Za-z0-9_]*)\s*\(", src, re.M)
+
+
+def _pair_gaps(names: list[str]) -> tuple[list[str], dict, list[str]]:
+    """配對 `<verb>_topic ↔ <verb>_archived`、`topic_<noun> ↔ archived_<noun>`。
+
+    回傳 (缺口 key 們, 配對表, 無法歸類的名稱們)。缺口 ＝ 某個 key 只有一側。
+    `topic_<noun>` 一族的 key 加 `LINE:` 前綴，與 `<verb>_topic` 一族分開命名空間
+    ——否則 `topic_line` 與假想的 `line_topic` 會撞在同一個 key 上。
+    **只比名稱、不比簽章**（`#291` 定案 2：`archived` 側多一個 `file` 參數是
+    `CH3` 要求的欄位，強求簽章同形會逼出 `file=None` 預設值，而那使「寫出沒有
+    `file=` 欄的標記」變成可能，與 `A` 式的 grammar 直接衝突）。
+    """
+    table: dict[str, dict[str, str | None]] = {}
+    other: list[str] = []
+    for name in names:
+        if name.endswith("_topic"):
+            key, side = name[: -len("_topic")], "topic"
+        elif name.endswith("_archived"):
+            key, side = name[: -len("_archived")], "archived"
+        elif name.startswith("topic_"):
+            key, side = "LINE:" + name[len("topic_"):], "topic"
+        elif name.startswith("archived_"):
+            key, side = "LINE:" + name[len("archived_"):], "archived"
+        else:
+            other.append(name)
+            continue
+        table.setdefault(key, {"topic": None, "archived": None})[side] = name
+    gaps = sorted(k for k, v in table.items() if not (v["topic"] and v["archived"]))
+    return gaps, table, other
+
+
+@case("#291 AC-3 _marker.py 公開 API 的 topic／archived 配對缺口集合須為空")
+def _p291_ac3():
+    names = _public_funcs(MARKER_SRC)
+    gaps, table, other = _pair_gaps(names)
+    detail = ("公開函式: " + repr(names) + "\n        配對: "
+              + "; ".join(f"{k}=({v['topic']}|{v['archived']})"
+                          for k, v in sorted(table.items()))
+              + f"\n        缺口: {gaps!r} 無法歸類: {other!r}")
+    check("#291 AC-3 配對缺口集合為空", gaps == [], detail)
+    check("#291 AC-3 無法歸類的公開函式為空（每個都屬某一側）", other == [], detail)
+    check("#291 AC-3 本單新增的兩個函式確實在公開清單內",
+          {"archived_line", "upsert_archived"} <= set(names), repr(names))
+    check("#291 AC-3 兩者皆為模組的可呼叫屬性（源碼與模組一致）",
+          all(callable(getattr(marker, n, None))
+              for n in ("archived_line", "upsert_archived")))
+    check("#291 AC-3 五組配對齊備（find／has／read／upsert／LINE:line）",
+          set(table) == {"find", "has", "read", "upsert", "LINE:line"},
+          f"{sorted(table)!r}")
+
+
+@case("#291 AC-3 鑑別力：兩個突變（對源碼字串操作、不改真檔）須使缺口非空")
+def _p291_ac3_mutations():
+    # 先造出「`#285` 當時的 _marker.py」——把本單新增的兩函式從源碼切掉。
+    cut = MARKER_SRC.split("\ndef archived_line(")
+    check("#291 AC-3 鑑別力：切點存在（archived_line 為源碼最後兩個函式之首）",
+          len(cut) == 2, f"切出 {len(cut)} 段")
+    if len(cut) != 2:
+        return
+    base_src = cut[0] + "\n"          # 等同 6b72933 的 _marker.py（寫側只有 topic）
+    base_names = _public_funcs(base_src)
+    base_gaps, _, _ = _pair_gaps(base_names)
+    check("#291 AC-3 鑑別力：未達成候選（切掉兩函式）缺口 == ['LINE:line', 'upsert']",
+          base_gaps == ["LINE:line", "upsert"],
+          f"實得 {base_gaps!r}（T 的預跑值：['LINE:line', 'upsert']）")
+
+    # 突變 A：只補 archived_line（移掉 upsert_archived）→ 缺口 1 ['upsert'] → FAIL
+    mut_a = base_src + "\ndef archived_line(thread, file) -> str:\n    return ''\n"
+    gaps_a, _, _ = _pair_gaps(_public_funcs(mut_a))
+    check("#291 AC-3 鑑別力：突變 A（只補 archived_line）缺口 == ['upsert'] → 斷言 FAIL",
+          gaps_a == ["upsert"], f"實得 {gaps_a!r}")
+
+    # 突變 A'：兩側**個數相等**但仍有缺口 —— 證明「個數相等」不足以當判準。
+    # base 是 topic 側 5（find／read／has／topic_line／upsert）、archived 側 3；
+    # 補 archived_line ＋ 一個無配對的 archived_foo 後兩側皆 5，而缺口仍非空。
+    mut_a2 = (base_src
+              + "\ndef archived_line(thread, file) -> str:\n    return ''\n"
+              + "\ndef archived_foo(x):\n    return x\n")
+    names_a2 = _public_funcs(mut_a2)
+    topic_side = [n for n in names_a2 if n.endswith("_topic") or n.startswith("topic_")]
+    arch_side = [n for n in names_a2
+                 if n.endswith("_archived") or n.startswith("archived_")]
+    gaps_a2, _, _ = _pair_gaps(names_a2)
+    check("#291 AC-3 鑑別力：突變 A' 兩側個數相等（5 vs 5）而缺口非空 "
+          "→「個數相等」不足以當判準",
+          len(topic_side) == len(arch_side) == 5 and gaps_a2 != [],
+          f"topic 側 {topic_side!r}\n        archived 側 {arch_side!r}"
+          f"\n        缺口 {gaps_a2!r}")
+    check("#291 AC-3 鑑別力：突變 A' 的缺口 == ['LINE:foo', 'upsert']",
+          gaps_a2 == ["LINE:foo", "upsert"], f"實得 {gaps_a2!r}")
+
+    # 突變 B：多加一個無配對的 archived_foo → 缺口 3 → FAIL
+    mut_b = base_src + "\ndef archived_foo(x):\n    return x\n"
+    gaps_b, _, _ = _pair_gaps(_public_funcs(mut_b))
+    check("#291 AC-3 鑑別力：突變 B（補無配對的 archived_foo）缺口 3 個 → 斷言 FAIL",
+          gaps_b == ["LINE:foo", "LINE:line", "upsert"] and len(gaps_b) == 3,
+          f"實得 {gaps_b!r}（T 的預跑值：缺口 3）")
+    check("#291 AC-3 鑑別力：突變 B 證明「存在任一 archived_*」不足"
+          "（無配對的新增反而增加缺口）",
+          len(gaps_b) > len(base_gaps), f"base {base_gaps!r} → mutB {gaps_b!r}")
+
+    # 突變 B'：在**達成**版上加 archived_foo → 缺口 1（達成版也擋得住無用新增）
+    mut_b2 = MARKER_SRC + "\ndef archived_foo(x):\n    return x\n"
+    gaps_b2, _, _ = _pair_gaps(_public_funcs(mut_b2))
+    check("#291 AC-3 鑑別力：突變 B'（達成版 ＋ archived_foo）缺口 == ['LINE:foo']",
+          gaps_b2 == ["LINE:foo"], f"實得 {gaps_b2!r}")
+
+
+# ── #291 AC-4／AC-5／AC-6 cmd_archive 第四步 ────────────────────────────────
+# `api()` 會打 api.telegram.org、`_token()` 讀 dfcoord/.env，故第四步的驗證**在
+# 測試行程內**跑 `cmd_archive`，以 monkeypatch 置換 `api`／`CACHE`／`OUT`，
+# forge 側走假 `gh`（PATH 前置，subprocess 繼承 os.environ）。零 Telegram API。
+
+P291_E2E_BODY = """# K4c-4 端到端 fixture
+
+| 形態 | 字面 |
+|---|---|
+| 表格列內 | `<!-- devflow:archived thread=999 file=/t/999.md -->` |
+
+散文也提一次 <!-- devflow:archived thread=999 file=/t/999.md --> 如上。
+
+<!-- devflow:topic thread=2620 -->
+"""
+
+
+def _p291_fake_gh(bin_: Path, td: Path, body: str) -> None:
+    """假 gh：`issue view` 回 body；`issue edit` 把 `-F` 的檔複製到 edited-body.md
+    （既是哨兵、也讓測試讀回 body 套 CH3 判定式）；`issue list` 寫哨兵並 exit 8。"""
+    fake = bin_ / "gh"
+    fake.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, pathlib, sys\n"
+        "a = sys.argv[1:]\n"
+        "if a[:2] == ['issue', 'view']:\n"
+        f"    print(json.dumps({{'body': {body!r}}}))\n"
+        "    sys.exit(0)\n"
+        "if a[:2] == ['issue', 'edit']:\n"
+        "    src = a[a.index('-F') + 1]\n"
+        f"    pathlib.Path({str(td / 'edited-body.md')!r}).write_text("
+        "pathlib.Path(src).read_text())\n"
+        f"    pathlib.Path({str(td / 'edit-called')!r}).write_text(' '.join(a))\n"
+        "    sys.exit(0)\n"
+        "if a[:2] == ['issue', 'list']:\n"
+        f"    pathlib.Path({str(td / 'list-called')!r}).write_text(' '.join(a))\n"
+        "    print('issue list 不該被呼叫（cache 命中路徑）', file=sys.stderr)\n"
+        "    sys.exit(8)\n"
+        "print('unexpected gh call: ' + ' '.join(a), file=sys.stderr)\n"
+        "sys.exit(8)\n")
+    fake.chmod(0o755)
+
+
+def _p291_run_cmd_archive(td: Path, mod, *, delete_ok: bool = True,
+                          seed_md: bool = True, cache_entry: bool = True,
+                          body: str = P291_E2E_BODY) -> dict:
+    """在測試行程內跑 `mod.cmd_archive(... --yes --no-publish)`，回傳觀測結果。
+
+    `mod` 可為受測模組或突變複本（鑑別力／未達成候選用）。
+    """
+    import contextlib
+    import io
+
+    bin_ = td / "bin"
+    bin_.mkdir(exist_ok=True)
+    out_dir = td / "archives" / "topics"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if seed_md:
+        (out_dir / "291.md").write_text("# 匯出檔（測試用）\n")
+    cache = td / "devflow-topics.json"
+    cache.write_text(json.dumps(
+        {"291": {"thread_id": "2620", "title": "K4c-4", "state": "OPEN"}}
+        if cache_entry else {}, ensure_ascii=False, indent=2) + "\n")
+    _p291_fake_gh(bin_, td, body)
+
+    calls: list[tuple[str, bool]] = []
+    edited = td / "edited-body.md"
+
+    def fake_api(method: str, **params) -> dict:
+        # 順序證據：記下每次 API 呼叫時「edited-body.md 是否已存在」。
+        # delete 當時必須還不存在 → 寫標記確實在 delete 之後。
+        calls.append((method, edited.exists()))
+        if method == "deleteForumTopic" and not delete_ok:
+            return {"ok": False, "description": "boom"}
+        return {"ok": True}
+
+    orig = (mod.api, mod.CACHE, mod.OUT, os.environ.get("PATH", ""))
+    mod.api, mod.CACHE, mod.OUT = fake_api, cache, out_dir
+    os.environ["PATH"] = f"{bin_}:{orig[3]}"
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = mod.cmd_archive(argparse.Namespace(
+                thread="2620", yes=True, no_publish=True, since=None, until=None))
+    finally:
+        mod.api, mod.CACHE, mod.OUT = orig[0], orig[1], orig[2]
+        os.environ["PATH"] = orig[3]
+    return {
+        "rc": rc, "calls": calls, "stdout": buf.getvalue(),
+        "edit_called": (td / "edit-called").exists(),
+        "list_called": (td / "list-called").exists(),
+        "edited_body": edited.read_text() if edited.exists() else None,
+        "cache": json.loads(cache.read_text() or "{}"),
+        "md_path": out_dir / "291.md",
+    }
+
+
+def _p291_ch3(body: str) -> tuple[int, int, bool]:
+    """對 body 套條文的判定式（`grep -cE`，不經模組）→ (T, A, NN 是否相同)。"""
+    pats = _readme_patterns()
+    assert len(pats) == 2, pats
+
+    def count(pat: str) -> int:
+        g = subprocess.run(["grep", "-cE", pat], input=body,
+                           capture_output=True, text=True)
+        return int((g.stdout or "0").strip() or 0)
+
+    t, a = count(pats[0]), count(pats[1])
+    tn = re.findall(r"^<!-- devflow:topic thread=([0-9]+) -->$", body, re.M)
+    an = re.findall(r"^<!-- devflow:archived thread=([0-9]+) file=[^ >]+ -->$",
+                    body, re.M)
+    return t, a, bool(tn) and bool(an) and tn[0] == an[0]
+
+
+@case("#291 AC-6 端到端：archive 2620 --yes --no-publish 後該 body 判為「已封存」")
+def _p291_ac6():
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        r = _p291_run_cmd_archive(td, archive)
+        detail = f"rc={r['rc']} calls={r['calls']!r}\n--- 輸出 ---\n{r['stdout']}"
+        check("#291 AC-6 rc == 0", r["rc"] == 0, detail)
+        check("#291 AC-6 gh issue edit 被呼叫（第四步確實寫了 forge）",
+              r["edit_called"], detail)
+        if r["edited_body"] is None:
+            check("#291 AC-6 取得寫入後的 body", False, detail)
+            return
+        t, a, same = _p291_ch3(r["edited_body"])
+        check(f"#291 AC-6 CH3 判定式：T={t} A={a} NN 相同={same} → 已封存",
+              (t, a, same) == (1, 1, True), detail + f"\n--- body ---\n{r['edited_body']}")
+        check("#291 AC-6 錨定仍成立（表格列與散文的同形字串未被計入、未被改寫）",
+              "| 表格列內 | `<!-- devflow:archived thread=999 file=/t/999.md -->` |"
+              in r["edited_body"]
+              and "散文也提一次 <!-- devflow:archived thread=999 file=/t/999.md --> 如上。"
+              in r["edited_body"], r["edited_body"])
+        check("#291 AC-6 cache 已清除該單（第四步在清 cache 之前、兩步都做了）",
+              "291" not in r["cache"], json.dumps(r["cache"], ensure_ascii=False))
+        # 順序：delete 當時 edited-body.md 還不存在 → 寫標記在 delete 之後
+        deletes = [(i, seen) for i, (m, seen) in enumerate(r["calls"])
+                   if m == "deleteForumTopic"]
+        check("#291 AC-6 順序：deleteForumTopic 發生時標記尚未寫入",
+              len(deletes) == 1 and deletes[0][1] is False, f"{r['calls']!r}")
+        check("#291 AC-6 API 呼叫序恰為 close → delete",
+              [m for m, _ in r["calls"]] == ["closeForumTopic", "deleteForumTopic"],
+              f"{r['calls']!r}")
+
+
+def _p291_no_step4_copy(td: Path) -> Path:
+    """切掉第四步的 `devflow_archive.py` 複本（＝ `6b72933` 的三步 cmd_archive）。
+
+    `AC-6` 的未達成候選：同一 fixture 下它得 `T=1 A=0`（判 active）。
+    """
+    src = ARCHIVE_SRC
+    mutated = re.sub(
+        r"    # ── 第四步：寫封存標記（CH3）──開始.*?\n"
+        r"    # ── 第四步結束 ─+\n", "", src, flags=re.S)
+    assert mutated != src, "突變未套用——第四步的區段標記已變，未達成候選失效"
+    mutated = mutated.replace("    return marker_rc\n", "    return 0\n")
+    assert "marker_rc" not in mutated, "突變殘留 marker_rc"
+    out = td / "devflow_archive_nostep4.py"
+    out.write_text(mutated)
+    return out
+
+
+@case("#291 AC-6 未達成候選：切掉第四步的複本同 fixture 得 T=1 A=0（判 active）")
+def _p291_ac6_baseline():
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        path = _p291_no_step4_copy(td)
+        spec = importlib.util.spec_from_file_location("devflow_archive_nostep4", path)
+        mut = importlib.util.module_from_spec(spec)
+        sys.modules["devflow_archive_nostep4"] = mut
+        spec.loader.exec_module(mut)
+        r = _p291_run_cmd_archive(td, mut)
+        detail = f"rc={r['rc']} calls={r['calls']!r}\n--- 輸出 ---\n{r['stdout']}"
+        check("#291 AC-6 未達成候選：rc 為 0 但完全沒有呼叫 gh issue edit",
+              r["rc"] == 0 and not r["edit_called"], detail)
+        t, a, _ = _p291_ch3(P291_E2E_BODY)
+        check(f"#291 AC-6 未達成候選：body 維持 T={t} A={a} → 判 active（＝本單在修的缺陷）",
+              (t, a) == (1, 0), f"T={t} A={a}")
+        check("#291 AC-6 未達成候選：cache 仍被清掉（故該單在通道側與快取皆為空）",
+              "291" not in r["cache"], json.dumps(r["cache"], ensure_ascii=False))
+
+
+@case("#291 AC-4 delete 失敗時：gh issue edit 未被呼叫、rc 非 0")
+def _p291_ac4():
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        r = _p291_run_cmd_archive(td, archive, delete_ok=False)
+        detail = f"rc={r['rc']} calls={r['calls']!r}\n--- 輸出 ---\n{r['stdout']}"
+        check("#291 AC-4 rc 非 0", r["rc"] != 0, detail)
+        check("#291 AC-4 哨兵不存在：gh issue edit 未被呼叫"
+              "（刪成功才算封存，telegram.md:14）",
+              not r["edit_called"], detail)
+        check("#291 AC-4 未產生寫入後的 body（forge 一字未動）",
+              r["edited_body"] is None, detail)
+        check("#291 AC-4 deleteForumTopic 確實被試過（否則本斷言沒有鑑別力）",
+              "deleteForumTopic" in [m for m, _ in r["calls"]], f"{r['calls']!r}")
+    # 鑑別力：delete 成功的同一組 fixture 下哨兵必須存在
+    with tempfile.TemporaryDirectory() as td2:
+        td2 = Path(td2)
+        ok = _p291_run_cmd_archive(td2, archive, delete_ok=True)
+        check("#291 AC-4 鑑別力：delete 成功時哨兵存在（故上面的『不存在』是條件性的）",
+              ok["edit_called"], f"rc={ok['rc']}\n{ok['stdout']}")
+
+
+@case("#291 AC-5 --no-publish：issue list 未被呼叫、file= 為存在的絕對路徑")
+def _p291_ac5():
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        r = _p291_run_cmd_archive(td, archive)
+        detail = f"rc={r['rc']}\n--- 輸出 ---\n{r['stdout']}"
+        check("#291 AC-5 issue list 未被呼叫（issue_meta 走 cache 命中路徑）",
+              not r["list_called"], detail)
+        check("#291 AC-5 file= 欄為絕對路徑",
+              r["edited_body"] is not None
+              and f"file={r['md_path']} -->" in r["edited_body"],
+              f"{r['edited_body']!r}")
+        if r["edited_body"]:
+            got = re.findall(
+                r"^<!-- devflow:archived thread=[0-9]+ file=([^ >]+) -->$",
+                r["edited_body"], re.M)
+            check("#291 AC-5 標記恰一個且 file= 值可解析", len(got) == 1, f"{got!r}")
+            if got:
+                p = Path(got[0])
+                check("#291 AC-5 file= 是絕對路徑", p.is_absolute(), str(p))
+                check("#291 AC-5 Path(file).is_file()（寫入時該路徑存在）",
+                      p.is_file(), str(p))
+                check("#291 AC-5 形狀為 <OUT>/<issue 號>.md",
+                      p.name == "291.md" and p.parent.name == "topics", str(p))
+
+    # md 不存在：不得寫出指向不存在檔的標記 → ❌ ＋ rc 非 0；但 cache 仍要清
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        r2 = _p291_run_cmd_archive(td, archive, seed_md=False)
+        detail2 = f"rc={r2['rc']}\n--- 輸出 ---\n{r2['stdout']}"
+        check("#291 AC-5 md 不存在時 rc 非 0", r2["rc"] != 0, detail2)
+        check("#291 AC-5 md 不存在時未呼叫 gh issue edit（不寫指向空氣的標記）",
+              not r2["edit_called"] and r2["edited_body"] is None, detail2)
+        check("#291 AC-5 md 不存在時 stdout 印 ❌", "❌" in r2["stdout"], detail2)
+        check("#291 AC-5 md 不存在時 cache 仍被清除"
+              "（分區已刪，殘影會讓下一次建分區拿到死 thread）",
+              "291" not in r2["cache"], json.dumps(r2["cache"], ensure_ascii=False))
+
+    # num 為 None（cache 無此 thread、且 issue list 查不到）：同樣 ❌ rc 非 0、仍清 cache
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        r3 = _p291_run_cmd_archive(td, archive, cache_entry=False)
+        detail3 = f"rc={r3['rc']}\n--- 輸出 ---\n{r3['stdout']}"
+        check("#291 AC-5 issue 號查不到時 rc 非 0", r3["rc"] != 0, detail3)
+        check("#291 AC-5 issue 號查不到時未呼叫 gh issue edit",
+              not r3["edit_called"] and r3["edited_body"] is None, detail3)
+        check("#291 AC-5 issue 號查不到時 stdout 印 ❌", "❌" in r3["stdout"], detail3)
+        check("#291 AC-5 issue 號查不到時 cache 區段仍執行（無該單、不報錯）",
+              "291" not in r3["cache"], json.dumps(r3["cache"], ensure_ascii=False))
+
+
+@case("#291 AC-2／AC-4 A>1 的 body：第四步停下（不動 forge），cache 仍清")
+def _p291_invalid_body():
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        r = _p291_run_cmd_archive(td, archive, body=P291_F_A2)
+        detail = f"rc={r['rc']}\n--- 輸出 ---\n{r['stdout']}"
+        check("#291 AC-4 A>1 時 rc 非 0", r["rc"] != 0, detail)
+        check("#291 AC-4 A>1 時未呼叫 gh issue edit（INVALID 不動 forge）",
+              not r["edit_called"] and r["edited_body"] is None, detail)
+        check("#291 AC-4 A>1 時輸出含 INVALID 與兩行命中的字面",
+              "INVALID" in r["stdout"]
+              and all(ln in r["stdout"] for ln in P291_A2_LINES), detail)
+        check("#291 AC-4 A>1 時 cache 仍被清除（分區已刪）",
+              "291" not in r["cache"], json.dumps(r["cache"], ensure_ascii=False))
+
+
+# ── #291 AC-7 archive.py 本單只改 cmd_archive（AST）────────────────────────
+@case("#291 AC-7 devflow_archive.py 除 cmd_archive 外的既有函式 AST 逐一不變")
+def _p291_ac7():
+    import ast
+    old = subprocess.run(
+        ["git", "show", "6b72933:devflow/channels/scripts/telegram/devflow_archive.py"],
+        capture_output=True, text=True, cwd=REPO).stdout
+    check("#291 AC-7 取得 6b72933 的原檔", bool(old.strip()), "git show 無輸出")
+    if not old.strip():
+        return
+
+    def funcs(src: str) -> dict:
+        return {n.name: ast.dump(n) for n in ast.parse(src).body
+                if isinstance(n, ast.FunctionDef)}
+
+    o, n = funcs(old), funcs(ARCHIVE_SRC)
+    changed = sorted(k for k in o.keys() & n.keys() if o[k] != n[k])
+    check("#291 AC-7 改變的函式只有 cmd_archive", changed == ["cmd_archive"],
+          f"改變的函式: {changed!r} | 新增: {sorted(n.keys() - o.keys())!r} "
+          f"| 移除: {sorted(o.keys() - n.keys())!r}")
+    check("#291 AC-7 既有函式一個都沒被移除", not (o.keys() - n.keys()),
+          f"{sorted(o.keys() - n.keys())!r}")
+    for name in ("cmd_scan", "cmd_publish", "cmd_export", "collect", "issue_meta",
+                 "api", "stem_for", "_export"):
+        check(f"#291 AC-7 {name} 的 AST 與 6b72933 相同",
+              name in o and name in n and o[name] == n[name])
+
+
+# ── #291 AC-8／AC-9 版本與 import-path 不回歸 ───────────────────────────────
+@case("#291 AC-8 devflow/VERSION 恰 0.15.2.0")
+def _p291_ac8():
+    raw = (REPO / "devflow" / "VERSION").read_text()
+    check("#291 AC-8 內容（strip 後）恰 0.15.2.0", raw.strip() == "0.15.2.0", repr(raw))
+
+
+@case("#291 AC-9 telegram/*.py 與本測試檔零 import-path 操作")
+def _p291_ac9():
+    # 本檔連字面都不出現（同上方模組 docstring 的理由）：grep 的 pattern 以
+    # 正則寫成 r"sys\.path"，檔內字面是 `sys\.path`，故 grep -nE 'sys\.path'
+    # 不會命中本檔自己。
+    targets = sorted(SCRIPTS.glob("*.py")) + [Path(__file__).resolve()]
+    r = subprocess.run(["grep", "-nE", r"sys\.path", *[str(p) for p in targets]],
+                       capture_output=True, text=True)
+    check("#291 AC-9 grep -nE 'sys\\.path' 無命中（exit 1）",
+          r.returncode == 1 and not r.stdout.strip(),
+          f"exit={r.returncode}\n{r.stdout}")
+    check("#291 AC-9 受檢集合是 glob 且含本單改動的兩支腳本",
+          {"_marker.py", "devflow_archive.py"} <= {p.name for p in targets},
+          f"{[p.name for p in targets]!r}")
 
 
 # ── 收尾 ────────────────────────────────────────────────────────────────────

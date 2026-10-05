@@ -166,3 +166,65 @@ def upsert_topic(body: str, thread, *, detail: str = "") -> str:
     # count=1 是多餘的保險：T=1 時只有一個命中。用 lambda 避免 line 內的
     # 反斜線被當成取代字串的轉義（此 grammar 不含反斜線，但不靠這點成立）。
     return TOPIC.sub(lambda _m: line, text, count=1)
+
+
+def archived_line(thread, file) -> str:
+    """封存標記的正規字面。寫入與比對都從這裡取，不各自拼字串。
+
+    **不合 grammar 就 raise `ValueError`，不放寬 grammar**（`#291` 的硬要求）：
+    `channels/README.md:51` 的 `file=` 值明文「不含空白與 `>`」，`ARCHIVED_RE` 的
+    `[^ >]+` 是 `CH3` 的字面。遇含空白的路徑**不得**改成引號包裹或百分號編碼——
+    那是在實作裡放寬判準，要改判準得走 `G2`（`#285` 的教訓）。raise 的代價是
+    呼叫端得停下，而靜默產出不合規字面的代價是寫完 body 落回 `A=0`
+    ——與本單在修的缺陷同形，故選前者。
+
+    為什麼這裡驗、`topic_line` 不驗：`topic_line` 唯一的欄位是 Telegram 配發的
+    thread id（呼叫端從 API 或 cache 拿到的整數）；`archived_line` 的 `file=`
+    是自由形狀的路徑，`CH3` 對它有明文約束，是真的會不合的那一欄。
+
+    兩道檢查（都只收窄、不放寬）：
+      1. 產出須 `re.fullmatch(ARCHIVED_RE)`——grammar 本身。
+      2. 產出須是**單一行**。`[^ >]+` 的否定字元集只排除空白與 `>`，故 `\\n`
+         也在它的字集內，`re.fullmatch` 會接受含換行的 `file=` 值；但條文的
+         `A` 是 `grep -cE` 逐行比對，含換行的字面寫進 body 就裂成兩行、
+         兩行都不合 grammar（`A=0`）。故額外擋掉。
+    """
+    line = f"<!-- devflow:archived thread={thread} file={file} -->"
+    bad = [c for c in ("\n", "\r") if c in line]
+    if bad:
+        raise ValueError(
+            f"封存標記不得跨行（{bad!r} 出現在字面內）：thread={thread!r} file={file!r}"
+            f"\n  條文的 A 是 grep -cE 逐行比對，跨行的字面寫進 body 落回 A=0"
+        )
+    if not re.fullmatch(ARCHIVED_RE, line):
+        raise ValueError(
+            f"封存標記不合 CH3 的 A 式：{line!r}"
+            f"\n  grammar：{ARCHIVED_RE}"
+            f"\n  thread={thread!r} 須為十進位數字；file={file!r} 不得含空白或 '>'"
+            f"（channels/README.md:51）"
+        )
+    return line
+
+
+def upsert_archived(body: str, thread, file, *, detail: str = "") -> str:
+    """寫入封存標記，回傳新 body。與 `upsert_topic` 同形的三分支。
+
+    `A=0` → 在尾端追加**獨立一行**；`A=1` → **只**取代那一行；`A>1` → raise
+    `InvalidMarker`（**不**回傳 body——`telegram.md:14`：寫入須是 upsert，否則
+    重跑封存產生 `A>1` 落入 INVALID）。
+
+    錨定同 `upsert_topic`：表格列內、散文旁註、縮排的同形字串**一字不動**，
+    `^…$` 根本不匹配它們。
+
+    `file` 的 grammar 由 `archived_line` 先驗；不合時 raise `ValueError` 且
+    **body 不動**（呼叫端不會拿到半成品去寫 forge）。
+    """
+    text = body or ""
+    line = archived_line(thread, file)      # 先驗 grammar：不合就 raise，body 不動
+    _, lines = find_archived(text)
+    if len(lines) > 1:
+        raise InvalidMarker("archived", lines, detail)
+    if not lines:
+        return text.rstrip() + "\n\n" + line + "\n"
+    # count=1 ＋ lambda 的理由同 upsert_topic（錨定下只有一個命中；避免反斜線轉義）。
+    return ARCHIVED.sub(lambda _m: line, text, count=1)
