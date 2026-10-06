@@ -1573,10 +1573,10 @@ def _p291_ac7():
 
 
 # ── #291 AC-8／AC-9 版本與 import-path 不回歸 ───────────────────────────────
-@case("#291 AC-8 devflow/VERSION 恰 0.15.3.0（#293 進位後）")
+@case("#291 AC-8 devflow/VERSION 恰 0.15.4.0（#286 進位後）")
 def _p291_ac8():
     raw = (REPO / "devflow" / "VERSION").read_text()
-    check("#291 AC-8 內容（strip 後）恰 0.15.3.0", raw.strip() == "0.15.3.0", repr(raw))
+    check("#291 AC-8 內容（strip 後）恰 0.15.4.0", raw.strip() == "0.15.4.0", repr(raw))
 
 
 @case("#291 AC-9 telegram/*.py 與本測試檔零 import-path 操作")
