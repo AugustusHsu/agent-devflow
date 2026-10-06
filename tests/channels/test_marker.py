@@ -1097,9 +1097,19 @@ P291_E2E_BODY = """# K4c-4 端到端 fixture
 """
 
 
-def _p291_fake_gh(bin_: Path, td: Path, body: str) -> None:
-    """假 gh：`issue view` 回 body；`issue edit` 把 `-F` 的檔複製到 edited-body.md
-    （既是哨兵、也讓測試讀回 body 套 CH3 判定式）；`issue list` 寫哨兵並 exit 8。"""
+def _p291_fake_gh(bin_: Path, td: Path, body: str, cache: Path, *,
+                  edit_fail: bool = False) -> None:
+    """假 gh。
+
+    * `issue view` → 回 `body`。
+    * `issue edit` → **在被呼叫的那一刻**把 `-F` 的檔與 `cache` 的內容各複製一份
+      （`edited-body.md`／`cache-at-edit.json`），再寫 `edit-called` 哨兵。
+      快照 cache 是 `AC-4` 第二個斷言的要件：寫標記與清 cache 的**相對次序**
+      不能靠最終狀態判斷（兩種次序的最終狀態相同），只能在 edit 的時點觀測。
+      `edit_fail=True` 時 exit 1（`AC-11` 的反例）——快照照留，供斷言 forge
+      確實被叫到過。
+    * `issue list` → 寫 `list-called` 哨兵並 exit 8（`AC-5`：不該走到這裡）。
+    """
     fake = bin_ / "gh"
     fake.write_text(
         "#!/usr/bin/env python3\n"
@@ -1112,8 +1122,11 @@ def _p291_fake_gh(bin_: Path, td: Path, body: str) -> None:
         "    src = a[a.index('-F') + 1]\n"
         f"    pathlib.Path({str(td / 'edited-body.md')!r}).write_text("
         "pathlib.Path(src).read_text())\n"
+        f"    cache = pathlib.Path({str(cache)!r})\n"
+        f"    pathlib.Path({str(td / 'cache-at-edit.json')!r}).write_text("
+        "cache.read_text() if cache.exists() else '<cache 檔不存在>')\n"
         f"    pathlib.Path({str(td / 'edit-called')!r}).write_text(' '.join(a))\n"
-        "    sys.exit(0)\n"
+        f"    sys.exit({1 if edit_fail else 0})\n"
         "if a[:2] == ['issue', 'list']:\n"
         f"    pathlib.Path({str(td / 'list-called')!r}).write_text(' '.join(a))\n"
         "    print('issue list 不該被呼叫（cache 命中路徑）', file=sys.stderr)\n"
@@ -1125,6 +1138,7 @@ def _p291_fake_gh(bin_: Path, td: Path, body: str) -> None:
 
 def _p291_run_cmd_archive(td: Path, mod, *, delete_ok: bool = True,
                           seed_md: bool = True, cache_entry: bool = True,
+                          edit_fail: bool = False,
                           body: str = P291_E2E_BODY) -> dict:
     """在測試行程內跑 `mod.cmd_archive(... --yes --no-publish)`，回傳觀測結果。
 
@@ -1143,7 +1157,7 @@ def _p291_run_cmd_archive(td: Path, mod, *, delete_ok: bool = True,
     cache.write_text(json.dumps(
         {"291": {"thread_id": "2620", "title": "K4c-4", "state": "OPEN"}}
         if cache_entry else {}, ensure_ascii=False, indent=2) + "\n")
-    _p291_fake_gh(bin_, td, body)
+    _p291_fake_gh(bin_, td, body, cache, edit_fail=edit_fail)
 
     calls: list[tuple[str, bool]] = []
     edited = td / "edited-body.md"
@@ -1156,6 +1170,7 @@ def _p291_run_cmd_archive(td: Path, mod, *, delete_ok: bool = True,
             return {"ok": False, "description": "boom"}
         return {"ok": True}
 
+    snap = td / "cache-at-edit.json"
     orig = (mod.api, mod.CACHE, mod.OUT, os.environ.get("PATH", ""))
     mod.api, mod.CACHE, mod.OUT = fake_api, cache, out_dir
     os.environ["PATH"] = f"{bin_}:{orig[3]}"
@@ -1172,8 +1187,11 @@ def _p291_run_cmd_archive(td: Path, mod, *, delete_ok: bool = True,
         "edit_called": (td / "edit-called").exists(),
         "list_called": (td / "list-called").exists(),
         "edited_body": edited.read_text() if edited.exists() else None,
+        "cache_at_edit": snap.read_text() if snap.exists() else None,
         "cache": json.loads(cache.read_text() or "{}"),
         "md_path": out_dir / "291.md",
+        # `AC-11`：寫標記用的暫存檔路徑（受測程式用同一個 gettempdir，同行程）。
+        "tmp_marker": Path(tempfile.gettempdir()) / "devflow-archived-291.md",
     }
 
 
@@ -1243,6 +1261,78 @@ def _p291_no_step4_copy(td: Path) -> Path:
     return out
 
 
+# ── 突變複本的共用機制（`AC-4`／`AC-5`／`AC-11` 的未達成候選）───────────────
+# 區段邊界的字面：清 cache 區塊與寫標記區段各自的起訖，突變靠它們切段。
+P291_CACHE_HEAD = "    # 封存程序第 (4) 步：清 cache。"
+P291_STEP4_HEAD = "    # ── 第四步：寫封存標記（CH3）──開始"
+P291_STEP4_TAIL = "    # ── 第四步結束 ─"
+P291_META_LINES = ("    issue_num, _title, _state = issue_meta(args.thread)\n"
+                   "    md_path = OUT / f\"{stem_for(args.thread, issue_num)}.md\"\n")
+
+
+def _p291_split_blocks(src: str) -> tuple[str, str, str, str]:
+    """把 `cmd_archive` 的尾段切成 (前段, 清 cache 區塊, 寫標記區段, 後段)。"""
+    i = src.index(P291_CACHE_HEAD)
+    j = src.index(P291_STEP4_HEAD)
+    k = src.index("\n", src.index(P291_STEP4_TAIL, j)) + 1
+    return src[:i], src[i:j], src[j:k], src[k:]
+
+
+def _p291_load_mutant(td: Path, name: str, src: str):
+    """把突變後的源碼寫成複本並載入。`_marker` 已在 sys.modules，同層 import 解析得到。"""
+    path = td / f"{name}.py"
+    path.write_text(src)
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _p291_v1_order_src() -> str:
+    """T v1 的次序：寫標記在清 cache **之前**（＝ `2a6af87` 的實作）。
+
+    `AC-4` 第二個斷言的未達成候選。該版本在 v1 的 AC 下全部通過，故是可重跑
+    且具鑑別力的對照——它與本輪實作的差別**只有**這兩個區塊的先後。
+    """
+    head, cache_blk, step4_blk, tail = _p291_split_blocks(ARCHIVE_SRC)
+    return head + step4_blk + cache_blk + tail
+
+
+def _p291_meta_late_src() -> str:
+    """`issue_meta`／`md_path` 的取值搬到清 cache **之後**（`AC-5` 的未達成候選）。
+
+    清 cache 已把該單的條目刪掉，故 `issue_meta` 的 cache 查找落空、退回
+    `gh issue list` 掃全 repo——正是 `AC-5` 要擋的事。
+    """
+    head, cache_blk, step4_blk, tail = _p291_split_blocks(ARCHIVE_SRC)
+    assert P291_META_LINES in head, "取值兩行的字面已變，AC-5 的突變失效"
+    head = head.replace(P291_META_LINES, "")
+    return head + cache_blk + P291_META_LINES + step4_blk + tail
+
+
+def _p291_no_finally_src() -> str:
+    """把 `AC-11` 的 `try/finally` 還原成 `2a6af87`（unlink 在 check=True 之後）。"""
+    old = """            try:
+                subprocess.run(
+                    ["gh", "issue", "edit", str(issue_num), "-R", "AugustusHsu/agent-devflow",
+                     "-F", str(tmp)],
+                    capture_output=True, stdin=subprocess.DEVNULL, timeout=60,
+                    text=True, check=True)
+            finally:
+                tmp.unlink(missing_ok=True)
+"""
+    new = """            subprocess.run(
+                ["gh", "issue", "edit", str(issue_num), "-R", "AugustusHsu/agent-devflow",
+                 "-F", str(tmp)],
+                capture_output=True, stdin=subprocess.DEVNULL, timeout=60,
+                text=True, check=True)
+            tmp.unlink(missing_ok=True)
+"""
+    assert old in ARCHIVE_SRC, "AC-11 的 try/finally 字面已變，突變失效"
+    return ARCHIVE_SRC.replace(old, new)
+
+
 @case("#291 AC-6 未達成候選：切掉第四步的複本同 fixture 得 T=1 A=0（判 active）")
 def _p291_ac6_baseline():
     with tempfile.TemporaryDirectory() as td:
@@ -1285,6 +1375,51 @@ def _p291_ac4():
               ok["edit_called"], f"rc={ok['rc']}\n{ok['stdout']}")
 
 
+@case("#291 AC-4(v2) 寫標記在清 cache 之後：edit 被呼叫的時點 cache 已移除該單")
+def _p291_ac4_order():
+    # 契約（`telegram.md:13`／`:25`）：封存程序四步的第 (4) 步是清 cache，
+    # 寫標記是「四步之後」的獨立動作。相對次序只能在 edit 的時點觀測——
+    # 兩種次序的**最終狀態相同**（cache 清掉、標記寫入），讀最終狀態沒有鑑別力。
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        r = _p291_run_cmd_archive(td, archive)
+        detail = (f"rc={r['rc']}\n--- 輸出 ---\n{r['stdout']}"
+                  f"--- edit 時點的 cache ---\n{r['cache_at_edit']}")
+        check("#291 AC-4(v2) rc == 0 且 gh issue edit 被呼叫", r["rc"] == 0
+              and r["edit_called"], detail)
+        check("#291 AC-4(v2) 取得 edit 時點的 cache 快照",
+              r["cache_at_edit"] is not None, detail)
+        if r["cache_at_edit"] is not None:
+            snap = json.loads(r["cache_at_edit"])
+            check("#291 AC-4(v2) edit 被呼叫時 cache 內該單條目**已移除**"
+                  "（清 cache 先於寫標記）",
+                  "291" not in snap, f"快照 {r['cache_at_edit']!r}")
+        check("#291 AC-4(v2) 最終狀態亦為已清除（兩步都做了）",
+              "291" not in r["cache"], json.dumps(r["cache"], ensure_ascii=False))
+
+    # 未達成候選：T v1 的次序（寫標記在清 cache 之前，＝ 2a6af87 的實作）。
+    # 同一 fixture 下 edit 時點的 cache **仍含該單** → 上面的斷言 FAIL。
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        mut = _p291_load_mutant(td, "devflow_archive_v1order", _p291_v1_order_src())
+        m = _p291_run_cmd_archive(td, mut)
+        mdetail = (f"rc={m['rc']}\n--- 輸出 ---\n{m['stdout']}"
+                   f"--- edit 時點的 cache ---\n{m['cache_at_edit']}")
+        check("#291 AC-4(v2) 未達成候選：v1 次序複本仍寫成標記（rc 0、edit 被呼叫）",
+              m["rc"] == 0 and m["edit_called"], mdetail)
+        check("#291 AC-4(v2) 未達成候選：v1 次序下 edit 時點的 cache **仍含該單**"
+              " → 上面的斷言 FAIL ✓",
+              m["cache_at_edit"] is not None
+              and "291" in json.loads(m["cache_at_edit"]),
+              f"快照 {m['cache_at_edit']!r}")
+        mv = _p291_ch3(m["edited_body"] or "")
+        rv = _p291_ch3(r["edited_body"] or "")
+        check("#291 AC-4(v2) 未達成候選：v1 次序的最終狀態與本實作無從區分"
+              "（cache 皆清空、body 皆判已封存 → 讀最終狀態沒有鑑別力）",
+              "291" not in m["cache"] and mv[:2] == rv[:2] == (1, 1),
+              f"最終 cache {m['cache']!r} v1 判定 {mv!r} 本實作判定 {rv!r}")
+
+
 @case("#291 AC-5 --no-publish：issue list 未被呼叫、file= 為存在的絕對路徑")
 def _p291_ac5():
     with tempfile.TemporaryDirectory() as td:
@@ -1310,46 +1445,96 @@ def _p291_ac5():
                 check("#291 AC-5 形狀為 <OUT>/<issue 號>.md",
                       p.name == "291.md" and p.parent.name == "topics", str(p))
 
-    # md 不存在：不得寫出指向不存在檔的標記 → ❌ ＋ rc 非 0；但 cache 仍要清
+    # 未達成候選：把 issue_meta／md_path 的取值搬到清 cache **之後**。
+    # 清 cache 已刪掉該單條目 → cache 查找落空 → 退回 gh issue list 掃全 repo。
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
-        r2 = _p291_run_cmd_archive(td, archive, seed_md=False)
-        detail2 = f"rc={r2['rc']}\n--- 輸出 ---\n{r2['stdout']}"
-        check("#291 AC-5 md 不存在時 rc 非 0", r2["rc"] != 0, detail2)
-        check("#291 AC-5 md 不存在時未呼叫 gh issue edit（不寫指向空氣的標記）",
-              not r2["edit_called"] and r2["edited_body"] is None, detail2)
-        check("#291 AC-5 md 不存在時 stdout 印 ❌", "❌" in r2["stdout"], detail2)
-        check("#291 AC-5 md 不存在時 cache 仍被清除"
-              "（分區已刪，殘影會讓下一次建分區拿到死 thread）",
-              "291" not in r2["cache"], json.dumps(r2["cache"], ensure_ascii=False))
-
-    # num 為 None（cache 無此 thread、且 issue list 查不到）：同樣 ❌ rc 非 0、仍清 cache
-    with tempfile.TemporaryDirectory() as td:
-        td = Path(td)
-        r3 = _p291_run_cmd_archive(td, archive, cache_entry=False)
-        detail3 = f"rc={r3['rc']}\n--- 輸出 ---\n{r3['stdout']}"
-        check("#291 AC-5 issue 號查不到時 rc 非 0", r3["rc"] != 0, detail3)
-        check("#291 AC-5 issue 號查不到時未呼叫 gh issue edit",
-              not r3["edit_called"] and r3["edited_body"] is None, detail3)
-        check("#291 AC-5 issue 號查不到時 stdout 印 ❌", "❌" in r3["stdout"], detail3)
-        check("#291 AC-5 issue 號查不到時 cache 區段仍執行（無該單、不報錯）",
-              "291" not in r3["cache"], json.dumps(r3["cache"], ensure_ascii=False))
+        mut = _p291_load_mutant(td, "devflow_archive_metalate", _p291_meta_late_src())
+        m = _p291_run_cmd_archive(td, mut)
+        mdetail = f"rc={m['rc']}\n--- 輸出 ---\n{m['stdout']}"
+        check("#291 AC-5 未達成候選：取值搬到清 cache 之後 → issue list **被呼叫**"
+              " → 上面的斷言 FAIL ✓",
+              m["list_called"], mdetail)
+        check("#291 AC-5 未達成候選：退回掃全 repo 後連 issue 號都查不到，標記寫不出來",
+              m["rc"] != 0 and not m["edit_called"], mdetail)
 
 
-@case("#291 AC-2／AC-4 A>1 的 body：第四步停下（不動 forge），cache 仍清")
-def _p291_invalid_body():
+@case("#291 AC-10 三個失敗分支：rc 非 0、cache 已清、gh issue edit 未呼叫")
+def _p291_ac10():
+    # T v2 `AC-10` 的正式規格（第 1 輪為實作者的射程外判斷，裁決位 2026-10-05
+    # 核對後採納為規格）：delete 已成功 ⇒ 分區已不存在 ⇒ cache 一律照清，
+    # 而整體 rc 非 0（標記是 `CH3` 的必需步驟，寫入失敗卻回 0 會誤報整體成功）。
+    # rc 與 cache 不矛盾——rc 反映「程序是否完整完成」，cache 反映「是否還有殘影」。
+    branches = [
+        ("分支二 匯出檔不存在", {"seed_md": False}),
+        ("分支一 issue_meta 回不出 issue 號", {"cache_entry": False}),
+        ("分支三 upsert 遇 A>1（InvalidMarker）", {"body": P291_F_A2}),
+    ]
+    for label, kwargs in branches:
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            r = _p291_run_cmd_archive(td, archive, **kwargs)
+            detail = f"rc={r['rc']}\n--- 輸出 ---\n{r['stdout']}"
+            check(f"#291 AC-10 {label}：rc 非 0", r["rc"] != 0, detail)
+            check(f"#291 AC-10 {label}：cache 已清（分區已刪，殘影就是錯的）",
+                  "291" not in r["cache"], json.dumps(r["cache"], ensure_ascii=False))
+            check(f"#291 AC-10 {label}：gh issue edit 未被呼叫（不動 forge）",
+                  not r["edit_called"] and r["edited_body"] is None, detail)
+            check(f"#291 AC-10 {label}：stdout 印 ❌（人看得到哪一步沒做成）",
+                  "❌" in r["stdout"], detail)
+    # 分支三另驗 `CH3` 的要求：印全部命中行到 stderr
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
         r = _p291_run_cmd_archive(td, archive, body=P291_F_A2)
-        detail = f"rc={r['rc']}\n--- 輸出 ---\n{r['stdout']}"
-        check("#291 AC-4 A>1 時 rc 非 0", r["rc"] != 0, detail)
-        check("#291 AC-4 A>1 時未呼叫 gh issue edit（INVALID 不動 forge）",
-              not r["edit_called"] and r["edited_body"] is None, detail)
-        check("#291 AC-4 A>1 時輸出含 INVALID 與兩行命中的字面",
+        check("#291 AC-10 分支三：輸出含 INVALID 與全部命中行的字面（CH3）",
               "INVALID" in r["stdout"]
-              and all(ln in r["stdout"] for ln in P291_A2_LINES), detail)
-        check("#291 AC-4 A>1 時 cache 仍被清除（分區已刪）",
+              and all(ln in r["stdout"] for ln in P291_A2_LINES),
+              r["stdout"])
+
+
+@case("#291 AC-11 暫存檔不洩漏：gh issue edit 失敗後該檔不存在")
+def _p291_ac11():
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        r = _p291_run_cmd_archive(td, archive, edit_fail=True)
+        detail = (f"rc={r['rc']} 暫存檔={r['tmp_marker']}\n"
+                  f"--- 輸出 ---\n{r['stdout']}")
+        check("#291 AC-11 gh issue edit 確實被呼叫過（否則本反例沒有鑑別力）",
+              r["edit_called"], detail)
+        check("#291 AC-11 rc 非 0（寫標記失敗不得誤報整體成功）", r["rc"] != 0, detail)
+        check("#291 AC-11 cmd_archive 返回後暫存檔**不存在**（finally 清掉了）",
+              not r["tmp_marker"].exists(), detail)
+        check("#291 AC-11 cache 已清（同 AC-10：delete 已成功）",
               "291" not in r["cache"], json.dumps(r["cache"], ensure_ascii=False))
+    # 成功路徑也不得留下暫存檔
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        ok = _p291_run_cmd_archive(td, archive)
+        check("#291 AC-11 成功路徑亦不留暫存檔",
+              ok["rc"] == 0 and not ok["tmp_marker"].exists(),
+              f"rc={ok['rc']} 暫存檔={ok['tmp_marker']}")
+
+    # 未達成候選：`2a6af87` 的實作（unlink 在 check=True 之後）。
+    # CalledProcessError 直接拋出 → unlink 不執行 → 檔案留在暫存根。
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        mut = _p291_load_mutant(td, "devflow_archive_nofinally",
+                                _p291_no_finally_src())
+        leaked = Path(tempfile.gettempdir()) / "devflow-archived-291.md"
+        leaked.unlink(missing_ok=True)          # 先確保乾淨，否則殘留不可歸因
+        try:
+            m = _p291_run_cmd_archive(td, mut, edit_fail=True)
+            check("#291 AC-11 未達成候選：2a6af87 的實作在 edit 失敗後**留下**暫存檔"
+                  " → 上面的斷言 FAIL ✓",
+                  leaked.exists(),
+                  f"rc={m['rc']} 期望殘留於 {leaked}\n--- 輸出 ---\n{m['stdout']}")
+            check("#291 AC-11 未達成候選：殘留的內容就是要寫進 forge 的 body"
+                  "（故洩漏的是完整的 issue body，不是空檔）",
+                  leaked.exists()
+                  and "<!-- devflow:archived thread=2620 " in leaked.read_text(),
+                  leaked.read_text()[:200] if leaked.exists() else "（檔案不存在）")
+        finally:
+            leaked.unlink(missing_ok=True)      # 突變複本的洩漏由測試自己收拾
 
 
 # ── #291 AC-7 archive.py 本單只改 cmd_archive（AST）────────────────────────
