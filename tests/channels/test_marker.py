@@ -1232,7 +1232,7 @@ def _p291_ac6():
               in r["edited_body"]
               and "散文也提一次 <!-- devflow:archived thread=999 file=/t/999.md --> 如上。"
               in r["edited_body"], r["edited_body"])
-        check("#291 AC-6 cache 已清除該單（第四步在清 cache 之前、兩步都做了）",
+        check("#291 AC-6 cache 已清除該單（最終狀態；次序由 AC-4 的 edit 時點快照把守）",
               "291" not in r["cache"], json.dumps(r["cache"], ensure_ascii=False))
         # 順序：delete 當時 edited-body.md 還不存在 → 寫標記在 delete 之後
         deletes = [(i, seen) for i, (m, seen) in enumerate(r["calls"])
