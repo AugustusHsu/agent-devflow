@@ -24,3 +24,4 @@
 
 - Bot API 無列出 forum topic 的方法；issue 與 topic 的對應須自行維護，forge 上的記載為權威（`README.md` 職能 4）。
 - 三個 `✅` 格（seat 間喚醒、在 General 下指令的限制、session 與 thread 的綁定）的驗證方式都需要第三者自備 Telegram forum group 與 ≥2 個 bot；「封存程序」格需要一個 administrator 權限的 bot 與自建的誘餌分區（**不得拿真實單的分區當靶**，`deleteForumTopic` 不可逆）；「分區狀態判準」格的 (1)(3)(4)(5) 與「封存標記寫入」格的 (1)(4) 只需 `gh` 與該 repo 的讀權，後者的 (2)(3) 另需 issue 編輯權；「分區狀態 INVALID 判定」格全部以自造的 body fixture 驗，只需 `gh` 讀權與一個編輯器，不需 Telegram 權限。無此環境者只能依 `R9` 當 `📝`／`⬜` 引用。
+- 凡要被 parse mode 解析的文字，插入外部字串前一律轉義，**不分人工或程式產生**（`#291` 封存時 issue 標題的裸底線、人工貼 MarkdownV2 字元清單時的裸反引號，同一個病）。

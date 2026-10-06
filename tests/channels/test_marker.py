@@ -1554,22 +1554,29 @@ def _p291_ac7():
 
     o, n = funcs(old), funcs(ARCHIVE_SRC)
     changed = sorted(k for k in o.keys() & n.keys() if o[k] != n[k])
-    check("#291 AC-7 改變的函式只有 cmd_archive", changed == ["cmd_archive"],
+    # `#293` 起 `cmd_publish`／`send_document` 亦改（caption 轉 HTML parse mode
+    # ＋ `esc_html` 轉義）。本子測試守的是「`#291` 的 `cmd_archive` 改動仍在、
+    # 且沒有別的函式被順手改」，故期望集合隨已合併的後續單增長，不是放寬。
+    check("#291 AC-7 改變的函式只有 cmd_archive（＋#293 的 cmd_publish／send_document）",
+          changed == ["cmd_archive", "cmd_publish", "send_document"],
           f"改變的函式: {changed!r} | 新增: {sorted(n.keys() - o.keys())!r} "
           f"| 移除: {sorted(o.keys() - n.keys())!r}")
     check("#291 AC-7 既有函式一個都沒被移除", not (o.keys() - n.keys()),
           f"{sorted(o.keys() - n.keys())!r}")
-    for name in ("cmd_scan", "cmd_publish", "cmd_export", "collect", "issue_meta",
+    for name in ("cmd_scan", "cmd_export", "collect", "issue_meta",
                  "api", "stem_for", "_export"):
         check(f"#291 AC-7 {name} 的 AST 與 6b72933 相同",
               name in o and name in n and o[name] == n[name])
+    check("#291 AC-7 cmd_publish 自 #293 起改動（本單之後的事實，見 #293 AC-7）",
+          "cmd_publish" in o and "cmd_publish" in n
+          and o["cmd_publish"] != n["cmd_publish"])
 
 
 # ── #291 AC-8／AC-9 版本與 import-path 不回歸 ───────────────────────────────
-@case("#291 AC-8 devflow/VERSION 恰 0.15.2.0")
+@case("#291 AC-8 devflow/VERSION 恰 0.15.3.0（#293 進位後）")
 def _p291_ac8():
     raw = (REPO / "devflow" / "VERSION").read_text()
-    check("#291 AC-8 內容（strip 後）恰 0.15.2.0", raw.strip() == "0.15.2.0", repr(raw))
+    check("#291 AC-8 內容（strip 後）恰 0.15.3.0", raw.strip() == "0.15.3.0", repr(raw))
 
 
 @case("#291 AC-9 telegram/*.py 與本測試檔零 import-path 操作")
@@ -1586,6 +1593,208 @@ def _p291_ac9():
     check("#291 AC-9 受檢集合是 glob 且含本單改動的兩支腳本",
           {"_marker.py", "devflow_archive.py"} <= {p.name for p in targets},
           f"{[p.name for p in targets]!r}")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# `#293`／K4c-5：`cmd_publish` 的 caption 改 HTML parse mode ＋ 轉義
+# ════════════════════════════════════════════════════════════════════════════
+# 本單的 AC 編號獨立於上方 `#285`／`#291`，標籤一律帶 `#293` 前綴。
+# `AC-5`（真 API 對照）**不在本檔**：本檔零 Telegram API（見模組 docstring），
+# 該 AC 由實作者實跑並把輸出記進 issue 留言。
+
+# `#291` 的 issue 標題（`gh issue view 291 --json title` 實查，2026-10-06）。
+# 含 `_marker.py` 的裸底線 —— 就是 `#291` 封存時讓 `sendDocument` 回
+# `can't parse entities … byte offset 26` 的那一個字元。
+P293_TITLE_291 = ("🐛 K4c-4: _marker.py 公開 API 不對稱——封存標記無寫側實作"
+                  "（CH3 生效起每次封存產出不合規 body）")
+P293_TITLE_HTML = "fix: <script> & a > b 的處理"
+
+
+def _p293_caption(title: str, *, num: str = "291", thread: str = "3363",
+                  n: int = 9, state: str | None = None) -> str:
+    """以假的 `_export`／`issue_meta`／`send_document` 實跑 `cmd_publish`，
+    取回它**實際組出**的 caption（不在測試裡重寫一份格式，否則測不到實作）。"""
+    captured: list[str] = []
+    orig = (archive._export, archive.issue_meta, archive.send_document)
+    with tempfile.TemporaryDirectory() as td:
+        md = Path(td) / f"{num}.md"
+        js = Path(td) / f"{num}.json"
+        md.write_text("md")
+        js.write_text("{}")
+        try:
+            archive._export = lambda *a, **k: (md, js, n)
+            archive.issue_meta = lambda *a, **k: (num, title, state)
+            archive.send_document = lambda _t, _p, cap="": (captured.append(cap)
+                                                            or {"ok": True})
+            rc = archive.cmd_publish(argparse.Namespace(thread=thread))
+        finally:
+            archive._export, archive.issue_meta, archive.send_document = orig
+    assert rc == 0, f"cmd_publish rc={rc}"
+    return captured[0]
+
+
+def _p293_old_caption(title: str, *, num: str = "291", thread: str = "3363",
+                      n: int = 9, state: str | None = None) -> str:
+    """`21f1258` 的舊構造，逐字自該 commit 的 `cmd_publish:536` 抄來
+    （`**…**` ＋ 原樣插入）。`AC-3` 的未達成候選要的就是這一份輸出。"""
+    return (f"📦 **{'#' + num if num else 'thread ' + thread}** {title}\n"
+            f"{n} 則訊息 · thread {thread}"
+            + (f" · {state}" if state else ""))
+
+
+# ── #293 AC-1 轉義函式：恰三個字元，`&` 先行 ────────────────────────────────
+@case("#293 AC-1 esc 只處理 & < >，且 & 最先（否則二次轉義）")
+def _p293_ac1():
+    esc = archive.esc_html
+    check("#293 AC-1 esc('a&b<c>d') == 'a&amp;b&lt;c&gt;d'",
+          esc("a&b<c>d") == "a&amp;b&lt;c&gt;d", repr(esc("a&b<c>d")))
+    check("#293 AC-1 esc('&lt;') == '&amp;lt;'（& 先行，不二次轉義）",
+          esc("&lt;") == "&amp;lt;", repr(esc("&lt;")))
+    check("#293 AC-1 esc('_marker.py') == '_marker.py'（底線不是 HTML 實體起點）",
+          esc("_marker.py") == "_marker.py", repr(esc("_marker.py")))
+    for ch in ("_", "*", "`", "[", "]"):
+        check(f"#293 AC-1 Markdown 字元 {ch!r} 一字不動", esc(ch) == ch, repr(esc(ch)))
+
+    # 鑑別力：把 `&` 的處理移到最後 → 第一式壞（`&` 被二次轉義）。
+    #
+    # ⚠ T 的 `AC-1` 把鑑別力記在**第二式**（「把 `&` 的處理移到最後，第二式變成
+    # `&lt;`（錯）」）。實測不是這樣：第二式的輸入 `&lt;` **不含**字面 `<`，
+    # 兩種順序都只有 `&` 規則命中，皆得 `&amp;lt;` —— 該式對順序零鑑別力。
+    # 真正抓到順序錯的是**第一式**（輸入含字面 `<`）：
+    #     & 先行  'a&b<c>d' → 'a&amp;b&lt;c&gt;d'   （對）
+    #     & 最後  'a&b<c>d' → 'a&amp;b&amp;lt;c&amp;gt;d'（錯，`&lt;` 的 `&` 被二次轉義）
+    # T 的三條等式本身全部成立（上方已逐條斷言），只是「哪一式有鑑別力」記錯了；
+    # 本處斷言實測事實，並一併釘住第二式的順序不敏感性，免得後人再誤記。
+    def esc_amp_last(text: str) -> str:
+        return text.replace("<", "&lt;").replace(">", "&gt;").replace("&", "&amp;")
+
+    check("#293 AC-1 鑑別力：& 移到最後時第一式變 'a&amp;b&amp;lt;c&amp;gt;d' → FAIL ✓",
+          esc_amp_last("a&b<c>d") == "a&amp;b&amp;lt;c&amp;gt;d"
+          and esc_amp_last("a&b<c>d") != esc("a&b<c>d"),
+          repr(esc_amp_last("a&b<c>d")))
+    check("#293 AC-1 鑑別力：單一字面 '<' 亦抓到（& 最後 → '&amp;lt;'）",
+          esc_amp_last("<") == "&amp;lt;" and esc("<") == "&lt;",
+          f"amp_last={esc_amp_last('<')!r} 正確={esc('<')!r}")
+    check("#293 AC-1 T 的第二式對順序零鑑別力（輸入無字面 <，兩序同得 &amp;lt;）",
+          esc_amp_last("&lt;") == esc("&lt;") == "&amp;lt;",
+          f"amp_last={esc_amp_last('&lt;')!r} 正確={esc('&lt;')!r}")
+
+
+# ── #293 AC-2 caption 改用 HTML parse mode ─────────────────────────────────
+@case("#293 AC-2 parse_mode 恰 HTML 一處；caption 用 <b>…</b> ＋ 標題經轉義")
+def _p293_ac2():
+    hits = re.findall(r'field\("parse_mode", "([^"]+)"\)', ARCHIVE_SRC)
+    check("#293 AC-2 parse_mode 呼叫點恰 1 處且值為 HTML（射程未變）",
+          hits == ["HTML"], f"{hits!r}")
+    check("#293 AC-2 全檔不再出現 parse_mode 的 Markdown 值",
+          'field("parse_mode", "Markdown")' not in ARCHIVE_SRC)
+
+    cap = _p293_caption(P293_TITLE_291)
+    check("#293 AC-2 caption 含 <b>#291</b>", "<b>#291</b>" in cap, repr(cap))
+    check("#293 AC-2 _marker.py 的底線原樣保留",
+          "_marker.py" in cap and "\\_" not in cap, repr(cap))
+    check("#293 AC-2 caption 無 **（Markdown 粗體已換掉）", "**" not in cap, repr(cap))
+    check("#293 AC-2 標題其餘內容完整（未被轉義吃掉）",
+          "封存標記無寫側實作" in cap and "（CH3 生效起每次封存產出不合規 body）" in cap,
+          repr(cap))
+    check("#293 AC-2 無 issue 號時退回 thread N（分支亦走 <b>…</b>）",
+          "<b>thread 3363</b>" in _p293_caption("某標題", num=""),
+          repr(_p293_caption("某標題", num="")))
+    check("#293 AC-2 state 欄亦經轉義（外部值無漏網）",
+          " · a &amp; b" in _p293_caption("t", state="a & b"),
+          repr(_p293_caption("t", state="a & b")))
+
+
+# ── #293 AC-3 未達成候選：舊構造對同一標題產出不合法 caption ─────────────────
+@case("#293 AC-3 未達成候選：21f1258 的舊構造在 byte 26 有奇數個裸底線")
+def _p293_ac3():
+    old = _p293_old_caption(P293_TITLE_291)
+    b = old.encode()
+    # T 的切片寫 `[26:28]`，實測該兩 byte 解為 "_m"（底線 ＋ 'm'）；Telegram 報的
+    # offset 26 指的是**那一個**底線，故這裡取 `[26:27]`。兩者指同一個字元。
+    check("#293 AC-3 舊 caption 的 byte 26 是裸底線（T 的 [26:28] ＝ '_m'）",
+          b[26:27].decode() == "_",
+          f"[26:27]={b[26:27].decode()!r} [26:28]={b[26:28].decode()!r} "
+          f"[26:48]={b[26:48].decode()!r}")
+    check("#293 AC-3 舊 caption 的底線個數為奇數 ⇒ 必無配對",
+          old.count("_") % 2 == 1, f"count={old.count('_')}")
+    check("#293 AC-3 舊構造確實是 Markdown 粗體（** 在、無 <b>）",
+          "**" in old and "<b>" not in old, repr(old))
+
+    # 對照 `AC-2`：修正後的輸出在同一位置不再是裸底線起點，且無 **。
+    new = _p293_caption(P293_TITLE_291)
+    check("#293 AC-3 修正後輸出確實不同於舊構造（證明改動生效）", new != old)
+    check("#293 AC-3 修正後無 ** 且底線仍為奇數（底線不是 HTML 實體起點，無妨）",
+          "**" not in new and new.count("_") % 2 == 1,
+          f"count={new.count('_')} {new!r}")
+
+
+# ── #293 AC-4 HTML 特殊字元的標題也正確 ────────────────────────────────────
+@case("#293 AC-4 標題含 <script> & > 時轉義正確、不含裸標籤")
+def _p293_ac4():
+    esc = archive.esc_html
+    got = esc(P293_TITLE_HTML)
+    check("#293 AC-4 轉義結果逐字相符",
+          got == "fix: &lt;script&gt; &amp; a &gt; b 的處理", repr(got))
+    check("#293 AC-4 不含裸 <script>", "<script>" not in got, repr(got))
+    cap = _p293_caption(P293_TITLE_HTML)
+    check("#293 AC-4 caption 亦不含裸 <script>，且含轉義後字面",
+          "<script>" not in cap and "&lt;script&gt;" in cap, repr(cap))
+    check("#293 AC-4 caption 的 <b> 標籤自己沒被轉義（只轉外部值）",
+          "<b>#291</b>" in cap, repr(cap))
+    # 未達成候選：未轉義時含裸 <script>
+    check("#293 AC-4 未達成候選：未轉義時含裸 <script> → 上面的斷言 FAIL ✓",
+          "<script>" in P293_TITLE_HTML, repr(P293_TITLE_HTML))
+
+
+# ── #293 AC-6 build_md 的 MD 內文一字不動（區段 digest）─────────────────────
+def _p293_md_header() -> str:
+    """`sed -n '/lines = \\[f"# /,/匯出時間/p'` 的 Python 等價：自含
+    `lines = [f"# ` 的那一行起，至其後第一個含「匯出時間」的行止（含兩端）。"""
+    lines = ARCHIVE_SRC.splitlines()
+    start = next(i for i, ln in enumerate(lines) if 'lines = [f"# ' in ln)
+    end = next(i for i, ln in enumerate(lines) if i >= start and "匯出時間" in ln)
+    return "\n".join(lines[start:end + 1]) + "\n"
+
+
+@case("#293 AC-6 build_md 表頭的區段 digest 與 T 所載相同（** 與反引號不動）")
+def _p293_ac6():
+    import hashlib
+    sec = _p293_md_header()
+    with_nl = hashlib.sha256(sec.encode()).hexdigest()
+    without_nl = hashlib.sha256(sec.rstrip("\n").encode()).hexdigest()
+    check("#293 AC-6 區段恰 20 行", len(sec.rstrip("\n").splitlines()) == 20,
+          f"{len(sec.rstrip(chr(10)).splitlines())} 行")
+    # T 所載 6f454f… 是 `printf '%s' "$(sed …)"`（去結尾換行）的值；
+    # `sed … | sha256sum`（含結尾換行）得 606217cf…。兩者指同一段內容。
+    check("#293 AC-6 digest（去結尾換行）== T 所載 6f454f47950a371d…",
+          without_nl == "6f454f47950a371d59b0dac1739b7cccf345ea435d9dde287f4d9cbe23173bee",
+          f"去換行={without_nl}\n        含換行={with_nl}")
+    check("#293 AC-6 digest（含結尾換行，即 sed | sha256sum）== 606217cf6b13cd47…",
+          with_nl == "606217cf6b13cd478260e677725188845812ca02a11065bde89581ea4e030372",
+          f"含換行={with_nl}")
+    # 界線：寫進 .md 檔的內文**不經** Telegram 解析，故粗體與反引號維持 Markdown。
+    check("#293 AC-6 該段仍用 ** 粗體（未被換成 <b>）", "**" in sec)
+    check("#293 AC-6 該段仍用反引號 inline code（未被換成 <code>）", "`" in sec)
+    check("#293 AC-6 該段不出現 HTML 標籤",
+          "<b>" not in sec and "<code>" not in sec, repr(sec[:120]))
+    check("#293 AC-6 該段不呼叫轉義函式（不對 MD 內文的外部值轉義）",
+          "esc_html" not in sec)
+
+    # 鑑別力：T 預跑的三種突變，digest 皆須不同於候選值。
+    muts = {
+        "突變 A：** 換成 <b>": sec.replace("**", "<b>"),
+        "突變 B：反引號換成 <code>": sec.replace("`", "<code>"),
+        "突變 C：對該段的 title 做 escape":
+            sec.replace("{title}", "{esc_html(title)}"),
+    }
+    for label, mut in muts.items():
+        d = hashlib.sha256(mut.rstrip("\n").encode()).hexdigest()
+        check(f"#293 AC-6 鑑別力：{label} → digest 不同 → 斷言 FAIL ✓",
+              d != without_nl and mut != sec, f"突變 digest={d[:16]}")
+    check("#293 AC-6 鑑別力：三種突變確實改到了內容（非空操作）",
+          len({*muts.values(), sec}) == 4,
+          f"{len({*muts.values(), sec})} 種相異內容（期望 4）")
 
 
 # ── 收尾 ────────────────────────────────────────────────────────────────────
