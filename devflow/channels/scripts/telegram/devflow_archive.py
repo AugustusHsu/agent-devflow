@@ -76,6 +76,23 @@ def api(method: str, **params) -> dict:
         return {"ok": False, "description": str(exc)}
 
 
+def esc_html(text: str) -> str:
+    """把外部字串轉義成 Telegram HTML parse mode 的合法內文。
+
+    只處理 HTML 的三個實體字元，且 `&` **必須最先**——否則 `<` → `&lt;` 產生的
+    `&` 會被後續的 `&` 規則二次轉義成 `&amp;lt;`（`#293` `AC-1` 的鑑別力）。
+
+    底線、星號、反引號一律**不動**：HTML parse mode 不以它們為實體起點，這正是
+    `#293` 捨 Markdown 改用 HTML 的理由（`#291` 封存時 issue 標題裡 `_marker.py`
+    的裸底線被 Markdown 當成斜體起點，`sendDocument` 回 `can't parse entities`）。
+
+    界線（`#293` `AC-6`）：本函式只用於**要被 parse mode 解析的文字**（caption、
+    訊息文字）。`build_md` 寫進 `.md` 檔的內文由檢視器渲染、不經 Telegram 解析，
+    一律不得經過本函式。
+    """
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def send_document(thread: int, path: pathlib.Path, caption: str = "") -> dict:
     """multipart 上傳，urllib 手工組（避免依賴 requests）。"""
     boundary = "----devflowarchive" + _dt.datetime.now().strftime("%H%M%S%f")
@@ -90,7 +107,11 @@ def send_document(thread: int, path: pathlib.Path, caption: str = "") -> dict:
     field("message_thread_id", str(thread))
     if caption:
         field("caption", caption[:1024])
-        field("parse_mode", "Markdown")
+        # HTML 而非 Markdown（`#293`）：caption 要插入 issue 標題這類外部字串，
+        # HTML 的實體起點只有 `&` `<` `>` 三個、可由 `esc_html` 機械轉義乾淨；
+        # Markdown 的 `_` `*` `` ` `` 散落在正常文字裡（`_marker.py`），
+        # 轉義清單長且易漏。呼叫端的 caption 須自行對外部值套 `esc_html`。
+        field("parse_mode", "HTML")
     parts.append(
         f'--{boundary}\r\nContent-Disposition: form-data; name="document"; '
         f'filename="{path.name}"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode()
@@ -533,9 +554,13 @@ def cmd_export(args) -> int:
 def cmd_publish(args) -> int:
     md, js, n = _export(args.thread, getattr(args, "since", None), getattr(args, "until", None))
     num, title, state = issue_meta(args.thread)
-    caption = (f"📦 **{'#' + num if num else 'thread ' + args.thread}** {title}\n"
-               f"{n} 則訊息 · thread {args.thread}"
-               + (f" · {state}" if state else ""))
+    # caption 走 HTML parse mode（`send_document:93`）：粗體用 `<b>…</b>`，
+    # 外部值（issue 標題、state）一律先過 `esc_html`。`#291` 封存時標題含
+    # `_marker.py` 的裸底線，Markdown 解析失敗、MD 封存檔整個送不出去（`#293`）。
+    head = "#" + num if num else "thread " + args.thread
+    caption = (f"📦 <b>{esc_html(head)}</b> {esc_html(title)}\n"
+               f"{n} 則訊息 · thread {esc_html(args.thread)}"
+               + (f" · {esc_html(state)}" if state else ""))
     ok = True
     for path, cap in ((md, caption), (js, "")):
         res = send_document(ARCHIVES_THREAD, path, cap)
