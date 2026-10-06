@@ -25,6 +25,7 @@ import pathlib
 import re
 import sqlite3
 import sys
+import tempfile
 import urllib.parse
 import urllib.request
 
@@ -549,6 +550,37 @@ def cmd_publish(args) -> int:
 
 
 def cmd_archive(args) -> int:
+    """`publish` → close → delete → 清 cache → **寫封存標記**。
+
+    封存程序本身是**四步**（`telegram.md:13`「封存程序」格逐字：「分區封存是四步，
+    順序固定」）：(1) 匯出 (2) 發到 archives 分區 (3) close ＋ delete (4) 清 cache。
+    寫封存標記是**四步之後的獨立動作**（同格逐字：「四步之後還要在 issue body 寫
+    封存標記」；`telegram.md:14`「封存標記寫入」格逐字：「封存程序四步完成後」）。
+
+    三個順序約束（`#291` `AC-4`／`AC-5`；第 2 輪依 `R1` BLOCK-1 的裁示改正）：
+
+    * 寫標記在 **delete 成功之後**。「時機在刪分區**之後** —— 刪成功才算封存，
+      先寫標記而刪失敗會留下『已封存』的假象」（`telegram.md:14` 逐字）。
+    * 寫標記在 **清 cache 之後**，不塞進四步之間。契約的結構理由：`telegram.md:13`
+      明載「第 (4) 步失敗時前三步已生效…殘影會讓下一次建分區拿到已不存在的
+      thread id，故第 (4) 步須讀回驗證」——清 cache 是**四步裡須讀回驗證的收尾
+      動作**；寫標記是 `CH3` 的**獨立動作**，契約依 `R7` 刻意把兩者拆成兩格
+      （兩者實測狀態不同：四步有既有紀錄、寫標記從未執行過）。把寫標記塞進
+      四步之間會模糊這個刻意的劃分。
+      ⚠ 本單第 1 輪（`2a6af87`）依 T v1 把寫標記放在清 cache **之前**，被 `R1`
+      以 BLOCK-1 擋下（`L3`(b)：T 與它宣告不修改的共用契約矛盾）。裁決位
+      2026-10-05 選定「契約優先、T 改」，故這裡是契約的次序，不是工程偏好。
+    * `issue_meta` 與 `md_path` 仍在 **delete 之前**取齊（`AC-5`）。`issue_meta`
+      先讀 cache，命中就不打 forge；取值一旦落到清 cache 之後會退回
+      `gh issue list` 掃全 repo（多一次 API，且任一張單 `T>1` 時 raise，
+      使封存的最後一步失敗）。**取值的位置與寫入的位置是兩件事**：前者受
+      cache 還在與否約束，後者受契約的四步劃分約束。
+
+    三個失敗分支的處置見 `AC-10`（T v2 正式規格）：`delete` 已成功 ⇒ 分區已不
+    存在 ⇒ **cache 一律照清**，而**整體 rc 非 0**（標記是 `CH3` 的必需步驟，
+    寫入失敗卻回 0 會誤報整體成功）。rc 與 cache 不是矛盾——rc 反映「封存程序
+    是否完整完成」，cache 反映「本機快取是否還有殘影」；分區已刪，殘影就是錯的。
+    """
     if not args.yes:
         print("⚠️ archive 會刪除 topic 及其所有訊息（不可逆）。確認後加 --yes 重跑。")
         return 2
@@ -558,6 +590,14 @@ def cmd_archive(args) -> int:
         print("（--no-publish：沿用先前 publish 的檔案，不重送）")
     elif cmd_publish(args) != 0:
         return 1
+    # 寫標記要用的兩個值在這裡就**取齊**（delete 與清 cache 之前；`AC-5`）：
+    # `--no-publish` 會跳過 cmd_publish，而 issue 號與匯出檔路徑原本只在
+    # `_export`／`cmd_publish` 內算得出來，故這裡自己取。取值早、寫入晚——
+    # 寫入的位置由 `AC-4` 規定在清 cache 之後（見 docstring 的契約理由）。
+    # 變數不叫 `num`：下面清 cache 的迴圈用的就是那個名字（既有碼），
+    # 共用一個名字會被該迴圈覆寫。
+    issue_num, _title, _state = issue_meta(args.thread)
+    md_path = OUT / f"{stem_for(args.thread, issue_num)}.md"
     # close 再 delete。實測（3 次複驗）開啟中的 topic 也能直接刪除，close 不是 API 前置條件；
     # 保留它是為了「封存＝先停止寫入，再移除」這個語意順序，並讓中途失敗留下可辨識的狀態。
     closed = api("closeForumTopic", chat_id=CHAT, message_thread_id=int(args.thread))
@@ -571,6 +611,7 @@ def cmd_archive(args) -> int:
     print(f"  {'✅ 已刪除 topic' if res.get('ok') else '❌ ' + str(res.get('description'))}")
     if not res.get("ok"):
         return 1
+    # 封存程序第 (4) 步：清 cache。寫標記在這**之後**（`AC-4`：契約的四步劃分）。
     if CACHE.exists():
         data = json.loads(CACHE.read_text() or "{}")
         drop = [n for n, r in data.items() if str(r.get("thread_id")) == str(args.thread)]
@@ -579,7 +620,61 @@ def cmd_archive(args) -> int:
         if drop:
             CACHE.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
             print(f"  ✅ cache 移除 {', '.join('#' + n for n in drop)}")
-    return 0
+    # ── 第四步：寫封存標記（CH3）──開始（#291；此標記供測試的突變複本切除本段）──
+    # 命名沿用「第四步」只為區段標記的穩定（測試的突變複本靠它切段）；就契約而言
+    # 這是**四步之後**的獨立動作，不是四步裡的第四步（見 docstring）。
+    marker_rc = 0
+    if issue_num is None:
+        # `AC-10` 分支一：rc 非 0、cache 已清（上面做完了）、不呼叫 gh issue edit。
+        print("  ❌ 查不到該 thread 對應的 issue 號，不寫封存標記"
+              "（該單在 forge 上維持 T=1 A=0 ＝ active，依 F4 人工補寫）")
+        marker_rc = 1
+    elif not md_path.is_file():
+        # `AC-10` 分支二：不寫指向不存在檔的標記——`file=` 欄的語意是「封存的
+        # 實體所在」（`channels/README.md:51`）。
+        print(f"  ❌ 匯出檔不存在，不寫指向不存在檔的封存標記：{md_path}")
+        marker_rc = 1
+    else:
+        import subprocess
+        try:
+            # repo 與 issue_meta 的 `gh issue list` 同一個字面（該函式本單不得改，
+            # 故此處重寫一次而非抽常數——`#291` `AC-7` 的 AST 比對要求）。
+            body = json.loads(subprocess.run(
+                ["gh", "issue", "view", str(issue_num), "-R", "AugustusHsu/agent-devflow",
+                 "--json", "body"],
+                capture_output=True, stdin=subprocess.DEVNULL, timeout=60,
+                text=True, check=True).stdout)["body"]
+            # upsert：A=0 追加獨立一行、A=1 只取代那一行、A>1 raise（不動 forge）。
+            # file= 寫絕對路徑（OUT 在 ~/.hermes 下），形狀同 #283／#285 的先例。
+            body = _marker.upsert_archived(body, args.thread, md_path,
+                                           detail=f"issue #{issue_num}")
+            tmp = pathlib.Path(tempfile.gettempdir()) / f"devflow-archived-{issue_num}.md"
+            tmp.write_text(body)
+            # `AC-11`：暫存檔在**任何路徑**都要清掉，含 gh 失敗時。第 1 輪
+            # （`2a6af87`）把 unlink 放在 check=True 之後，故 edit 失敗時
+            # CalledProcessError 直接拋出、檔案留在暫存根——那就是 `C5` 第一項
+            # 要抓的散檔，而且是收尾動作自己製造的。
+            try:
+                subprocess.run(
+                    ["gh", "issue", "edit", str(issue_num), "-R", "AugustusHsu/agent-devflow",
+                     "-F", str(tmp)],
+                    capture_output=True, stdin=subprocess.DEVNULL, timeout=60,
+                    text=True, check=True)
+            finally:
+                tmp.unlink(missing_ok=True)
+            print(f"  ✅ 已寫封存標記到 #{issue_num}"
+                  f"（thread={args.thread} file={md_path}）")
+        except _marker.InvalidMarker as exc:
+            # `AC-10` 分支三：`CH3` 要求印全部命中行到 stderr、不動 forge。
+            # cache 已在上面清掉——分區已刪，殘影就是錯的（見 docstring）。
+            print(str(exc), file=sys.stderr)
+            print("  ❌ 封存標記寫入停下（INVALID），依 F4 人工處置")
+            marker_rc = 1
+        except Exception as exc:  # noqa: BLE001 — forge 不可用／grammar 不合都在此收容
+            print(f"  ❌ 寫封存標記失敗：{type(exc).__name__}: {exc}", file=sys.stderr)
+            marker_rc = 1
+    # ── 第四步結束 ──────────────────────────────────────────────────────────
+    return marker_rc
 
 
 def main() -> int:
