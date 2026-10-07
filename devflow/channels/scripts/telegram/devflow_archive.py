@@ -4,7 +4,8 @@
 封存 = 匯出（MD 人讀 + JSON 全量）→ 發到 archives topic → 刪除原 topic → 清 cache。
 
 用法：
-    devflow_archive.py scan                    掃描群組實際存在的 topic（cache 不是權威）
+    devflow_archive.py scan                    掃描**本 kit 管理過的** topic（標記 ∪ cache ∪ archives）
+    devflow_archive.py scan --full             掃描**群組實際存在的** topic（全區間探活，慢）
     devflow_archive.py export <thread>         只匯出到 ~/.hermes/archives/topics/
     devflow_archive.py publish <thread>        匯出並發到 archives topic（不刪原 topic）
     devflow_archive.py archive <thread> --yes  publish + 刪除原 topic + 清 cache
@@ -12,7 +13,9 @@
 關鍵設計（踩過的坑）：
   * manager 的工作記錄 thread_id 是 None（headless `chat --oneshot`），
     只撈 `thread_id=<N>` 會漏掉整段執行軌跡。以時間窗口補撈，按時間軸併起來。
-  * cache（devflow-topics.json）會殘留已刪除的 thread，只有 scan 是權威。
+  * cache（devflow-topics.json）會殘留已刪除的 thread，只有探活是權威。
+    `scan` 預設只探「本 kit 管理過的 thread id」（標記 ∪ cache ∪ archives），
+    `--full` 才掃全區間——探活成本因此與 thread id 上界脫鉤（`#296`）。
   * Telegram 的 MD 檢視器不支援 <details> 折疊與 <a id> 錨點，但支援
     巢狀清單、表格、刪除線、核取清單（2026-09-29 實測）。
 """
@@ -531,8 +534,117 @@ def _forge_scan_items(repo: str = "AugustusHsu/agent-devflow"):
     return [(str(it["number"]), it.get("body") or "") for it in json.loads(out or "[]")]
 
 
+def scan_candidates(items, cache, archives_thread, *, full=False, hi=None,
+                    on_invalid=None) -> list[int]:
+    """決定 `scan` 要探活哪些 thread id。**純函式、零 I/O**（`#296` `AC-1`）。
+
+    預設（`full=False`）＝「**本 kit 管理過的** thread id」：
+
+        forge 的 `topic`／`archived` 標記 ∪ cache 的 `thread_id` ∪ {`archives_thread`}
+
+    `full=True` ＝ `sorted(range(2, hi))`，即 `#287` 的全區間掃描（`hi` 必須給）。
+
+    **為什麼改**（`#296` 材料 ①）：`#287` 把上界來源從 cache 改為 forge 標記是對的
+    （斷掉「封存清 cache → `scan` 探得越少」的循環依賴），但探活仍是對 `range(2, hi)`
+    的連續區間掃描 —— 成本 `O(上界)`，而 `thread_id` 單調成長且 forge 標記不隨封存
+    消失，故**上界只增不減、再無天花板**。2026-10-08 實測：上界 4442 個 ／ 候選 25 個
+    ＝ 178 倍浪費，且分子每天 ＋400 餘而分母只隨單數成長，**倍數本身單調上升**。
+    推上界的那組標記本身就是候選集合，現行實作只取了它的 `max()`。
+
+    **三個來源都有貢獻**，少一個就漏候選（`AC-3` 以鑑別力守）：
+
+      * forge 標記 —— 本 kit 建過分區的單，封存後只剩 `archived` 式仍承載 thread id。
+      * cache —— 補「`ensure` 建了 topic 但寫回 forge 失敗」的單（`#285` ⑤-c）：
+        那種單在 forge 上**沒有**標記，只有 cache 記得。
+      * `archives_thread` —— 封存目的地本身沒有 issue、不會有標記。
+
+    標記解析一律經 `_marker`（`scan_topic`／`scan_archived`），**不自備正則**
+    （`#285` `AC-7` 的單一來源原則：錨定 `^…$` 只有一份實作）。
+    `T>1`／`A>1` 的單交給 `on_invalid` 並**跳過該單**，其餘 id 仍在集合內 ——
+    一張壞單不得吃掉整個集合（`AC-2`）；語意與 `scan_upper_bound` 一致。
+
+    `cmd_scan` 不得另算任何 id 集合（`AC-1`）：候選的定義只在這裡。
+    """
+    if full:
+        if hi is None:
+            raise ValueError("full=True 時必須給 hi（全區間掃描的上界）")
+        return sorted(range(2, int(hi)))
+
+    rows = list(items)
+    hits = (_marker.scan_topic(rows, on_invalid=on_invalid)
+            + _marker.scan_archived(rows, on_invalid=on_invalid))
+    ids = {int(tid) for _num, tid, _kind in hits}
+
+    for rec in (cache or {}).values():
+        tid = (rec or {}).get("thread_id") if isinstance(rec, dict) else None
+        if tid is not None:
+            # cache 的值歷來是 int，但損壞／手改的 cache 不得讓整個 scan 停擺
+            # （`cmd_scan` 對損壞 cache 的容忍見其讀取段）。
+            try:
+                ids.add(int(tid))
+            except (TypeError, ValueError):
+                pass
+
+    if archives_thread is not None:
+        ids.add(int(archives_thread))
+
+    return sorted(ids)
+
+
+def scan_sources(items, cache, archives_thread, *, on_invalid=None) -> dict:
+    """候選集合的**來源分解**，供 `cmd_scan` 的那一行輸出（`#296` `AC-5`）。
+
+    回 `{"marks": [...], "cache": [...], "archives": [...], "all": [...]}`，
+    各欄已排序去重；`all` 與 `scan_candidates(..., full=False)` 逐一相等
+    （同一組來源、同一個 `_marker` 解析路徑，不是另一套邏輯）。
+
+    分解的用途不是美觀：`AC-5` 的那一行是本單的達成證據載體 —— 未達成的面貌是
+    「候選 ＝ 4442」，達成的面貌是「候選 25 ／ 探測 25」。三個來源各報一個數字，
+    才看得出「拿掉 cache 會不會漏」這類問題該往哪查。
+    """
+    def _dec(kind: str):
+        rows = list(items)
+        return (_marker.scan_topic(rows, on_invalid=on_invalid) if kind == "topic"
+                else _marker.scan_archived(rows, on_invalid=on_invalid))
+
+    marks = sorted({int(t) for _n, t, _k in _dec("topic") + _dec("archived")})
+    cids = sorted({int(r["thread_id"]) for r in (cache or {}).values()
+                   if isinstance(r, dict) and isinstance(r.get("thread_id"), int)})
+    arch = [] if archives_thread is None else [int(archives_thread)]
+    return {"marks": marks, "cache": cids, "archives": arch,
+            "all": scan_candidates(items, cache, archives_thread,
+                                   on_invalid=on_invalid)}
+
+
+def _scan_read_cache() -> dict:
+    """讀 cache 給候選集合用；不存在／損壞一律視為 `{}`，不讓 `scan` 停擺。
+
+    cache 在此是**候選的來源之一**（`#296`），不是上界的來源 —— 上界自 `#287`
+    起只由 forge 標記推出，`--full` 路徑不讀 cache。
+    """
+    if not CACHE.exists():
+        return {}
+    try:
+        return json.loads(CACHE.read_text() or "{}") or {}
+    except Exception as exc:  # noqa: BLE001 — 損壞的 cache 只該少幾個候選，不該停擺
+        print(f"  ⚠ cache 無法解析（{type(exc).__name__}: {exc}），候選不計 cache 來源",
+              file=sys.stderr)
+        return {}
+
+
 def cmd_scan(args) -> int:
-    """探測實際存在的 topic。cache 不是權威（已刪 thread 會殘留）。"""
+    """探測 topic 是否存在。cache 不是權威（已刪 thread 會殘留），探活才是。
+
+    **兩種宣稱、兩種成本**（`#296`，宣稱字面依裁決位 2026-10-08 裁示分化）：
+
+      * 預設 —— 探「**本 kit 管理過的** thread id」，集合由 `scan_candidates`
+        決定（標記 ∪ cache ∪ archives）。成本 `O(管理過的數量)`。
+      * `--full` —— 探「**群組實際存在的** topic」，即 `range(2, hi)` 全區間
+        （`#287` 的行為，上界仍由 `scan_upper_bound` 從 forge 標記推出）。
+        成本 `O(上界)`，而上界單調成長：2026-10-08 實測 4442 個／約 16.5 分鐘。
+
+    本函式**不自算任何 id 集合**（`AC-1`）：候選的定義只在 `scan_candidates`。
+    """
     from concurrent.futures import ThreadPoolExecutor
 
     def probe(tid: int):
@@ -543,6 +655,23 @@ def cmd_scan(args) -> int:
         if "TOPIC_NOT_MODIFIED" in res.get("description", ""):
             return ("closed", tid)
         return None
+
+    # 既有測試以 `argparse.Namespace(prune=False)` 呼叫（無 `full` 欄）→ 用 getattr。
+    want_full = getattr(args, "full", False)
+
+    def _warn(exc, issue):
+        print(f"  ⚠ #{issue} {exc}", file=sys.stderr)
+
+    # forge 的 issue body 是兩條路徑**共用的唯一輸入**：預設模式取它的標記當候選，
+    # `--full` 取它的最大 thread id 當上界。只查一次（代價見 `_forge_scan_items`）。
+    try:
+        items = _forge_scan_items()
+    except Exception as exc:  # noqa: BLE001 — forge 不可用時不讓 scan 停擺
+        print(f"  ⚠ 無法從 forge 取 issue body（{type(exc).__name__}: {exc}），"
+              f"視為零標記", file=sys.stderr)
+        items = []
+
+    cache_data = _scan_read_cache()
 
     # 上界的**來源**是 forge，不是 cache（`#287` `AC-3`）。
     #
@@ -556,30 +685,48 @@ def cmd_scan(args) -> int:
     # ＋餘裕。issue body 的標記不隨封存消失（`#291` 之後封存標記也在），**與封存
     # 動作無關**。代價見 `_forge_scan_items` 的 docstring：多一次 `gh` 查詢。
     # cache 在這裡**不再參與上界計算**，故 cache 不存在／為 `{}`／損壞都不影響 `hi`。
-    try:
-        hi = scan_upper_bound(
-            _forge_scan_items(),
-            on_invalid=lambda exc, issue: print(f"  ⚠ #{issue} {exc}", file=sys.stderr))
-    except Exception as exc:  # noqa: BLE001 — forge 不可用時退回寫死地板，不讓 scan 停擺
-        print(f"  ⚠ 無法從 forge 推上界（{type(exc).__name__}: {exc}），"
-              f"退回寫死值 {SCAN_HI_FLOOR}", file=sys.stderr)
-        hi = SCAN_HI_FLOOR
-    print(f"（上界 hi={hi}，由 forge 的分區標記推出；探測 range(2, {hi})）")
+    #
+    # `#296` 起這段**只在 `--full` 走**：`scan_upper_bound` 一字不動（它算的上界仍
+    # 正確），但「上界」不再等於「要探活的集合」—— 推上界的那組標記本身就是候選，
+    # 只取 `max()` 再掃連續區間是 178 倍的浪費，且倍數每天上升（`#296` 材料 ①）。
+    if want_full:
+        try:
+            hi = scan_upper_bound(items, on_invalid=_warn)
+        except Exception as exc:  # noqa: BLE001 — 推不出上界時退回寫死地板
+            print(f"  ⚠ 無法從 forge 推上界（{type(exc).__name__}: {exc}），"
+                  f"退回寫死值 {SCAN_HI_FLOOR}", file=sys.stderr)
+            hi = SCAN_HI_FLOOR
+        print(f"（上界 hi={hi}，由 forge 的分區標記推出；探測 range(2, {hi})）")
+        targets = scan_candidates(items, {}, None, full=True, hi=hi)
+    else:
+        src = scan_sources(items, cache_data, ARCHIVES_THREAD, on_invalid=_warn)
+        targets = src["all"]
+        print(f"（候選 {len(targets)} 個：forge 標記 {len(src['marks'])}"
+              f" ／ cache {len(src['cache'])} ／ archives {len(src['archives'])}；"
+              f"探測 {len(targets)} 個 thread）")
+        if not targets:
+            # 三個來源皆空 ≠「群組沒有 topic」—— 不得靜默（`AC-2`）。
+            print("  ⚠ 候選 0 —— 三個來源（forge 標記／cache／archives）皆空，"
+                  "本次沒有探測任何 thread。")
+            print("  （這不代表群組沒有 topic；要掃群組實際存在的 topic 請用 "
+                  "`scan --full`）")
 
     found = []
     with ThreadPoolExecutor(max_workers=32) as pool:
-        for res in pool.map(probe, range(2, hi)):
+        for res in pool.map(probe, targets):
             if res:
                 found.append(res)
-    print(f"群組實際 topic（{len(found)}）：")
+    print(f"{'群組實際' if want_full else '本 kit 管理過的'} topic（{len(found)}）：")
     for state, tid in sorted(found, key=lambda x: x[1]):
         num, title, _ = issue_meta(str(tid))
         tag = f"#{num} {title[:40]}" if num else ("📦 archives" if tid == ARCHIVES_THREAD else "")
         print(f"  thread {tid:>4}  {state:<6}  {tag}")
 
-    if CACHE.exists():
+    # cache 過期項的語意不動（`#296` 射程外）：cache 指向的 thread 探不到就是死條目。
+    # 預設模式下 cache 的每一筆都在候選內（它是來源之一），故「探不到」仍可歸因。
+    if cache_data:
         live = {t for _, t in found}
-        data = json.loads(CACHE.read_text() or "{}")
+        data = cache_data
         stale = [(n, r["thread_id"]) for n, r in data.items() if r.get("thread_id") not in live]
         if stale:
             print(f"\ncache 過期項（{len(stale)}）— 指向已刪除的 thread：")
@@ -813,9 +960,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sp_scan = sub.add_parser("scan", help="掃描群組實際存在的 topic")
+    sp_scan = sub.add_parser("scan", help="掃描本 kit 管理過的 topic（加 --full 掃群組實際存在的）")
     sp_scan.add_argument("--prune", action="store_true",
                          help="一併移除 cache 中指向已刪除 thread 的項")
+    sp_scan.add_argument("--full", action="store_true",
+                         help="掃描群組實際存在的 topic：探活 range(2, hi) 全區間"
+                              "（上界由 forge 的分區標記推出）。慢——2026-10-08 實測"
+                              "4442 個 thread／約 16.5 分鐘；預設模式只探本 kit"
+                              "管理過的 25 個")
     for name, helptext in (("export", "只匯出到本機"),
                            ("publish", "匯出並發到 archives topic"),
                            ("archive", "publish + 刪除 topic + 清 cache")):
