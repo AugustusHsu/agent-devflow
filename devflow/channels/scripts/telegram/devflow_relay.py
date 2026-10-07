@@ -41,6 +41,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 
 from devflow_archive import tool_summary  # noqa: E402 — 與封存檔共用摘要邏輯
 
@@ -77,6 +78,36 @@ CHAIN_ENV = "DEVFLOW_RELAY_CHAIN"
 # log 檔名的程序內序號。`itertools.count` 的 `next` 在 CPython 下是原子的，
 # 同一程序內（含將來若有多個執行緒各派子程序）不會發出重複值。
 _LOG_SEQ = itertools.count(1)
+
+# ── 第二棒的 handoff 行（`#300`）────────────────────────────────────────────
+# 寫什麼：三個 relay **已持有**的值——第二棒的 profile（`args.then_wake`）、relay 發出它的
+# 時刻（relay 自己的時鐘）、受託子程序的 rc（`_run_child` 的回傳）。界線是「寫自己的行為」
+# 而非「寫任務的判斷」：relay 不需要知道 push 是什麼，就能記錄自己做了什麼。
+# 為什麼要寫：`#298` 落地後「第二棒成功了沒」無法從 forge 觀測，而 A（被喚醒者沒做 PR）
+# 與 C（被喚醒者那輪失敗）在 git／PR 狀態上完全同形，差別只在 `$TMPDIR` 裡的 log。
+# 判準表（`#300` `AC-3`，不寫第二行）：handoff 行有＋PR 有＝正常；有＋無 PR＝C；
+# 無 handoff 行＝relay 沒接手，**或** relay 接手了但寫 forge 失敗（兩種成因分不開，
+# 處置相同——人介入，見 `_write_handoff`）。
+#
+# 為什麼 grammar 住這裡、**不**住 `_marker.py`（裁決位 2026-10-07）：`#287` 抽出共用函式的
+# 理由是**消除重複**（`issue_meta` 與新上界是同一段邏輯要寫兩次）；本單沒有重複可消除——
+# handoff 行只有一個寫者（relay）、零程式讀者。抽進 `_marker.py` 現在只會多一個跨模組依賴，
+# 不會少任何一份邏輯。且 `_marker.py` 的自述逐字是「`CH3` 分區標記 grammar 的單一實作…
+# `devflow/channels/README.md` 分區三態判定式的**實作**」——它整個存在理由是某個外部條文的
+# 實作，放一個沒有條文對應的字面進去不是擴寫定位，是讓它承載規範之外的東西。
+#
+# **上移觸發條件**：當 handoff 行出現**第二個寫者**或**第一個程式讀者**時，grammar 上移到
+# `_marker.py` 並同步擴寫其定位說明（手法同 `#286` 的上移觸發條件——讓改這段的人直接讀到）。
+HANDOFF_FMT = "<!-- devflow:handoff profile={profile} at={at} rc={rc} -->"
+# 時刻格式：本機時區的 ISO 8601（`%z` 帶 ±HHMM 偏移）。取 relay 自己的時鐘，不問任何人。
+HANDOFF_AT_FMT = "%Y-%m-%dT%H:%M:%S%z"
+# grammar 本體。與既有兩種標記同族（`^<!-- devflow:… -->$`、獨立一行才算），但字面相異且
+# 互不為子字串——`TOPIC_RE`／`ARCHIVED_RE` 各自錨定自己的完整字面，`findall` 不計本行，
+# 故新增本行**不改變** `CH3` 的三態判定（`WORKFLOW.md` 與 `channels/README.md` 的補句即此）。
+# relay 自己不讀它（零程式讀者，見上方上移觸發條件）；測試拿它驗產出的行合不合 grammar。
+HANDOFF_RE = (r"^<!-- devflow:handoff profile=[A-Za-z0-9_.\-]+ "
+              r"at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+\-][0-9]{4} "
+              r"rc=-?[0-9]+ -->$")
 
 
 def _current_depth() -> int:
@@ -117,6 +148,20 @@ def _log_path(issue: str | None, profile: str) -> pathlib.Path:
     return pathlib.Path(tempfile.gettempdir()) / name
 
 
+def _capture(cmd: list[str], *, timeout: int = 60) -> subprocess.CompletedProcess[str]:
+    """跑一條短命指令並收回 stdout／stderr／rc。**模組內唯一的 `run` 呼叫點。**
+
+    為什麼集中（`#300`）：`_send`（送 topic）與 `_write_handoff`（寫 forge）是兩個對外
+    效果，但「縫只有一處」是本模組測試能零真 API 的前提——替掉模組全域的 `subprocess`
+    就全部攔下。兩邊各自呼叫一次不會多攔下任何東西，只會讓那個宣稱從「一處」變成
+    「兩處各自維護的 kwargs」（`stdin=DEVNULL` 漏一邊就會在 oneshot 下吃掉 stdin）。
+    呼叫者各自判成敗：`_send` 讀 stdout 的 `success`，`_write_handoff` 讀 `returncode`
+    ——判準不同，故不收進這裡。
+    """
+    return subprocess.run(cmd, capture_output=True, stdin=subprocess.DEVNULL,
+                          timeout=timeout, text=True)
+
+
 def _send(profile: str, thread: str, text: str) -> bool:
     """送一則到 topic。失敗只警告不中斷——轉播斷了不該讓任務跟著死。"""
     if not text.strip():
@@ -124,9 +169,8 @@ def _send(profile: str, thread: str, text: str) -> bool:
     if len(text) > MAX_MSG:
         text = text[:MAX_MSG] + "\n…（本則已截斷）"
     try:
-        res = subprocess.run(
-            ["hermes", "-p", profile, "send", "-t", f"telegram:{CHAT}:{thread}", "--json", text],
-            capture_output=True, stdin=subprocess.DEVNULL, timeout=60, text=True)
+        res = _capture(
+            ["hermes", "-p", profile, "send", "-t", f"telegram:{CHAT}:{thread}", "--json", text])
         ok = '"success": true' in res.stdout
         if not ok:
             print(f"[relay] ⚠️ 送出失敗：{(res.stdout or res.stderr)[:200]}", file=sys.stderr)
@@ -134,6 +178,48 @@ def _send(profile: str, thread: str, text: str) -> bool:
     except Exception as exc:  # noqa: BLE001
         print(f"[relay] ⚠️ 送出異常：{exc}", file=sys.stderr)
         return False
+
+
+def _handoff_line(wake_profile: str, rc: int) -> str:
+    """組 handoff 行。三個欄位全部是 relay 已持有的值，見 `HANDOFF_FMT` 上方那段。"""
+    return HANDOFF_FMT.format(profile=wake_profile,
+                              at=time.strftime(HANDOFF_AT_FMT), rc=rc)
+
+
+def _write_handoff(issue: str, wake_profile: str, rc: int, *, thread: str) -> bool:
+    """在該 issue 留一則含 handoff 行的留言。回傳成功與否，**不**中斷流程。
+
+    時機：在**發出第二棒之後**（`Popen` 成功的那一刻），不等它結束——「第二棒已發出」
+    這件事在 Popen 當下就成立。等第二棒結束再寫會違反 `#298` 的全部理由（relay 不需要
+    等待；`#287` 已證明等不住：工具層 180s／420s 上限 vs 一輪 40 分鐘）。
+
+    `gh issue comment <N> --body <text>`，**不帶 `-R`**：repo 依 cwd 的 git remote 判定。
+    與 `_wake_prompt` 交給被喚醒者的那條讀取指令同一寫法——relay 不持有 repo 名，硬編碼
+    或新增旗標都是在讓轉播器知道它不需要知道的事。
+
+    失敗時只警告不中斷（沿用 `_send` 的原則，`:55` docstring 逐字：「轉播斷了不該讓任務
+    跟著死」），relay 仍回受託子程序的 rc。但警告**必須送進 topic**，不得只印 stderr：
+    stderr 在 oneshot 下沒有讀者，那正是本族缺陷的形狀（`#287` 的 5-byte log）。
+    代價：此失敗使「無 handoff 行」有兩種成因（relay 沒接手／寫 forge 失敗），兩者的處置
+    相同（人介入），故判準表不得宣稱它分得開（`channels/telegram.md` 該格已載明）。
+    """
+    line = _handoff_line(wake_profile, rc)
+    body = (f"relay 已發出第二棒（續接者 `-p {wake_profile}`），受託子程序 rc={rc}。"
+            f"下一步做什麼由它讀 forge 自己判——本則只記 relay 做了什麼。\n\n{line}\n")
+    detail = ""
+    try:
+        res = _capture(["gh", "issue", "comment", issue, "--body", body])
+        if not res.returncode:
+            return True
+        detail = ((res.stderr or res.stdout or "") or f"rc={res.returncode}")[:300]
+    except Exception as exc:  # noqa: BLE001
+        detail = str(exc)[:300]
+    print(f"[relay] ⚠️ handoff 行寫入失敗（#{issue}）：{detail}", file=sys.stderr)
+    _send(wake_profile, thread,
+          f"⚠️ **relay 警告**：`#{issue}` 的 handoff 行寫入 forge 失敗，"
+          f"該單在 forge 上看不出第二棒已發出（人介入：確認該單有無 handoff 行，缺則補）。"
+          f"\n\n```\n{line}\n{detail}\n```")
+    return False
 
 
 # Hermes 自己的工具動詞表（`agent/display.py:505-513`）。沿用同一套措辭，
@@ -334,11 +420,18 @@ def _build_cmd(profile: str, prompt: str, *, thread: str, issue: str | None,
 
 
 def _run_child(cmd: list[str], *, profile: str, thread: str, title: str, pace: str,
-               session_label: str, log: pathlib.Path) -> int:
+               session_label: str, log: pathlib.Path,
+               after_spawn: Callable[[], None] | None = None) -> int:
     """跑一個子程序、全程轉播，並把原始事件流與 stderr 寫進 `log`。回傳 rc。
 
     log 的用途（`AC-2`）：`--then-wake` 喚醒的是新的 oneshot，畫面已經不在；
     它只憑 forge（`R5`）加這個檔接續，所以必須是原始 stream-json 行，不是摘要。
+
+    `after_spawn`：`Popen` 成功後**立即**呼叫一次，在讀 stdout／`wait()` 之前。
+    這個鉤子存在的唯一理由是時機（`#300` `AC-1`）：「第二棒已發出」在 Popen 當下就成立，
+    而本函式接著要阻塞讀完整個 stdout 再 `wait()`——把寫 forge 掛在回傳之後就等於
+    「等第二棒結束才寫」，那是 T 明列否決的做法。鉤子自己的失敗不得傳染給子程序，
+    故在此吞掉例外（回報的責任在鉤子內，見 `_write_handoff`）。
     """
     relay = Relay(profile, thread, title, pace, session_label)
 
@@ -356,6 +449,12 @@ def _run_child(cmd: list[str], *, profile: str, thread: str, title: str, pace: s
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             stdin=subprocess.DEVNULL, text=True, bufsize=1,
                             env=_child_env(profile))
+
+    if after_spawn is not None:
+        try:
+            after_spawn()
+        except Exception as exc:  # noqa: BLE001 — 鉤子掛掉不該讓子程序跟著死
+            print(f"[relay] ⚠️ after_spawn 鉤子異常：{exc}", file=sys.stderr)
 
     # stderr 必須有人持續讀走。只在結束後 read() 會讓子程序寫滿管線緩衝而卡住，
     # 接著 proc.wait() 永遠等不到 —— 實測就是這樣掛掉並被外層 timeout 殺成 exit 2。
@@ -490,11 +589,18 @@ def main() -> int:
             args.then_wake, _wake_prompt(args.issue, log, rc, args.profile),
             thread=args.thread, issue=args.issue, session=None, fresh=False,
             workdir=None, model=None, provider=None)
+        # handoff 行只在帶 `--issue` 時寫（`#300` `AC-1`）：不帶 `--issue` ＝ 一次性操作，
+        # 沒有 issue 可留言，forge 也沒有該輪的對應物。掛成 `after_spawn` 而不是放在
+        # `_run_child` 回傳後——後者等於「等第二棒結束才寫」（T 明列否決，理由見該鉤子）。
+        def _handoff_after_spawn() -> None:
+            _write_handoff(str(args.issue), args.then_wake, rc, thread=args.thread)
+
         _run_child(wake_cmd, profile=args.then_wake, thread=args.thread,
                    title=(f"`#{args.issue}` · 續接" if args.issue
                           else f"thread {args.thread} · 續接"),
                    pace=args.pace, session_label=wake_label,
-                   log=_log_path(args.issue, args.then_wake))
+                   log=_log_path(args.issue, args.then_wake),
+                   after_spawn=_handoff_after_spawn if args.issue else None)
 
     # 回傳的仍是受託子程序的 rc：喚醒者的成敗是它自己那一輪的事，不該蓋掉這一輪的結果。
     return rc
