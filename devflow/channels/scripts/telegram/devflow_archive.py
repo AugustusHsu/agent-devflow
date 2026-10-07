@@ -571,9 +571,34 @@ def scan_candidates(items, cache, archives_thread, *, full=False, hi=None,
         return sorted(range(2, int(hi)))
 
     rows = list(items)
-    hits = (_marker.scan_topic(rows, on_invalid=on_invalid)
-            + _marker.scan_archived(rows, on_invalid=on_invalid))
-    ids = {int(tid) for _num, tid, _kind in hits}
+
+    # **任一式 INVALID → 整張單跳過**（`_marker.py:141`：「跳過時整張都跳過（不續掃
+    # 它的另一式）：該單的分區「是哪一個」已無單一答案」）。
+    #
+    # ⚠ 第 1 輪的實作把 `on_invalid` 直接交給兩次呼叫，於是 `_marker` 的「整張跳過」
+    # 只在**各自那一次**內成立：`T>1` ＋ `A=1` 的單，`scan_topic` 跳過了它，
+    # `scan_archived` 仍回它的 hit —— 壞單的 archived id 因此進了候選
+    # （`#296` `R1` 第 1 輪 `BLOCK 1`，複驗得 `[7999]`／`[8001]`，期望 `[]`）。
+    # 故在這裡收集 INVALID 的**單號**，兩式都掃完後把該單的**全部** hit 濾掉。
+    # 兩式分別呼叫是 `AC-1` 的明文（解析一律經 `scan_topic`／`scan_archived`），
+    # 跨兩次呼叫的「整張跳過」只能在呼叫端收攏。
+    #
+    # `on_invalid is None` 時**不**包裝 → `InvalidMarker` 原樣穿出去，與
+    # `scan_upper_bound` 的預設行為一致（跳過是「給了 `on_invalid`」才有的語意）。
+    bad: set[str] = set()
+    report = on_invalid
+
+    def _collect(exc, issue):
+        # 同一單只轉發一次：`T>1` 且 `A>1` 時兩式都會回報，但那是**一張**壞單。
+        first = issue not in bad
+        bad.add(issue)
+        if first:
+            report(exc, issue)
+
+    cb = None if report is None else _collect
+    hits = (_marker.scan_topic(rows, on_invalid=cb)
+            + _marker.scan_archived(rows, on_invalid=cb))
+    ids = {int(tid) for issue, tid, _kind in hits if issue not in bad}
 
     for rec in (cache or {}).values():
         tid = (rec or {}).get("thread_id") if isinstance(rec, dict) else None
@@ -595,25 +620,24 @@ def scan_sources(items, cache, archives_thread, *, on_invalid=None) -> dict:
     """候選集合的**來源分解**，供 `cmd_scan` 的那一行輸出（`#296` `AC-5`）。
 
     回 `{"marks": [...], "cache": [...], "archives": [...], "all": [...]}`，
-    各欄已排序去重；`all` 與 `scan_candidates(..., full=False)` 逐一相等
-    （同一組來源、同一個 `_marker` 解析路徑，不是另一套邏輯）。
+    各欄已排序去重；`all` 與 `scan_candidates(..., full=False)` 逐一相等。
+
+    **每一欄都是 `scan_candidates` 自己算的**（只餵它該欄的那一個來源），故
+    分解與候選不可能分岔，標記也**只解析一次**：`marks` 那次是唯一餵了 `items`
+    的呼叫，`cache` 那次餵空 `items`（`_marker` 對空批零解析）。第 1 輪的實作
+    另寫了一套 `_dec()` 解析 ＋ 一套 cache 取值，於是同一批標記被解析四趟、
+    `on_invalid` 對同一壞單被呼叫兩次（`#296` `R1` 第 1 輪非阻擋建議：
+    「避免顯示邏輯與候選邏輯再次分岔」）。
 
     分解的用途不是美觀：`AC-5` 的那一行是本單的達成證據載體 —— 未達成的面貌是
     「候選 ＝ 4442」，達成的面貌是「候選 25 ／ 探測 25」。三個來源各報一個數字，
     才看得出「拿掉 cache 會不會漏」這類問題該往哪查。
     """
-    def _dec(kind: str):
-        rows = list(items)
-        return (_marker.scan_topic(rows, on_invalid=on_invalid) if kind == "topic"
-                else _marker.scan_archived(rows, on_invalid=on_invalid))
-
-    marks = sorted({int(t) for _n, t, _k in _dec("topic") + _dec("archived")})
-    cids = sorted({int(r["thread_id"]) for r in (cache or {}).values()
-                   if isinstance(r, dict) and isinstance(r.get("thread_id"), int)})
+    marks = scan_candidates(items, {}, None, on_invalid=on_invalid)
+    cids = scan_candidates([], cache, None)
     arch = [] if archives_thread is None else [int(archives_thread)]
     return {"marks": marks, "cache": cids, "archives": arch,
-            "all": scan_candidates(items, cache, archives_thread,
-                                   on_invalid=on_invalid)}
+            "all": sorted(set(marks) | set(cids) | set(arch))}
 
 
 def _scan_read_cache() -> dict:

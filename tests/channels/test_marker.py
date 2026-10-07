@@ -2400,6 +2400,89 @@ P296_CACHE = {"300": {"thread_id": 4394, "state": "open", "title": "單 X"},
 
 P296_WANT = [261, 3054, 3363, 3724, 4100, 4394]
 
+# `R1` 第 1 輪 `BLOCK 1` 的交叉形態：**一式 INVALID、另一式合法**。
+# 第 1 輪的實作把 `on_invalid` 直接交給 `scan_topic`／`scan_archived` 兩次呼叫，
+# 於是 `_marker.py:141` 的「跳過時整張單都跳過」只在各自那一次內成立 ——
+# 壞單**另一式**的 id 仍進候選（複驗得 `[7999]`／`[8001]`，期望 `[]`）。
+# 這兩張 fixture 的字面即 BLOCK 1 複驗腳本的 body，逐字相同。
+P296_F_T2_A1 = ("<!-- devflow:topic thread=7001 -->\n"
+                "<!-- devflow:topic thread=7002 -->\n"
+                "<!-- devflow:archived thread=7999 file=/t/x.md -->\n")
+P296_F_T1_A2 = ("<!-- devflow:topic thread=8001 -->\n"
+                "<!-- devflow:archived thread=8998 file=/t/a.md -->\n"
+                "<!-- devflow:archived thread=8999 file=/t/b.md -->\n")
+# 兩式都 INVALID：`on_invalid` 對**一張**單只該被呼叫一次（第 1 輪叫兩次）
+P296_F_T2_A2 = ("<!-- devflow:topic thread=9001 -->\n"
+                "<!-- devflow:topic thread=9002 -->\n"
+                "<!-- devflow:archived thread=9998 file=/t/a.md -->\n"
+                "<!-- devflow:archived thread=9999 file=/t/b.md -->\n")
+
+
+@case("#296 AC-2／BLOCK-1 交叉形態：一式 INVALID → 該單**全部** id 都不進候選")
+def _p296_block1_cross():
+    # ① 單獨驗（＝ BLOCK 1 複驗腳本的兩個 case，期望 candidates == []）
+    for label, body, kind, leaked in (
+            ("T>1 + A=1", P296_F_T2_A1, "topic", 7999),
+            ("T=1 + A>1", P296_F_T1_A2, "archived", 8001)):
+        seen = []
+        got = archive.scan_candidates(
+            [("900", body)], {}, None,
+            on_invalid=lambda exc, issue: seen.append((issue, exc.kind)))
+        check(f"#296 BLOCK-1 {label}：候選為空（整張單跳過）",
+              got == [], f"實得 {got!r}；期望 []")
+        check(f"#296 BLOCK-1 {label}：on_invalid 收到該單號恰一次，kind=={kind}",
+              seen == [("900", kind)], f"實得 {seen!r}")
+        check(f"#296 BLOCK-1 {label}：另一式的合法 id {leaked} 未漏進候選"
+              f"（第 1 輪的實作在此回 [{leaked}]）",
+              leaked not in got, f"實得 {got!r}")
+
+    # ② 同批其他合法單不受影響 —— 期望集合逐一相等（不比長度）
+    for label, body in (("T>1 + A=1", P296_F_T2_A1),
+                        ("T=1 + A>1", P296_F_T1_A2),
+                        ("T>1 + A>1", P296_F_T2_A2)):
+        seen = []
+        got = archive.scan_candidates(
+            P296_ITEMS + [("900", body)], P296_CACHE, archive.ARCHIVES_THREAD,
+            on_invalid=lambda exc, issue: seen.append(issue))
+        check(f"#296 BLOCK-1 {label} 混在合法單中：其餘 id 一字不少、壞單一個不進",
+              got == P296_WANT, f"實得 {got!r}\n期望 {P296_WANT!r}")
+        check(f"#296 BLOCK-1 {label}：on_invalid 對同一壞單恰呼叫一次"
+              "（非阻擋建議：第 1 輪的 T>1＋A>1 會叫兩次）",
+              seen == ["900"], f"實得 {seen!r}")
+        for leaked in (7001, 7002, 7999, 8001, 8998, 8999, 9001, 9002, 9998, 9999):
+            if leaked in got:
+                check(f"#296 BLOCK-1 {label}：壞單的 id {leaked} 不在集合內",
+                      False, f"實得 {got!r}")
+
+    # ③ `on_invalid is None` 時語意不變：`InvalidMarker` 原樣穿出去（不靜默跳過）
+    for label, body in (("T>1 + A=1", P296_F_T2_A1), ("T=1 + A>1", P296_F_T1_A2)):
+        raised = False
+        try:
+            archive.scan_candidates([("900", body)], {}, None)
+        except marker.InvalidMarker:
+            raised = True
+        check(f"#296 BLOCK-1 {label}：未給 on_invalid → InvalidMarker 穿出"
+              "（與 scan_upper_bound 的預設一致）", raised)
+
+    # ④ 鑑別力：同一壞單若「只有 INVALID 的那一式」，第 1 輪也會回 [] ——
+    #    故交叉形態（另一式合法）才是有鑑別力的 fixture。
+    only_t2 = archive.scan_candidates([("900", F3)], {}, None,
+                                      on_invalid=lambda *a: None)
+    check("#296 BLOCK-1 鑑別力：單一式 INVALID（F3，無 archived 式）兩版實作都回 []"
+          " → 本 BLOCK 只有交叉形態驗得出來",
+          only_t2 == [], f"實得 {only_t2!r}")
+
+    # ⑤ scan_sources 亦整張跳過，且 on_invalid 不因分解而重複呼叫
+    seen = []
+    src = archive.scan_sources(
+        P296_ITEMS + [("900", P296_F_T2_A1)], P296_CACHE, archive.ARCHIVES_THREAD,
+        on_invalid=lambda exc, issue: seen.append(issue))
+    check("#296 BLOCK-1 scan_sources 的 all 與 marks 亦不含壞單的 id",
+          src["all"] == P296_WANT and src["marks"] == [3054, 3363, 3724, 4100],
+          f"{src!r}")
+    check("#296 非阻擋建議：scan_sources 不重複解析 → on_invalid 恰一次",
+          seen == ["900"], f"實得 {seen!r}")
+
 
 @case("#296 AC-1／AC-2 候選集合＝標記 ∪ cache ∪ archives，逐一相等（含反例）")
 def _p296_ac1_ac2():
