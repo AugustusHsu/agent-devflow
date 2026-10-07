@@ -8,6 +8,7 @@
 
 - 撰 T：依協調位固定的 G 與 issue 的 `L1` 各欄撰寫，含逐條 AC、write scope、驗證指令；AC 的鑑別力依 `L1`——對至少一個明確的未達成候選實跑同一步驟並得到不同輸出；證據須能定位，計數式斷言不得作為任一條 AC 的唯一證據（`R6`）。
 - 派實作位：建 worktree 於 `../<repo>.worktrees/<N>`，實作位不在主 checkout 工作（`I2`）；交付 issue、G、T、worktree 路徑、驗證指令（`L2`）；同一時間一張 issue 只有一個實作者（`I1`）。
+- **派工帶 `--issue` 時必須同時帶 `--then-wake <profile>`**：被派的 seat 是 oneshot 子程序，turn 結束即程序退出、session 消失，它自己啟動的 background 通知沒有收件人（`#287` 實證：漏 push ＋ 開 PR ＋ 派審；`#285`／`#286`／`#293` 同族）。`--then-wake` 讓轉播器在子程序退出後自己再喚醒指定 profile，銜接因此不依賴任何 seat 的 turn 存活，也不需要等待（foreground 等待撞工具層上限，已驗不可行）。帶 `--issue` ＝ 這一輪屬於某張單的執行流程，必須有銜接；不帶 `--issue` ＝ 一次性操作，不需鏈結。鏈結深度由 `DEVFLOW_RELAY_DEPTH` 經環境傳遞並設上限，撞上限表示轉播器在轉播器裡遞迴，改由最外層派工。本位仍須自行判下一步——被喚醒後拿到的只有單號、子程序的 log 路徑與 rc，`rc=0` 與「該進下一步」不等價（實作位可能依 `L3` 正當停下），差別要讀 issue 留言與 verdict。指令形式住對照表（`devflow/channels/`），不記在本檔。
 - 實作位停下時依 `L3` 判停或續；命中 `L3` 的停判準（處置落在 write scope 外、或 issue 與規格、留言互相矛盾）則回報協調位，不自行決定方向。
 - 複驗與開 PR：複驗以可重跑且具鑑別力的指令為準（`R6`）；測試綠後 push 分支、開 PR 並引用 issue、G、T、head sha（`L4`）；PR 記錄本任務的 G 並依 G 審查（`G1`）；候選分支中的入口檔、skill、CI 變更不當本次治理依據（`G5`）。
 - 派審查位：依 `R2` 的填位基準與 `devflow.yml` 的綁定派審（`R1`、`R2`、`R12`）；餵入 `templates/review-prompt.md` 全文（`R4`）。**派審是本位的職責，不是協調位的。** `R12` 的沙箱設定、可寫根實際值，以及該輪結束前的三項核對——checkout 的 HEAD 等於被審 sha、該輪工具日誌顯示的核准政策為「不得自行升權」、該 checkout 的 `git diff` 已另存——由本位負責並記入 verdict 留言。
