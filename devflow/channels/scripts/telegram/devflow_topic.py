@@ -166,23 +166,28 @@ def sync():
     （`channels/README.md:61`：不得靜默取其一）。
     """
     out = gh("issue", "list", "-R", REPO, "--state", "all", "--limit", "300", "--json", "number,title,body,state")
-    c, n, invalid = {}, 0, []
-    for it in json.loads(out):
-        try:
-            tid = _marker.read_topic(it["body"] or "", detail=f"issue #{it['number']}")
-        except _marker.InvalidMarker as e:
-            invalid.append(str(it["number"]))
-            print(f"# {e}", file=sys.stderr)
-            continue
-        if tid is not None:
-            c[str(it["number"])] = {
-                "thread_id": tid,
-                "state": (it.get("state") or "OPEN").lower(),
-                "title": it["title"],
-            }
-            n += 1
+    items = json.loads(out)
+    c, invalid = {}, []
+    by_num = {str(it["number"]): it for it in items}
+
+    def _skip(exc, issue):
+        """`T>1`：回報單號、印 INVALID、跳過該單續掃（exit 非 0 由 `__main__` 帶出）。"""
+        invalid.append(str(issue))
+        print(f"# {exc}", file=sys.stderr)
+
+    # 掃描走共用模組（`#287` `AC-1`／`AC-2`）：查詢留在這裡（上面的 `gh`），
+    # marker 解析交給 `_marker.scan_topic`。對外行為一字不變——`on_invalid` 即
+    # 原本的 `except … continue`（跳過該單續掃），回傳的 `(n, invalid)` 同形。
+    for num, tid, _kind in _marker.scan_topic(
+            ((str(it["number"]), it["body"] or "") for it in items), on_invalid=_skip):
+        it = by_num[num]
+        c[num] = {
+            "thread_id": tid,
+            "state": (it.get("state") or "OPEN").lower(),
+            "title": it["title"],
+        }
     _save(c)
-    return n, invalid
+    return len(c), invalid
 
 
 if __name__ == "__main__":
