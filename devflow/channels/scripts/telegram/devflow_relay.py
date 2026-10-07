@@ -32,6 +32,7 @@ session `thread_id=None`，沒有 Telegram 介面可以渲染 `tool_progress`，
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import os
 import pathlib
@@ -73,6 +74,10 @@ DEPTH_ENV = "DEVFLOW_RELAY_DEPTH"
 # 選配的可讀鏈：每層把自己的 profile 接在後面，超限時印出來才看得出是誰疊誰。
 CHAIN_ENV = "DEVFLOW_RELAY_CHAIN"
 
+# log 檔名的程序內序號。`itertools.count` 的 `next` 在 CPython 下是原子的，
+# 同一程序內（含將來若有多個執行緒各派子程序）不會發出重複值。
+_LOG_SEQ = itertools.count(1)
+
 
 def _current_depth() -> int:
     """relay 自身所在的層數。未設 ＝ 0（最外層，由人或 gateway session 直接啟動）。"""
@@ -99,9 +104,16 @@ def _log_path(issue: str | None, profile: str) -> pathlib.Path:
 
     被 `--then-wake` 喚醒的是新的 oneshot，它看不到前一個子程序的畫面；
     原始事件流與 stderr 落成檔案，喚醒 prompt 才有東西可以指（`AC-2`）。
+
+    檔名**不得只靠時間戳**：`--issue 287 --then-wake dfmgr` 時首棒與喚醒棒的 issue 與
+    profile 都相同，兩棒在同一秒內取名就會拿到同一個路徑，喚醒棒覆寫首棒的 log，而
+    prompt 指的正是首棒那個——讀到的內容已經是第二棒的（`#298` 第 2 輪 `BLOCK 1` 實測）。
+    故加入 pid ＋程序內遞增序號：序號保證**同一程序內任兩次呼叫必不同**（時間戳與 pid
+    在同一程序內都是常數，撐不起這個保證），pid 則讓並行的多個 relay 不互撞。
     """
+    seq = next(_LOG_SEQ)
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    name = f"relay-{issue or 'nonissue'}-{profile}-{stamp}.log"
+    name = f"relay-{issue or 'nonissue'}-{profile}-{stamp}-{os.getpid()}-{seq}.log"
     return pathlib.Path(tempfile.gettempdir()) / name
 
 
@@ -466,13 +478,18 @@ def main() -> int:
 
     if args.then_wake:
         # 銜接在 relay 這一層，不在任何 seat 的 turn 裡——故不需要等待（`#287` 證明等不住）。
-        # 喚醒者一律續接 `issue-<N>`（同一 seat 的續接，不給 `--fresh`），也不承襲 `--in`：
-        # worktree 是實作位的，管理位在主 checkout。**不對它再 then-wake**：那會無限鏈，
-        # 深度上限只是兜底，不是正解。
+        # 喚醒者一律續接 `issue-<N>`（同一 seat 的續接，不給 `--fresh`）。**不對它再
+        # then-wake**：那會無限鏈，深度上限只是兜底，不是正解。
+        #
+        # 三項**不**承襲（`#298` 第 2 輪 `BLOCK 2`）：
+        #   `--in`     worktree 是實作位的，被喚醒的管理位在主 checkout。
+        #   `-m`／`--provider`  `I7`：覆寫只作用於該次子程序（配額耗盡時的一次性切換），
+        #       被喚醒者是另一個 seat 的另一輪，須用**自己 profile 的綁定**。承襲等於
+        #       替它換了綁定，而換綁定不是 relay 的事。
         wake_cmd, wake_label = _build_cmd(
             args.then_wake, _wake_prompt(args.issue, log, rc, args.profile),
             thread=args.thread, issue=args.issue, session=None, fresh=False,
-            workdir=None, model=args.model, provider=args.provider)
+            workdir=None, model=None, provider=None)
         _run_child(wake_cmd, profile=args.then_wake, thread=args.thread,
                    title=(f"`#{args.issue}` · 續接" if args.issue
                           else f"thread {args.thread} · 續接"),

@@ -28,6 +28,7 @@ import importlib.util
 import io
 import os
 import re
+import shutil
 import sys
 import tempfile
 import types
@@ -46,6 +47,12 @@ VERSION_FILE = REPO / "devflow" / "VERSION"
 
 SELF_SRC = Path(__file__).read_text()
 RELAY_SRC = RELAY_SRC_PATH.read_text()
+
+# 本檔自己的暫存目錄：relay 的 log 走 `tempfile.gettempdir()`，不收束的話每跑一次就在
+# 暫存根留下幾個 `relay-*.log`（實測累積上百個）。指向一個本檔擁有的子目錄，收尾整個刪掉。
+# 仍在真實暫存根之下，故「log 不寫進 repo」那幾條斷言的語意不變。
+TESTTMP = Path(tempfile.mkdtemp(prefix="devflow-test_relay."))
+tempfile.tempdir = str(TESTTMP)        # relay 與本檔的 gettempdir() 都改指這裡
 
 RESULTS: list[tuple[str, bool, str]] = []
 
@@ -67,8 +74,12 @@ def _register(name: str, path: Path) -> None:
     spec.loader.exec_module(mod)
 
 
-def load(fake):
-    """每個案例重新載入一份 relay（模組狀態乾淨），注入假 subprocess 並覆寫時間常數。"""
+def load(fake, *, freeze_clock: bool = False):
+    """每個案例重新載入一份 relay（模組狀態乾淨），注入假 subprocess 並覆寫時間常數。
+
+    `freeze_clock`：把秒級時間戳凍成常數，用來強制「兩棒落在同一秒」（`BLOCK 1`）——
+    否則那條測試要靠搶時鐘才會紅。
+    """
     if "devflow_archive" not in sys.modules:
         _register("_marker", SCRIPTS / "_marker.py")          # devflow_archive 內 `import _marker`
         _register("devflow_archive", SCRIPTS / "devflow_archive.py")
@@ -79,6 +90,8 @@ def load(fake):
     # AC-5：顯式覆寫兩個時間常數，測試不得依賴 wall-clock（現值 20s／300s）。
     mod.OPENING_DELAY = 10 ** 9
     mod.HEARTBEAT_AFTER = 10 ** 9
+    if freeze_clock:
+        mod.time.strftime = lambda _fmt: "FIXED"
     return mod
 
 
@@ -131,9 +144,17 @@ LINES = [
 ]
 
 
-def run(argv: list[str], fake, rc_lines=LINES):
-    """以 sys.argv 餵參數呼叫 main()，回傳 (rc, stdout, stderr)。"""
-    mod = load(fake)
+LAST_MOD: list = []            # run() 把最後一次載入的模組放這裡，供需要它的案例取用
+
+
+def run(argv: list[str], fake, *, freeze_clock: bool = False):
+    """以 sys.argv 餵參數呼叫 main()，回傳 (rc, stdout, stderr)。
+
+    載入的模組另放進 `LAST_MOD[-1]`——`BLOCK 1` 要在同一個模組實例上續呼
+    `_log_path`（序號是模組級狀態），回傳值不改形狀以免動搖既有案例。
+    """
+    mod = load(fake, freeze_clock=freeze_clock)
+    LAST_MOD.append(mod)
     saved_argv = sys.argv
     sys.argv = ["devflow_relay.py"] + argv
     out, err = io.StringIO(), io.StringIO()
@@ -214,6 +235,34 @@ check("AC-1 喚醒者不承襲 `--in`（worktree 是實作位的，管理位在�
       len(f1b.spawned) == 2 and "--in" not in f1b.spawned[1],
       f"spawned[1]={f1b.spawned[1] if len(f1b.spawned) > 1 else None}")
 
+# ── BLOCK 2（第 2 輪 R1）：`-m`／`--provider` 不得承襲，`I7` ──
+# 覆寫只作用於該次子程序（配額耗盡時的一次性切換）；被喚醒者是另一個 seat 的另一輪，
+# 須用自己 profile 的綁定。承襲等於由 relay 替它換綁定——那不是 relay 的事。
+f1c = FakeSub(LINES)
+rc1c, _, _ = run(["4149", "hi", "-p", "dfrev", "--issue", "287", "--then-wake", "dfmgr",
+                  "-m", "review-model", "--provider", "review-provider"], f1c)
+check("BLOCK 2 首棒確實帶了 `-m`／`--provider`（覆寫對該次子程序有效，不是沒傳進來）",
+      len(f1c.spawned) == 2
+      and f1c.spawned[0][f1c.spawned[0].index("-m") + 1] == "review-model"
+      and f1c.spawned[0][f1c.spawned[0].index("--provider") + 1] == "review-provider",
+      f"spawned[0]={f1c.spawned[0] if f1c.spawned else None}")
+check("BLOCK 2 `spawned[1]` 不含 `-m`（I7：被喚醒者用自己 profile 的綁定）",
+      len(f1c.spawned) == 2 and "-m" not in f1c.spawned[1],
+      f"spawned[1]={f1c.spawned[1] if len(f1c.spawned) > 1 else None}")
+check("BLOCK 2 `spawned[1]` 不含 `--provider`（同上）",
+      len(f1c.spawned) == 2 and "--provider" not in f1c.spawned[1],
+      f"spawned[1]={f1c.spawned[1] if len(f1c.spawned) > 1 else None}")
+check("BLOCK 2 連模型／provider 的值字面都不在喚醒棒的指令裡",
+      len(f1c.spawned) == 2
+      and "review-model" not in f1c.spawned[1] and "review-provider" not in f1c.spawned[1],
+      f"spawned[1]={f1c.spawned[1] if len(f1c.spawned) > 1 else None}")
+check("BLOCK 2 不承襲覆寫但其餘旗標照舊（-p 喚醒對象、-c 續接、prompt 都還在）",
+      len(f1c.spawned) == 2 and rc1c == 0
+      and f1c.spawned[1][f1c.spawned[1].index("-p") + 1] == "dfmgr"
+      and f1c.spawned[1][f1c.spawned[1].index("-c") + 1] == "issue-287"
+      and "-q" in f1c.spawned[1],
+      f"rc={rc1c} spawned[1]={f1c.spawned[1] if len(f1c.spawned) > 1 else None}")
+
 
 # ── AC-2：喚醒 prompt 的內容 ────────────────────────────────────────────────
 print("\n── AC-2：喚醒 prompt 須含單號、子程序 log 路徑、rc")
@@ -265,6 +314,72 @@ check("AC-2 鑑別力：兩輪的 log 路徑互不相同（不會覆寫彼此的
 check("AC-2 prompt 要被喚醒者自己去 forge 讀材料（relay 不寫下一步做什麼）",
       "forge" in wake_prompt and "gh issue view" in wake_prompt,
       repr(wake_prompt[:300]))
+
+
+# ── BLOCK 1（第 2 輪 R1）：log 路徑不得碰撞 ──────────────────────────────────
+print("\n── BLOCK 1：同 issue／同 profile／同秒的兩棒 log 不得互相覆寫")
+
+
+class TaggedSub(FakeSub):
+    """每次 `Popen` 吐**不同**的事件內容，用來分辨 prompt 指到的是哪一棒的 log。
+
+    碰撞的病徵是「兩棒拿到同一路徑、喚醒棒覆寫首棒」，此時 prompt 指的檔案仍是首棒那個
+    路徑，但內容已經是第二棒的——只比對路徑字串看不出來，必須讀檔案內容才抓得到。
+    """
+
+    def Popen(self, cmd, **kw):   # noqa: N802
+        tag = "FIRST_CHILD" if not self.spawned else "WAKE_CHILD"
+        self.kwargs.append(kw)
+        self.spawned.append(cmd)
+        return FakeProc(
+            [f'{{"type":"result","text":"{tag}","duration_ms":1}}\n'], self._rc)
+
+
+fb1 = TaggedSub([])
+rcb1, _, errb1 = run(["4149", "hi", "--issue", "287", "--then-wake", "dfmgr"],
+                     fb1, freeze_clock=True)
+_m = LAST_MOD[-1]
+
+check("BLOCK 1 前置：兩棒的 issue 與 profile 完全相同，且時間戳已凍在同一秒",
+      len(fb1.spawned) == 2
+      and fb1.spawned[0][fb1.spawned[0].index("-p") + 1]
+      == fb1.spawned[1][fb1.spawned[1].index("-p") + 1] == "dfmgr"
+      and _m.time.strftime("%Y%m%d-%H%M%S") == "FIXED",
+      f"rc={rcb1} spawned={len(fb1.spawned)} err={errb1[:200]!r}")
+
+# 兩棒的 log 路徑：首棒那個由喚醒 prompt 指出（下方以檔案內容驗指對了人）；
+# 「同一程序內必不同」則在同一個模組實例上續呼 _log_path 直接驗——序號是模組級狀態。
+_p1 = _m._log_path("287", "dfmgr")
+_p2 = _m._log_path("287", "dfmgr")
+_p3 = _m._log_path("287", "dfmgr")
+check("BLOCK 1 同一程序內任兩次 _log_path（同 issue／同 profile／同秒）必不同",
+      len({_p1, _p2, _p3}) == 3,
+      f"{_p1.name} / {_p2.name} / {_p3.name}")
+check("BLOCK 1 檔名仍含 issue 與 profile（AC-2 的可讀性不因去碰撞而失去）",
+      all("287" in p.name and "dfmgr" in p.name and p.name.endswith(".log")
+          for p in (_p1, _p2, _p3)),
+      f"{_p1.name}")
+check("BLOCK 1 檔名含 pid（並行的多個 relay 互不碰撞）",
+      all(f"-{os.getpid()}-" in p.name for p in (_p1, _p2, _p3)), f"{_p1.name}")
+check("BLOCK 1 仍落在 $TMPDIR 下，不寫進 repo",
+      all(str(p).startswith(tempfile.gettempdir()) and str(REPO) not in str(p)
+          for p in (_p1, _p2, _p3)), f"{_p1}")
+
+wake_b1 = prompt_of(fb1.spawned[1]) if len(fb1.spawned) == 2 else ""
+_lp_b1 = re.findall(r"`(/[^`]+\.log)`", wake_b1)
+check("BLOCK 1 喚醒 prompt 仍指出一個 log 絕對路徑", len(_lp_b1) == 1, f"命中={_lp_b1}")
+if _lp_b1:
+    _first_log = Path(_lp_b1[0])
+    _body = _first_log.read_text() if _first_log.exists() else ""
+    check("BLOCK 1 prompt 指向的檔案含**首棒**事件（FIRST_CHILD）",
+          "FIRST_CHILD" in _body, f"log={_first_log} body={_body[:160]!r}")
+    check("BLOCK 1 prompt 指向的檔案**不含**喚醒棒事件（WAKE_CHILD）＝ 未被覆寫",
+          "WAKE_CHILD" not in _body, f"log={_first_log} body={_body[:160]!r}")
+    # 喚醒棒的 log 另成一檔：同目錄下應找得到含 WAKE_CHILD 的另一個檔，且不是首棒那個。
+    _sibs = [p for p in TESTTMP.glob("relay-287-dfmgr-FIXED-*.log")
+             if p != _first_log and "WAKE_CHILD" in p.read_text()]
+    check("BLOCK 1 喚醒棒的 log 是另一個檔（兩棒的現場都保住了）",
+          len(_sibs) >= 1, f"首棒={_first_log.name} 其餘含 WAKE_CHILD 的={[p.name for p in _sibs]}")
 
 
 # ── AC-3：--issue 而無 --then-wake 即拒絕 ───────────────────────────────────
@@ -594,5 +709,9 @@ if __name__ == "__main__":
     leftovers = [str(p) for p in (SCRIPTS, HERE) if (p / "__pycache__").exists()]
     if leftovers:
         print(f"⚠ __pycache__ 殘留：{leftovers}")
+    # 本檔產生的 log 全在 TESTTMP 下，整個刪掉（暫存根不留 relay-*.log）
+    shutil.rmtree(TESTTMP, ignore_errors=True)
+    if TESTTMP.exists():
+        print(f"⚠ 暫存目錄未清掉：{TESTTMP}")
     print("─" * 72)
-    raise SystemExit(1 if failed or leftovers else 0)
+    raise SystemExit(1 if failed or leftovers or TESTTMP.exists() else 0)
