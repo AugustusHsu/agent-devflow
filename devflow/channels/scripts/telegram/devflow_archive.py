@@ -619,25 +619,37 @@ def scan_candidates(items, cache, archives_thread, *, full=False, hi=None,
 def scan_sources(items, cache, archives_thread, *, on_invalid=None) -> dict:
     """候選集合的**來源分解**，供 `cmd_scan` 的那一行輸出（`#296` `AC-5`）。
 
-    回 `{"marks": [...], "cache": [...], "archives": [...], "all": [...]}`，
-    各欄已排序去重；`all` 與 `scan_candidates(..., full=False)` 逐一相等。
+    回 `{"marks": [...], "cache": [...], "archives": [...], "all": [...]}`。
 
-    **每一欄都是 `scan_candidates` 自己算的**（只餵它該欄的那一個來源），故
-    分解與候選不可能分岔，標記也**只解析一次**：`marks` 那次是唯一餵了 `items`
-    的呼叫，`cache` 那次餵空 `items`（`_marker` 對空批零解析）。第 1 輪的實作
-    另寫了一套 `_dec()` 解析 ＋ 一套 cache 取值，於是同一批標記被解析四趟、
-    `on_invalid` 對同一壞單被呼叫兩次（`#296` `R1` 第 1 輪非阻擋建議：
-    「避免顯示邏輯與候選邏輯再次分岔」）。
+    **四欄全部是 `scan_candidates` 的回傳值**，本函式不含任何聯集／去重／排序：
+
+      * `all` ＝ 一次 `scan_candidates(items, cache, archives_thread, …)`
+        —— 三來源的聯集**只定義在 `scan_candidates` 裡一處**（`AC-1`）。
+      * `marks`／`cache`／`archives` ＝ 同一函式只餵單一來源的**子集呼叫**
+        （其餘兩個來源給空值），不是另一套邏輯。
+
+    ⚠ 第 2 輪的實作在這裡另以 set 聯集算了一遍 `all`，於是三來源的聯集有兩處
+    定義、而 `cmd_scan` 取的是這一處
+    （`#296` `R1` 第 2 輪 `BLOCK 1`：違反 `AC-1`「候選集合的定義集中在一個
+    純函式……`cmd_scan` 只呼叫它，不自備任何集合邏輯」）。
+
+    `on_invalid` **只交給 `all` 那一次呼叫**：`marks` 那次餵的是同一批 `items`，
+    若也轉發就會對同一壞單回報兩次（`R1` 第 1 輪非阻擋建議）。`cmd_scan` 另有
+    自己的 `scan_candidates` 呼叫負責 stderr 回報，故它呼叫本函式時把
+    `on_invalid` 吞掉——回報的單一來源是那一次，不是分解。
 
     分解的用途不是美觀：`AC-5` 的那一行是本單的達成證據載體 —— 未達成的面貌是
     「候選 ＝ 4442」，達成的面貌是「候選 25 ／ 探測 25」。三個來源各報一個數字，
     才看得出「拿掉 cache 會不會漏」這類問題該往哪查。
     """
-    marks = scan_candidates(items, {}, None, on_invalid=on_invalid)
-    cids = scan_candidates([], cache, None)
-    arch = [] if archives_thread is None else [int(archives_thread)]
-    return {"marks": marks, "cache": cids, "archives": arch,
-            "all": sorted(set(marks) | set(cids) | set(arch))}
+    def _quiet(_exc, _issue):
+        """吞掉回報：壞單的處置由 `all` 那一次（或呼叫端自己那一次）負責。"""
+
+    return {"marks": scan_candidates(items, {}, None, on_invalid=_quiet),
+            "cache": scan_candidates([], cache, None),
+            "archives": scan_candidates([], {}, archives_thread),
+            "all": scan_candidates(items, cache, archives_thread,
+                                   on_invalid=on_invalid)}
 
 
 def _scan_read_cache() -> dict:
@@ -723,8 +735,15 @@ def cmd_scan(args) -> int:
         print(f"（上界 hi={hi}，由 forge 的分區標記推出；探測 range(2, {hi})）")
         targets = scan_candidates(items, {}, None, full=True, hi=hi)
     else:
-        src = scan_sources(items, cache_data, ARCHIVES_THREAD, on_invalid=_warn)
-        targets = src["all"]
+        # targets 直接來自 `scan_candidates`（`AC-1`：候選的定義集中在那一處，
+        # `cmd_scan` 只呼叫它）。`#296` `R1` 第 2 輪 `BLOCK 1` 的修正：第 2 輪
+        # 取的是 `scan_sources` 回傳字典裡那個自己算的聯集欄，那是第二套定義。
+        targets = scan_candidates(items, cache_data, ARCHIVES_THREAD,
+                                  on_invalid=_warn)
+        # 分解只為了那一行的三個數字。`on_invalid` 吞掉——INVALID 的 stderr 回報
+        # 已由上面那次做過，分解再轉發會對同一壞單印兩次。
+        src = scan_sources(items, cache_data, ARCHIVES_THREAD,
+                           on_invalid=lambda _exc, _issue: None)
         print(f"（候選 {len(targets)} 個：forge 標記 {len(src['marks'])}"
               f" ／ cache {len(src['cache'])} ／ archives {len(src['archives'])}；"
               f"探測 {len(targets)} 個 thread）")

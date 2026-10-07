@@ -2484,6 +2484,93 @@ def _p296_block1_cross():
           seen == ["900"], f"實得 {seen!r}")
 
 
+@case("#296 AC-1／R2-BLOCK-1 三來源聯集只有一處定義：scan_sources[\"all\"] "
+      "逐一等於 scan_candidates(...)")
+def _p296_r2_block1_single_union():
+    # ① 合法批：`all` 與直接呼叫 `scan_candidates` 逐一相等
+    direct = archive.scan_candidates(P296_ITEMS, P296_CACHE,
+                                     archive.ARCHIVES_THREAD)
+    src = archive.scan_sources(P296_ITEMS, P296_CACHE, archive.ARCHIVES_THREAD)
+    check("#296 R2-BLOCK-1 合法批：scan_sources['all'] == scan_candidates(...)",
+          src["all"] == direct == P296_WANT,
+          f"all={src['all']!r}\ndirect={direct!r}\n期望={P296_WANT!r}")
+
+    # ② 交叉 INVALID 批（一式 INVALID、另一式合法）：兩者仍逐一相等
+    #    —— 第 2 輪的第二套聯集是 `set(marks) | set(cids) | set(arch)`，而 `marks`
+    #    那次餵的來源組合與 `all` 不同，兩處定義一旦漂移就在這裡分岔。
+    for label, body in (("T>1 + A=1", P296_F_T2_A1),
+                        ("T=1 + A>1", P296_F_T1_A2),
+                        ("T>1 + A>1", P296_F_T2_A2)):
+        items = P296_ITEMS + [("900", body)]
+        quiet = (lambda *_a: None)
+        direct = archive.scan_candidates(items, P296_CACHE,
+                                         archive.ARCHIVES_THREAD,
+                                         on_invalid=quiet)
+        src = archive.scan_sources(items, P296_CACHE, archive.ARCHIVES_THREAD,
+                                   on_invalid=quiet)
+        check(f"#296 R2-BLOCK-1 {label}：scan_sources['all'] == "
+              "scan_candidates(...) 逐一相等",
+              src["all"] == direct == P296_WANT,
+              f"all={src['all']!r}\ndirect={direct!r}\n期望={P296_WANT!r}")
+
+    # ③ 三來源的各種空／非空組合：`all` 恆等於直接呼叫（不是只在滿載時相等）
+    for label, items, cache, arch in (
+            ("三來源皆空", [], {}, None),
+            ("只有標記", P296_ITEMS, {}, None),
+            ("只有 cache", [], P296_CACHE, None),
+            ("只有 archives", [], {}, 261),
+            ("標記 ＋ cache（無 archives）", P296_ITEMS, P296_CACHE, None),
+            ("cache ＋ archives（無標記）", [], P296_CACHE, 261)):
+        direct = archive.scan_candidates(items, cache, arch)
+        src = archive.scan_sources(items, cache, arch)
+        check(f"#296 R2-BLOCK-1 {label}：all == scan_candidates(...)",
+              src["all"] == direct,
+              f"all={src['all']!r} direct={direct!r}")
+
+    # ④ 四欄全部是 scan_candidates 的回傳值（子集呼叫，不是另一套邏輯）
+    src = archive.scan_sources(P296_ITEMS, P296_CACHE, archive.ARCHIVES_THREAD)
+    check("#296 R2-BLOCK-1 marks 欄 == scan_candidates(items, {}, None)",
+          src["marks"] == archive.scan_candidates(P296_ITEMS, {}, None),
+          f"{src['marks']!r}")
+    check("#296 R2-BLOCK-1 cache 欄 == scan_candidates([], cache, None)",
+          src["cache"] == archive.scan_candidates([], P296_CACHE, None),
+          f"{src['cache']!r}")
+    check("#296 R2-BLOCK-1 archives 欄 == scan_candidates([], {}, archives)",
+          src["archives"] == archive.scan_candidates(
+              [], {}, archive.ARCHIVES_THREAD) == [261],
+          f"{src['archives']!r}")
+
+    # ⑤ 源碼層反向斷言：第二套聯集的字面與 cmd_scan 的取用路徑都須 0 命中
+    check("#296 R2-BLOCK-1 全檔 `\"all\": sorted(set` 0 命中"
+          "（聯集不得在 scan_candidates 外再定義一次）",
+          ARCHIVE_SRC.count('"all": sorted(set') == 0,
+          "\n".join(ln for ln in ARCHIVE_SRC.splitlines() if "sorted(set" in ln))
+    check("#296 R2-BLOCK-1 全檔 `sorted(set` 0 命中（含任何改寫形態）",
+          ARCHIVE_SRC.count("sorted(set") == 0,
+          "\n".join(ln for ln in ARCHIVE_SRC.splitlines() if "sorted(set" in ln))
+    scan_src = ARCHIVE_SRC.split("def cmd_scan(")[1].split("\ndef ")[0]
+    check("#296 R2-BLOCK-1 cmd_scan 段內 `src[\"all\"]` 0 命中"
+          "（targets 不經分解字典）",
+          scan_src.count('src["all"]') == 0,
+          "\n".join(ln for ln in scan_src.splitlines() if 'src["all"]' in ln))
+    check("#296 R2-BLOCK-1 cmd_scan 的 targets 直接來自 "
+          "scan_candidates(items, cache_data, ARCHIVES_THREAD, …)",
+          "targets = scan_candidates(items, cache_data, ARCHIVES_THREAD,"
+          in scan_src,
+          "\n".join(ln for ln in scan_src.splitlines() if "targets" in ln))
+    sources_src = ARCHIVE_SRC.split("def scan_sources(")[1].split("\ndef ")[0]
+    # 去掉函式自己的 docstring（maxsplit=2：只切到主 docstring 結束，`_quiet` 的
+    # 巢狀 docstring 留在函式體內，它本身也不得含集合運算）。
+    body_only = (sources_src.split('"""', 2)[2] if '"""' in sources_src
+                 else sources_src)
+    check("#296 R2-BLOCK-1 scan_sources 的函式體無任何集合運算"
+          "（set(／|／sorted( 皆 0 命中）",
+          body_only.count("set(") == 0 and body_only.count("sorted(") == 0
+          and "|" not in body_only, body_only)
+    check("#296 R2-BLOCK-1 scan_sources 的四欄各是一次 scan_candidates 呼叫",
+          body_only.count("scan_candidates(") == 4, body_only)
+
+
 @case("#296 AC-1／AC-2 候選集合＝標記 ∪ cache ∪ archives，逐一相等（含反例）")
 def _p296_ac1_ac2():
     got = archive.scan_candidates(P296_ITEMS, P296_CACHE, archive.ARCHIVES_THREAD)
