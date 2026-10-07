@@ -129,10 +129,12 @@ T=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-rev.$TOKEN.XXXXXX")   # 本輪專
 D=$(mktemp -d "${TMPDIR:-$HOME/.cache}/devflow-co.$TOKEN.XXXXXX")    # 丟棄式 checkout；第 8 步刪
 git clone --shared <repo> "$D" && git -C "$D" checkout <head sha>
 env TMPDIR="$T" ~/.hermes/scripts/devflow_relay.py <thread> --file "$T/prompt.md" \
-  -p <instance> --issue <N> --fresh --pace quiet [-m <model> --provider <name>]
+  -p <instance> --issue <N> --fresh --pace quiet --then-wake <派工者自己的 instance> \
+  [-m <model> --provider <name>]
 ```
 
 - `--fresh` **不可省**：`R1` 要求每輪 fresh context。具名實例的 session 會累積，省掉即延續前一輪審查位的 context——前輪的判斷與取捨跟著進本輪，`R1` 要的「每輪全新」就不成立。
+- `--then-wake` **不可省**：帶 `--issue` 即表示這一輪屬某張單的執行流程，轉播器會**拒絕**未帶者（`#298` `AC-3`：rc 非 0、一個子程序都不派）。其值是**派工者自己**的 instance 名，**不是** `<instance>`——那是審查位。理由：子程序退出後要喚醒的是派工者，以續接 verdict 處理（第 8 步）；填成審查位即喚醒剛結束的那一位，續接的那一步沒有人做。該值與 `ISSUE`／`TOKEN`／`-p <instance>` 同為「由派工者填」的占位符（`SKILL.md` 的讀者是 orchestrator，它不知道自己的 profile 名，故此處不寫死）。
 - `--pace quiet`：避免審查位的投影與派工者自己的投影在同一通道交錯（第二節「投影」）。
 - 沙箱依 `R12`：可寫根收斂到該 checkout ＋本輪暫存目錄；平台設不起可寫根收斂時，該輪改**唯讀**執行，並於派工 prompt 與 verdict 留言**雙方註明**（`R12`）——「不得自行升權」不因此豁免。
 - `-m`／`--provider` 只在換模型時帶。verdict 的受測環境依 `R10` 寫**當次實際使用的**模型與 provider，不得照抄 `devflow.yml` 的預設綁定。
