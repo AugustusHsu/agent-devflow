@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""`#298`／K4c-7：`devflow_relay.py` 的 `--then-wake` 銜接（`AC-1`～`AC-7`、`AC-12`）。
+"""`#298`／K4c-7：`devflow_relay.py` 的 `--then-wake` 銜接（`AC-1`～`AC-7`、`AC-12`），
+以及 `#300`／K4c-8：第二棒的 handoff 行（本檔下半 `#300 AC-1`～`AC-11`）。
 
 直接執行：`/usr/bin/python3 tests/channels/test_relay.py`
 全過 exit 0、任一項失敗 exit 非 0，stdout 逐項列 PASS／FAIL（風格同 `test_marker.py`）。
 
-**縫只有一處**：relay 的對外效果全部經模組全域的 `subprocess`——`_send` 的 `run`
-是唯一的送訊息出口，`_run_child` 的 `Popen` 是唯一的子程序出口。實查無 `requests`／
-`urllib`／`http`／`socket`／`os.system`。替掉那一個名字即全部攔下，所以本檔零真 API、
-零真子程序（`AC-6`）。
+**縫只有一處**：relay 的對外效果全部經模組全域的 `subprocess`——`run` 是唯一的同步出口
+（`_send` 送 topic、`_write_handoff` 寫 forge 都經它，`#300` 起集中在 `_capture`），
+`_run_child` 的 `Popen` 是唯一的子程序出口。實查無 `requests`／`urllib`／`http`／`socket`／
+`os.system`。替掉那一個名字即全部攔下，所以本檔零真 API、零真子程序（`AC-6`）——
+`gh` 與送訊走**同一個名字**，故 handoff 行的驗證同樣零真 API（`#300` `AC-10`）。
 
 零 import-path 操作（`AC-6`，機械判準 `grep -nE 'sys\\.path'` 無命中，故本檔連字面都不
 出現）：受測模組以 `importlib.util.spec_from_file_location` 從 **repo 真實目錄**
@@ -21,6 +23,8 @@ relay 有 `from devflow_archive import tool_summary`，而 `devflow_archive.py` 
 
 **本檔驗的是「relay 發出了什麼」，不是「被喚醒的 seat 做對了什麼」**（`#298` 射程界線）：
 `spawned[1]` 含 `-p dfmgr` 與正確 prompt 可驗；mgr 收到後是否真的 push 只有端到端那次能證。
+同理 `#300` 只驗「relay 發出了那則留言的指令」，**不**驗 forge 上真的多了一則留言——
+本檔不打真 `gh`，forge 側零實跑（`channels/telegram.md` 該格的狀態欄因此是 `⬜`）。
 """
 from __future__ import annotations
 
@@ -31,6 +35,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 import types
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -43,6 +48,8 @@ SCRIPTS = REPO / "devflow" / "channels" / "scripts" / "telegram"
 RELAY_SRC_PATH = SCRIPTS / "devflow_relay.py"
 MANAGER_MD = REPO / "devflow" / "seats" / "manager.md"
 TELEGRAM_MD = REPO / "devflow" / "channels" / "telegram.md"
+WORKFLOW_MD = REPO / "devflow" / "WORKFLOW.md"
+CHANNELS_README = REPO / "devflow" / "channels" / "README.md"
 VERSION_FILE = REPO / "devflow" / "VERSION"
 
 SELF_SRC = Path(__file__).read_text()
@@ -55,6 +62,12 @@ TESTTMP = Path(tempfile.mkdtemp(prefix="devflow-test_relay."))
 tempfile.tempdir = str(TESTTMP)        # relay 與本檔的 gettempdir() 都改指這裡
 
 RESULTS: list[tuple[str, bool, str]] = []
+
+# 真時鐘的備份。`freeze_clock` 動的是 `time` 模組物件本身（受測模組與本檔共用同一個
+# 物件），所以**凍過就會留著**——`BLOCK 1` 之後的案例會一路拿到 `FIXED`。`load()` 因此
+# 明寫兩個方向：要凍就凍、不凍就還原，結果只取決於它自己的參數，不取決於前面有誰凍過
+# （`#300` 的 handoff 行要驗真的 ISO 8601 時刻，正是踩到這個）。
+_REAL_STRFTIME = time.strftime
 
 
 def check(label: str, ok: bool, detail: str = "") -> bool:
@@ -92,18 +105,32 @@ def load(fake, *, freeze_clock: bool = False):
     mod.HEARTBEAT_AFTER = 10 ** 9
     if freeze_clock:
         mod.time.strftime = lambda _fmt: "FIXED"
+    else:
+        mod.time.strftime = _REAL_STRFTIME   # 前面凍過的話在這裡還原（見 _REAL_STRFTIME）
     return mod
 
 
 class FakeProc:
-    """假子程序。每次建立都要新的 iterator——then-wake 會建第二次。"""
+    """假子程序。每次建立都要新的 iterator——then-wake 會建第二次。
 
-    def __init__(self, lines: list[str], rc: int) -> None:
+    `waits` 計數與 `events` 裡的 `wait` 事件供 `#300` `AC-1` 的時機斷言用：handoff 行
+    必須在第二棒 `Popen` 之後、`wait()` **之前**寫出去（等 `wait()` 回來才寫 ＝ 等第二棒
+    結束，T 明列否決）。`events` 由建立者（`FakeSub`）傳進來，與 `Popen`／`run` 共用
+    同一條時間軸，所以先後次序讀得出來，不必靠時鐘。
+    """
+
+    def __init__(self, lines: list[str], rc: int,
+                 events: list[str] | None = None) -> None:
         self.stdout = iter(lines)
         self.stderr = iter([])
         self.returncode = rc
+        self.waits = 0
+        self._events = events
 
     def wait(self) -> int:
+        self.waits += 1
+        if self._events is not None:
+            self._events.append("wait")
         return self.returncode
 
 
@@ -113,27 +140,51 @@ class FakeSub:
     `_run_child` 的 `Popen` 呼叫裡用了 `subprocess.DEVNULL`，只定義 `PIPE` 會在 kwargs
     求值時就掛成 `AttributeError: 'FakeSub' object has no attribute 'DEVNULL'`——
     那是裁決位與協調位各自踩到的實測。`STDOUT` 一併定義，日後改用合流就不必再回來補。
+
+    `#300` 起 `run` 多做三件事，都不改既有語意：
+      * 回傳物件帶 `returncode`（預設 0）——`_write_handoff` 讀它判成敗，而 `_send` 仍只
+        讀 stdout 的 `"success": true`，兩邊的判準各自獨立（`gh_rc` 不影響送訊）。
+      * 記 `events`（與 `procs` 共用一條時間軸）供時機斷言。
+      * `gh_rc` 非 0 時只對 `cmd[0] == "gh"` 的呼叫生效，`hermes send` 照舊成功。
+    `sent` 仍收**所有** `run` 的 cmd（既有斷言不動）；`gh` 與 `hermes` 以 `cmd[0]` 區分，
+    `gh_calls`／`send_calls` 兩個 property 讓「幾個 gh 呼叫」與「幾則送訊」各自讀得出來。
     """
 
     PIPE = -1
     DEVNULL = -3
     STDOUT = -2
 
-    def __init__(self, lines: list[str], rc: int = 0) -> None:
-        self.sent: list[list[str]] = []        # _send 的 run
+    def __init__(self, lines: list[str], rc: int = 0, *, gh_rc: int = 0) -> None:
+        self.sent: list[list[str]] = []        # 所有 run 的 cmd（送訊 ＋ gh）
         self.spawned: list[list[str]] = []     # 子程序的 Popen
         self.kwargs: list[dict] = []
+        self.procs: list[FakeProc] = []        # 建出來的假子程序，供 waits 計數用
+        self.events: list[str] = []            # 時間軸：popen／run:<argv0>
         self._lines = lines
         self._rc = rc
+        self._gh_rc = gh_rc
+
+    @property
+    def gh_calls(self) -> list[list[str]]:
+        return [c for c in self.sent if c and c[0] == "gh"]
+
+    @property
+    def send_calls(self) -> list[list[str]]:
+        return [c for c in self.sent if c and c[0] == "hermes"]
 
     def run(self, cmd, **kw):
         self.sent.append(cmd)
-        return types.SimpleNamespace(stdout='{"success": true}', stderr="")
+        self.events.append(f"run:{cmd[0] if cmd else '?'}")
+        rc = self._gh_rc if (cmd and cmd[0] == "gh") else 0
+        return types.SimpleNamespace(stdout='{"success": true}', stderr="", returncode=rc)
 
     def Popen(self, cmd, **kw):               # noqa: N802 — 對齊 subprocess 的名字
         self.kwargs.append(kw)
         self.spawned.append(cmd)
-        return FakeProc(self._lines, self._rc)
+        self.events.append("popen")
+        proc = FakeProc(self._lines, self._rc, self.events)
+        self.procs.append(proc)
+        return proc
 
 
 LINES = [
@@ -331,8 +382,12 @@ class TaggedSub(FakeSub):
         tag = "FIRST_CHILD" if not self.spawned else "WAKE_CHILD"
         self.kwargs.append(kw)
         self.spawned.append(cmd)
-        return FakeProc(
-            [f'{{"type":"result","text":"{tag}","duration_ms":1}}\n'], self._rc)
+        self.events.append("popen")
+        proc = FakeProc(
+            [f'{{"type":"result","text":"{tag}","duration_ms":1}}\n'], self._rc,
+            self.events)
+        self.procs.append(proc)
+        return proc
 
 
 fb1 = TaggedSub([])
@@ -692,8 +747,415 @@ if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", raw):
     # 整數元組比較，非字串——字串下 "0.15.10.0" < "0.15.4.0" 為 True（#287 AC-8 的作法）。
     check("AC-11 VERSION 嚴格大於 0.15.5.0（整數元組比較）",
           cur > (0, 15, 5, 0), f"cur={cur}")
-    check("AC-11 VERSION == 0.15.6.0（c 位進位：修正既有能力的缺陷）",
-          cur == (0, 15, 6, 0), f"cur={cur}")
+    # `#300` `AC-11`：下界由 `0.15.6.0`（`#298` 的值）改成嚴格大於它。沿用整數元組比較，
+    # 不改成 `== 0.15.7.0`——下一張單進位後這條會再度變成「鎖死在舊值」的假 FAIL。
+    check("#300 AC-11 VERSION 嚴格大於 0.15.6.0（c 位進位：修正既有能力的缺陷）",
+          cur > (0, 15, 6, 0), f"cur={cur}")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# `#300`／K4c-8：第二棒的 handoff 行
+# ════════════════════════════════════════════════════════════════════════════
+
+# ── #300 AC-1：寫入的存在、位置與時機 ───────────────────────────────────────
+print("\n── #300 AC-1：發出第二棒之後寫 handoff 行（存在、cmd 形狀、時機）")
+
+# 現行（base `cc94a30`）實測值，兩個數字刻意分開寫：
+#   **gh 呼叫數 0**（`run` 的 cmd 中 `cmd[0] == "gh"` 的個數）
+#   **`gh` 文字出現處 1**（`:412` 的 prompt 字串 `gh issue view {issue} --comments`，
+#   那是交給被喚醒者去讀 forge 的指令**文字**，不是本程序的呼叫）
+# 只寫「0」會讓 grep 到那一處文字的人以為撰 T 者漏看（裁決位 2026-10-07 指出）。
+h1 = FakeSub(LINES)
+rch1, _, errh1 = run(["4149", "hi", "--issue", "287", "--then-wake", "dfmgr"], h1)
+check("#300 AC-1 `--issue 287 --then-wake dfmgr` → gh 呼叫數 ≥1（現行 0）",
+      len(h1.gh_calls) >= 1,
+      f"rc={rch1} gh 呼叫={len(h1.gh_calls)} sent 的 argv0={[c[0] for c in h1.sent]}")
+check("#300 AC-1 gh 呼叫恰 1 個（一棒一則，不重複留言）",
+      len(h1.gh_calls) == 1, f"gh 呼叫={len(h1.gh_calls)}：{h1.gh_calls}")
+check("#300 AC-1 cmd 為 `gh issue comment <N>` 系列，單號取自 --issue",
+      bool(h1.gh_calls) and h1.gh_calls[0][:3] == ["gh", "issue", "comment"]
+      and "287" in h1.gh_calls[0],
+      f"cmd={h1.gh_calls[0] if h1.gh_calls else None}")
+check("#300 AC-1 不帶 `-R`（repo 依 cwd 的 git remote 判，relay 不持有 repo 名）",
+      bool(h1.gh_calls) and "-R" not in h1.gh_calls[0] and "--repo" not in h1.gh_calls[0],
+      f"cmd={h1.gh_calls[0] if h1.gh_calls else None}")
+check("#300 AC-1 既有的送訊沒有被 gh 呼叫擠掉（hermes send 仍 ≥1）",
+      len(h1.send_calls) >= 1,
+      f"send={len(h1.send_calls)} gh={len(h1.gh_calls)}")
+
+# 文字處數與呼叫數分開：受測源碼裡 `gh` 字面的出現處。
+_gh_text = re.findall(r"gh issue \w+", RELAY_SRC)
+check("#300 AC-1 受測源碼的 `gh issue …` 文字處數 ≥2（原 prompt 那 1 處 ＋ 本單的呼叫）",
+      len(_gh_text) >= 2, f"命中={_gh_text}")
+check("#300 AC-1 那 1 處 prompt 文字（`gh issue view … --comments`）仍在，未被改掉",
+      "gh issue view" in RELAY_SRC and "gh issue view" in prompt_of(h1.spawned[1]),
+      f"源碼命中={'gh issue view' in RELAY_SRC}")
+
+# 不帶 --then-wake（也就無 --issue）→ gh 呼叫 0。一次性操作不寫 forge。
+h2 = FakeSub(LINES)
+rch2, _, _ = run(["4149", "hi"], h2)
+check("#300 AC-1 不帶 --then-wake（無 --issue）→ gh 呼叫 0（一次性操作不寫 forge）",
+      rch2 == 0 and len(h2.gh_calls) == 0,
+      f"rc={rch2} gh 呼叫={len(h2.gh_calls)}：{h2.gh_calls}")
+check("#300 AC-1 該列仍照舊送訊（不寫 forge ≠ 不轉播）",
+      len(h2.send_calls) >= 1, f"send={len(h2.send_calls)}")
+
+# 帶 --then-wake 但**無** --issue：鏈結照跑，但沒有單可留言 → gh 呼叫 0。
+h2b = FakeSub(LINES)
+rch2b, _, _ = run(["4149", "hi", "--then-wake", "dfmgr"], h2b)
+check("#300 AC-1 `--then-wake` 而無 `--issue` → 仍鏈結（spawned==2）但 gh 呼叫 0",
+      rch2b == 0 and len(h2b.spawned) == 2 and len(h2b.gh_calls) == 0,
+      f"rc={rch2b} spawned={len(h2b.spawned)} gh={len(h2b.gh_calls)}")
+
+# 拒絕列（`#298` `AC-3`）：連子程序都不派，自然也不該寫 forge。
+h2c = FakeSub(LINES)
+rch2c, _, _ = run(["4149", "hi", "--issue", "287"], h2c)
+check("#300 AC-1 拒絕列（`--issue` 無 `--then-wake`）→ gh 呼叫 0（拒絕是純本機的）",
+      rch2c not in (0, None) and len(h2c.gh_calls) == 0 and len(h2c.spawned) == 0,
+      f"rc={rch2c} gh={len(h2c.gh_calls)} spawned={len(h2c.spawned)}")
+
+# ── 時機（T 明列否決「等第二棒結束再寫」）──
+# 時間軸 `events` 依序記 popen／run:<argv0>／wait，三者共用同一條 list，
+# 所以「gh 的 run 落在第二棒 popen 之後、該子程序 wait 之前」是純順序事實，不靠時鐘。
+_ev = h1.events
+_popens = [i for i, e in enumerate(_ev) if e == "popen"]
+_ghs = [i for i, e in enumerate(_ev) if e == "run:gh"]
+_waits = [i for i, e in enumerate(_ev) if e == "wait"]
+check("#300 AC-1 時機前置：時間軸有兩次 popen、兩次 wait、一次 run:gh",
+      len(_popens) == 2 and len(_waits) == 2 and len(_ghs) == 1,
+      f"events={_ev}")
+check("#300 AC-1 時機：gh 的 run 發生在**第二棒 Popen 之後**",
+      bool(_ghs) and len(_popens) == 2 and _ghs[0] > _popens[1],
+      f"gh@{_ghs} 第二棒 popen@{_popens[1:] } events={_ev}")
+check("#300 AC-1 時機：gh 的 run 發生在**第二棒 wait() 之前**（不等第二棒結束才寫）",
+      bool(_ghs) and len(_waits) == 2 and _ghs[0] < _waits[1],
+      f"gh@{_ghs} waits@{_waits} events={_ev}")
+check("#300 AC-1 時機鑑別力：第二棒的 FakeProc 在 gh 呼叫時 waits 仍為 0 之後才變 1",
+      len(h1.procs) == 2 and h1.procs[1].waits == 1
+      and _ghs[0] < _waits[1],
+      f"procs waits={[p.waits for p in h1.procs]} events={_ev}")
+check("#300 AC-1 時機：寫 forge 不耽誤第一棒——gh 的 run 在第一棒 wait() 之後",
+      bool(_ghs) and bool(_waits) and _ghs[0] > _waits[0],
+      f"gh@{_ghs} 第一棒 wait@{_waits[:1]} events={_ev}")
+# `after_spawn` 鉤子是上面那個時機的實作手段：掛在 Popen 之後、讀 stdout 之前。
+# 源碼位置以字面定位，刻意把 `Popen(` 拆成兩段再組——本檔自己的 `AC-6` 判準禁止
+# 「`subprocess` 加點加 run／Popen 加左括號」的字面出現，寫全會自我命中。
+_POPEN_CALL = "subprocess." + "Popen" + "("
+check("#300 AC-1 `_run_child` 有 `after_spawn` 鉤子，且在 Popen 之後、proc.wait() 之前呼叫",
+      "after_spawn" in RELAY_SRC
+      and RELAY_SRC.index("after_spawn()") > RELAY_SRC.index(_POPEN_CALL)
+      and RELAY_SRC.index("after_spawn()") < RELAY_SRC.index("proc.wait()"),
+      "源碼順序：Popen → after_spawn() → proc.wait()")
+
+
+# ── #300 AC-4：handoff 行的欄位與字面 ───────────────────────────────────────
+print("\n── #300 AC-4：三個欄位、獨立一行、與既有兩式互不相干")
+
+_mod = LAST_MOD[-1]
+_body = h1.gh_calls[0][h1.gh_calls[0].index("--body") + 1] if h1.gh_calls else ""
+_hand = [ln for ln in _body.splitlines()
+         if re.fullmatch(_mod.HANDOFF_RE[1:-1], ln)]
+check("#300 AC-4 --body 內恰一行合 grammar 的 handoff 行",
+      len(_hand) == 1, f"命中={_hand} body={_body!r}")
+check("#300 AC-4 該行是**獨立一行**（`^…$`，前後無其他字）",
+      len(_hand) == 1 and _hand[0] in _body.splitlines()
+      and re.search(_mod.HANDOFF_RE, _body, re.M) is not None,
+      f"body={_body!r}")
+check("#300 AC-4 留言另有一行人讀說明（不是只丟一行標記給人看）",
+      len([ln for ln in _body.splitlines() if ln.strip() and ln not in _hand]) >= 1,
+      f"body={_body!r}")
+if _hand:
+    _line = _hand[0]
+    check("#300 AC-4 欄位一：第二棒的 profile（取自 --then-wake）",
+          "profile=dfmgr" in _line, _line)
+    check("#300 AC-4 欄位二：啟動時刻（relay 自己的時鐘，ISO 8601 ＋ ±HHMM 偏移）",
+          re.search(r"at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+\-][0-9]{4}",
+                    _line) is not None, _line)
+    check("#300 AC-4 欄位三：受託子程序的 rc（本例 0）",
+          "rc=0" in _line, _line)
+    check("#300 AC-4 同族字面：獨立一行的 HTML 註解 `<!-- devflow:… -->`",
+          _line.startswith("<!-- devflow:") and _line.endswith(" -->"), _line)
+
+# 鑑別力：三個欄位都必須跟著輸入變，寫死任一個都會在這裡掛。
+h4 = FakeSub(LINES, rc=7)
+run(["4149", "hi", "-p", "dfimpl", "--issue", "999", "--then-wake", "dfcoord"], h4)
+_body4 = h4.gh_calls[0][h4.gh_calls[0].index("--body") + 1] if h4.gh_calls else ""
+_line4 = next((ln for ln in _body4.splitlines()
+               if ln.startswith("<!-- devflow:handoff")), "")
+check("#300 AC-4 鑑別力：`--then-wake dfcoord` → `profile=dfcoord`（非寫死 dfmgr）",
+      "profile=dfcoord" in _line4 and "dfmgr" not in _line4, f"line={_line4!r}")
+check("#300 AC-4 鑑別力：受託子程序 rc=7 → `rc=7`（非寫死 0）",
+      "rc=7" in _line4, f"line={_line4!r}")
+check("#300 AC-4 鑑別力：單號取自 --issue（999），不是寫死 287",
+      bool(h4.gh_calls) and "999" in h4.gh_calls[0] and "287" not in h4.gh_calls[0],
+      f"cmd={h4.gh_calls[0] if h4.gh_calls else None}")
+check("#300 AC-4 handoff 行的 rc 是**受託子程序**的，與 relay 的回傳一致",
+      "rc=7" in _line4, f"line={_line4!r}")
+
+# 與既有兩種標記的關係：不相等、互不為子字串——故 `CH3` 的三態判定不受影響。
+_marker_mod = sys.modules["_marker"]
+_pairs = {"TOPIC_RE": _marker_mod.TOPIC_RE, "ARCHIVED_RE": _marker_mod.ARCHIVED_RE}
+for _name, _pat in _pairs.items():
+    check(f"#300 AC-4 HANDOFF_RE 與 {_name} 不相等",
+          _mod.HANDOFF_RE != _pat, f"{_mod.HANDOFF_RE!r} vs {_pat!r}")
+    check(f"#300 AC-4 HANDOFF_RE 與 {_name} 互不為子字串",
+          _mod.HANDOFF_RE not in _pat and _pat not in _mod.HANDOFF_RE,
+          f"{_mod.HANDOFF_RE!r} vs {_pat!r}")
+# 行為層的同一件事：真的 handoff 行放進 body，`T`／`A` 兩式的計數不變。
+_fixture = ("<!-- devflow:topic thread=4394 -->\n"
+            + (_hand[0] if _hand else "") + "\n")
+check("#300 AC-4 handoff 行不使 T 變動（判定式錨定自己的完整字面）",
+      len(_marker_mod.TOPIC.findall(_fixture)) == 1, f"fixture={_fixture!r}")
+check("#300 AC-4 handoff 行不使 A 變動（A 仍 0 ＝ 該單仍判 active）",
+      len(_marker_mod.ARCHIVED.findall(_fixture)) == 0, f"fixture={_fixture!r}")
+
+
+# ── #300 AC-2：grammar 住 relay.py，附理由與上移觸發條件 ────────────────────
+print("\n── #300 AC-2：grammar 常數的位置、理由與上移觸發條件")
+
+check("#300 AC-2 grammar 常數定義在 devflow_relay.py（模組屬性讀得到）",
+      isinstance(getattr(_mod, "HANDOFF_RE", None), str)
+      and isinstance(getattr(_mod, "HANDOFF_FMT", None), str),
+      f"HANDOFF_RE={getattr(_mod, 'HANDOFF_RE', None)!r}")
+_src_lines = RELAY_SRC.splitlines()
+_const_idx = [i for i, ln in enumerate(_src_lines)
+              if re.match(r"^HANDOFF_(FMT|RE|AT_FMT)\s*=", ln)]
+check("#300 AC-2 三個常數都在模組頂層（行首賦值，不藏在函式裡）",
+      len(_const_idx) >= 2, f"命中行={[i + 1 for i in _const_idx]}")
+# 斷言：常數上下 5 行內要讀到「上移」與「第二個寫者」。
+_near = "\n".join(_src_lines[max(0, min(_const_idx) - 5):max(_const_idx) + 6]
+                  ) if _const_idx else ""
+check("#300 AC-2 常數上下 5 行內含「上移」字樣（改這段的人直接讀到觸發條件）",
+      "上移" in _near, f"鄰近={_near[:400]!r}")
+check("#300 AC-2 常數上下 5 行內含「第二個寫者」字樣",
+      "第二個寫者" in _near, f"鄰近={_near[:400]!r}")
+check("#300 AC-2 上移觸發條件寫全（另一半：第一個程式讀者 ＋ 上移到 _marker.py）",
+      "第一個程式讀者" in _near and "_marker.py" in _near, f"鄰近={_near[:600]!r}")
+# T 要求原樣寫進註解的理由：`#287` 抽共用是消除重複，本單沒有重複可消。
+check("#300 AC-2 註解載明 T 的理由（`#287` 抽共用是消除重複）",
+      "#287" in RELAY_SRC and "消除重複" in RELAY_SRC, "")
+check("#300 AC-2 註解載明本單沒有重複可消（一個寫者、零程式讀者）",
+      "一個寫者" in RELAY_SRC and "零程式讀者" in RELAY_SRC
+      and "沒有重複" in RELAY_SRC, "")
+# grammar **沒有**被放進 `_marker.py`（`AC-2` 的機械斷言）。
+# 這裡不跑 `git diff`：本檔的既有判準禁止任何真子程序（見上方 `AC-6` 兩條），
+# 而「零改動」的 git 事實由 T 的驗證指令在 shell 側取（`git diff --name-only`
+# ／`--numstat`，見該單的驗證輸出）。**內容面**的斷言比 diff 更直接命中本 AC 要防的事：
+# grammar 字面與 handoff 這個概念都不得出現在那兩檔裡。
+MARKER_SRC = (SCRIPTS / "_marker.py").read_text()
+TEST_MARKER_SRC = (HERE / "test_marker.py").read_text()
+check("#300 AC-2 `_marker.py` 不含 `handoff` 字面（grammar 沒有上移）",
+      "handoff" not in MARKER_SRC.lower(), "")
+check("#300 AC-2 `_marker.py` 仍只有兩個 grammar 常數（未多出第三種標記）",
+      len(re.findall(r"^[A-Z_]+_RE\s*=", MARKER_SRC, re.M)) == 2,
+      f"命中={re.findall(r'^[A-Z_]+_RE.*$', MARKER_SRC, re.M)}")
+check("#300 AC-2 `test_marker.py` 不含 `handoff` 字面（該檔零改動）",
+      "handoff" not in TEST_MARKER_SRC.lower(), "")
+
+
+# ── #300 AC-5：寫 forge 失敗只警告不中斷，但警告必須進 topic ────────────────
+print("\n── #300 AC-5：gh 回非 0 → rc 不變 ＋ topic 收到警告")
+
+h5 = FakeSub(LINES, rc=0, gh_rc=1)
+rch5, _, errh5 = run(["4149", "hi", "--issue", "287", "--then-wake", "dfmgr"], h5)
+check("#300 AC-5 gh 回非 0 → relay 的 rc 仍是受託子程序的 rc（0，不變）",
+      rch5 == 0, f"rc={rch5}")
+check("#300 AC-5 gh 回非 0 → 流程不中斷（兩棒都照樣派出）",
+      len(h5.spawned) == 2, f"spawned={len(h5.spawned)}")
+_warn = [c for c in h5.send_calls if any("⚠" in str(a) for a in c)]
+check("#300 AC-5 `sent` 中有一則含警告字樣（topic 送警告，不得只印 stderr）",
+      len(_warn) >= 1,
+      f"send 數={len(h5.send_calls)} 含警告={len(_warn)}")
+check("#300 AC-5 該警告指出是 handoff／寫 forge 失敗（人讀得出要處置什麼）",
+      any("handoff" in str(c) for c in _warn), f"警告={[str(c)[:200] for c in _warn]}")
+check("#300 AC-5 該警告含單號（人知道是哪一張單缺了 handoff 行）",
+      any("287" in str(c) for c in _warn), f"警告={[str(c)[:200] for c in _warn]}")
+check("#300 AC-5 stderr 也留痕（有人看 log 時讀得到），但不是唯一的通報路徑",
+      "handoff" in errh5 and len(_warn) >= 1, repr(errh5[:300]))
+# 鑑別力一：gh_rc=0 時不得送警告（避免「永遠送警告」的實作蒙過上面那條）。
+_warn_ok = [c for c in h1.send_calls if any("⚠" in str(a) for a in c)]
+check("#300 AC-5 鑑別力：gh 回 0 時**不**送警告（非無條件警告）",
+      len(_warn_ok) == 0, f"警告={[str(c)[:160] for c in _warn_ok]}")
+# 鑑別力二：`_send` 判 success 的邏輯不受 returncode 影響——FakeSub 對 hermes 一律回 0，
+# 但 `_send` 讀的是 stdout 的 `"success": true`，兩者是不同判準。
+check("#300 AC-5 `_send` 的成敗判準未被 returncode 取代（仍讀 stdout 的 success）",
+      '"success": true' in RELAY_SRC and _mod._send("dfmgr", "4149", "x") is True,
+      "FakeSub 的 run 回 returncode=0 ＋ success stdout，_send 應回 True")
+_mod_badsend = load(FakeSub(LINES))
+_mod_badsend.subprocess.run = (
+    lambda cmd, **kw: types.SimpleNamespace(stdout="{}", stderr="boom", returncode=0))
+check("#300 AC-5 鑑別力：stdout 無 success 時 `_send` 回 False（即使 returncode 為 0）",
+      _mod_badsend._send("dfmgr", "4149", "x") is False,
+      "證明 returncode 沒有被當成送訊的成敗判準")
+# 鑑別力三：gh 直接拋例外時同樣只警告不中斷。
+class _BoomSub(FakeSub):
+    def run(self, cmd, **kw):
+        if cmd and cmd[0] == "gh":
+            self.events.append("run:gh")
+            raise OSError("gh not found")
+        return super().run(cmd, **kw)
+
+
+h5b = _BoomSub(LINES)
+rch5b, _, errh5b = run(["4149", "hi", "--issue", "287", "--then-wake", "dfmgr"], h5b)
+_warn_b = [c for c in h5b.send_calls if any("⚠" in str(a) for a in c)]
+check("#300 AC-5 gh 拋例外（如 gh 不在 PATH）→ rc 不變、仍送警告、仍派兩棒",
+      rch5b == 0 and len(h5b.spawned) == 2 and len(_warn_b) >= 1,
+      f"rc={rch5b} spawned={len(h5b.spawned)} 警告={len(_warn_b)} err={errh5b[:200]!r}")
+
+
+# ── #300 AC-6：兩檔的條文補句（純新增一行、逐字相同）──────────────────────
+print("\n── #300 AC-6：WORKFLOW.md 與 channels/README.md 各補一行、逐字相同")
+
+# 取「新增那一行」的方式：不跑 `git diff`（本檔禁止真子程序，見上方 `AC-6` 兩條），
+# 而是從兩檔各自定位該句所在的那一行。T 的 `AC-6(b)` 要的是「自兩檔各取新增那一行、
+# 字串相等」——定位方式不是斷言的內容，**取到的是同一行**即滿足。
+#   純新增一行（`numstat` 須 `1 0`）由 T 的驗證指令在 shell 側取，不在本檔。
+#   這裡另加兩條內容面的替代擔保：該句在各檔**恰出現一次**、且**緊接在**指定段落之後
+#   （若有人把原句改長而非新增一行，那一行就不會是獨立的一行，第一條即掛）。
+WF_TEXT = WORKFLOW_MD.read_text()
+RM_TEXT = CHANNELS_README.read_text()
+CH3_ANCHOR = "- `CH3` 分區狀態的權威在 forge"
+RM_ANCHOR = "**其他組合（含 `T=0 A=1`"
+
+
+def _line_after(text: str, anchor: str) -> str:
+    """回傳以 `anchor` 起頭那一行的**下一行**（去頭尾空白前的原文）。"""
+    lines = text.split("\n")
+    for i, ln in enumerate(lines):
+        if ln.startswith(anchor):
+            return lines[i + 1] if i + 1 < len(lines) else ""
+    return ""
+
+
+_wf_add = [_line_after(WF_TEXT, CH3_ANCHOR)]
+_rm_add = [_line_after(RM_TEXT, RM_ANCHOR)]
+check("#300 AC-6 WORKFLOW.md 的 `CH3` 段之後緊接著一行非空的新句",
+      bool(_wf_add[0].strip()), f"實得={_wf_add[0]!r}")
+check("#300 AC-6 channels/README.md 的「其他組合」段之後緊接著一行非空的新句",
+      bool(_rm_add[0].strip()), f"實得={_rm_add[0]!r}")
+check("#300 AC-6(b) 兩條新增行**字串相等**（逐字相同，非語意等價）",
+      _wf_add[0] == _rm_add[0],
+      f"WORKFLOW={_wf_add[0]!r}\n        README={_rm_add[0]!r}")
+check("#300 AC-6 該句在 WORKFLOW.md 恰出現一次（是新增的獨立一行，不是把原句改長）",
+      bool(_wf_add[0].strip()) and WF_TEXT.count(_wf_add[0]) == 1
+      and ("\n" + _wf_add[0] + "\n") in WF_TEXT,
+      f"出現次數={WF_TEXT.count(_wf_add[0]) if _wf_add[0].strip() else 0}")
+check("#300 AC-6 該句在 channels/README.md 恰出現一次（同上）",
+      bool(_rm_add[0].strip()) and RM_TEXT.count(_rm_add[0]) == 1
+      and ("\n" + _rm_add[0] + "\n") in RM_TEXT,
+      f"出現次數={RM_TEXT.count(_rm_add[0]) if _rm_add[0].strip() else 0}")
+if _wf_add[0].strip():
+    _sent = _wf_add[0]
+    check("#300 AC-6 補句載明三態判定只讀分區狀態標記（topic／archived）",
+          "三態判定" in _sent and "devflow:topic" in _sent and "devflow:archived" in _sent,
+          repr(_sent))
+    check("#300 AC-6 補句載明其他 `devflow:*` 標記不參與三態判定",
+          "devflow:*" in _sent and "不參與三態判定" in _sent, repr(_sent))
+    check("#300 AC-6 補句點名 handoff 行（讀者知道新增的那一行屬於哪一類）",
+          "handoff" in _sent, repr(_sent))
+# 兩檔原本那一段的字句不得被動到（`AC-6(a)` 的「不得順手改動該節其他字句」）。
+check("#300 AC-6 `CH3` 原段落的關鍵字面未被改動",
+      "三態加上 INVALID 這個 catch-all 分支" in WF_TEXT
+      and "不以通道側的列舉或本機快取為權威" in WF_TEXT, "")
+check("#300 AC-6 README「其他組合」原段落的關鍵字面未被改動",
+      "加上 INVALID 這個 catch-all**，才對所有標記組合互斥且窮盡" in RM_TEXT
+      and "判定程式須對 INVALID 回非 0 或明確吐 `INVALID`" in RM_TEXT, "")
+check("#300 AC-6 判定式那一行（README `:59`）未被動到（`_marker.py` 的逐字來源）",
+      "grep -cE '^<!-- devflow:topic thread=[0-9]+ -->$'" in RM_TEXT
+      and "grep -cE '^<!-- devflow:archived thread=[0-9]+ file=[^ >]+ -->$'" in RM_TEXT,
+      "")
+
+
+# ── #300 AC-7：telegram.md 的格 ─────────────────────────────────────────────
+print("\n── #300 AC-7：telegram.md 加一格（含判準表與已知限制，狀態不得 ✅）")
+
+TG300 = TELEGRAM_MD.read_text()
+_rows = [ln for ln in TG300.splitlines()
+         if ln.startswith("|") and "handoff" in ln]
+check("#300 AC-7 通用表有一列講 handoff 行", len(_rows) == 1, f"命中列數={len(_rows)}")
+if len(_rows) == 1:
+    _cells = _rows[0].split(" | ")
+    check("#300 AC-7 該列與既有格同形（面向／職位／值／狀態 四欄）",
+          len(_cells) == 4, f"欄數={len(_cells)} 列={_rows[0][:160]!r}")
+    _aspect, _seat, _value, _status = (_cells + ["", "", "", ""])[:4]
+    check("#300 AC-7 面向欄指明是第二棒的 handoff 行",
+          "handoff" in _aspect, repr(_aspect))
+    check("#300 AC-7 職位欄是 manager（或 coordinator／manager）",
+          "manager" in _seat, repr(_seat))
+    check("#300 AC-7 狀態欄**不含** `✅`（本單 forge 側零實跑）",
+          "✅ 可用" not in _status and not _status.lstrip("| ").startswith("✅"),
+          repr(_status[:200]))
+    check("#300 AC-7 狀態欄取 R9 三值之一且為 `📝`／`⬜`",
+          _status.lstrip("| ").startswith(("📝 已宣稱", "⬜ 未測")), repr(_status[:200]))
+    check("#300 AC-7 狀態欄依 R9 寫明理由與第三者可執行的驗證方式",
+          "驗證方式" in _status and "零實跑" in _status, repr(_status[:300]))
+    check("#300 AC-7 狀態欄依 R10 載明受測環境",
+          "R10" in _status and "受測環境" in _status, repr(_status[:300]))
+    check("#300 AC-7 值欄載明 handoff 行的字面",
+          "devflow:handoff" in _value, repr(_value[:200]))
+    check("#300 AC-7 值欄載明三欄語意（profile／at／rc 各自是什麼）",
+          "profile" in _value and "`at`" in _value and "`rc`" in _value,
+          repr(_value[:300]))
+    check("#300 AC-7 值欄載明寫入時機（發出第二棒之後）",
+          "發出第二棒之後" in _value, repr(_value[:300]))
+    check("#300 AC-7 值欄載明 AC-3 的三列判準表（正常／C／無 handoff 行）",
+          "正常" in _value and "**C**" in _value and "handoff 行**無**" in _value,
+          repr(_value[:400]))
+    check("#300 AC-7 值欄載明 AC-5 的已知限制：「無 handoff 行」有兩種成因",
+          "relay 沒接手" in _value and "寫 forge 失敗" in _value and "兩種" in _value,
+          repr(_value[:400]))
+    check("#300 AC-7 判準表**不宣稱**那兩種成因分得開",
+          "不宣稱它分得開" in _value, repr(_value[:400]))
+
+
+# ── #300 AC-10：縫不變（本檔自身的機械判準）────────────────────────────────
+print("\n── #300 AC-10：縫不變——gh 也經模組全域 subprocess，零真 API")
+
+check("#300 AC-10 gh 與送訊走同一個名字（模組內 run 的呼叫點仍恰一處）",
+      len(re.findall(r"subprocess\.run\(", RELAY_SRC)) == 1
+      and len(re.findall(r"subprocess\.Popen\(", RELAY_SRC)) == 1,
+      f"run={len(re.findall(r'subprocess.run', RELAY_SRC))} "
+      f"Popen={len(re.findall(r'subprocess.Popen', RELAY_SRC))}")
+check("#300 AC-10 relay 不自己開 http／socket／os.system（縫沒有被繞過）",
+      not re.search(r"^import (requests|urllib|http|socket)", RELAY_SRC, re.M)
+      and "os.system" not in RELAY_SRC, "")
+check("#300 AC-10 本檔的假類確實攔下 gh（gh 呼叫全部落進 FakeSub.sent）",
+      bool(h1.gh_calls) and all(c in h1.sent for c in h1.gh_calls), "")
+check("#300 AC-10 FakeSub.run 回傳物件帶 returncode（預設 0，不影響 _send 的判準）",
+      hasattr(FakeSub(LINES).run(["hermes"]), "returncode")
+      and FakeSub(LINES).run(["hermes"]).returncode == 0, "")
+check("#300 AC-10 `gh_rc` 只作用於 gh（hermes send 的 returncode 仍 0）",
+      FakeSub(LINES, gh_rc=1).run(["hermes", "send"]).returncode == 0
+      and FakeSub(LINES, gh_rc=1).run(["gh", "issue"]).returncode == 1, "")
+check("#300 AC-10 三個假常數與時間常數覆寫都還在（既有 load() 未被破壞）",
+      all(hasattr(FakeSub, k) for k in ("PIPE", "DEVNULL", "STDOUT"))
+      and _mod.OPENING_DELAY == 10 ** 9 and _mod.HEARTBEAT_AFTER == 10 ** 9, "")
+check("#300 AC-10 本檔仍零 import-path 操作、仍以 spec_from_file_location 載入",
+      re.search(r"sys\." + "path", SELF_SRC) is None
+      and "importlib.util.spec_from_file_location" in SELF_SRC, "")
+check("#300 AC-10 本檔仍不 import subprocess、不真呼叫 run／Popen",
+      re.search(r"^import subprocess$", SELF_SRC, re.M) is None
+      and re.search(r"subprocess\.(run|Popen)\(", SELF_SRC) is None, "")
+
+
+# ── #300 AC-3：不寫第二行 ───────────────────────────────────────────────────
+print("\n── #300 AC-3：不寫第二行、不新增 seat 自律")
+
+check("#300 AC-3 一次派工只寫一則留言（不寫第二行結果行）",
+      len(h1.gh_calls) == 1, f"gh 呼叫={len(h1.gh_calls)}：{h1.gh_calls}")
+check("#300 AC-3 rc 仍只回受託子程序的（relay 不等第二棒、不蓋掉這一輪的結果）",
+      rch1 == 0 and "回傳的仍是受託子程序的 rc" in RELAY_SRC, f"rc={rch1}")
+check("#300 AC-3 第二棒的子程序 prompt 不要求它自報結果（否決「被喚醒 seat 自報」）",
+      "handoff" not in prompt_of(h1.spawned[1]).lower()
+      and "回報" not in prompt_of(h1.spawned[1]),
+      f"prompt={prompt_of(h1.spawned[1])[:300]!r}")
+# 本單不新增 seat 自律：`manager.md` 不得出現 handoff 行的義務。
+# 「該檔零改動」的 git 事實由 T 的驗證指令在 shell 側取（`git diff --name-only` 恰 6 檔）。
+check("#300 AC-3 本單不新增 seat 自律：manager.md 不含 handoff 字面",
+      "handoff" not in MGR.lower(), "")
+check("#300 AC-3 判準表的最後一列只宣稱「relay 沒接手」，不把成因說成分得開",
+      "relay 沒接手" in TG300 and "不宣稱它分得開" in TG300, "")
 
 
 # ── 收尾 ────────────────────────────────────────────────────────────────────
