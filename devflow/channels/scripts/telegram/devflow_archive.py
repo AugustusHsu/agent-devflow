@@ -404,6 +404,15 @@ def issue_meta(thread: str) -> tuple[str | None, str, str | None]:
     回填：marker (`<!-- devflow:topic thread=N -->`) 是 `ensure` 寫進 issue body 的，
     topic 刪除後仍留著。
 
+    ⚠ **cache 命中只代表「曾經有過這個對應」，不代表該 thread 還存在**（`#287`
+    `AC-6`）。本函式**刻意不**為 cache 命中補打一次 API 驗活：它在
+    `cmd_publish`／`cmd_archive` 的熱路徑上，每次多一次網路往返的代價落在每一次
+    封存上。分工是——**cache 只用於取 issue 號與標題（以及 issue 自身的 state），
+    thread 是否存在由呼叫端既有的探活負責**（`cmd_archive` 的 `deleteForumTopic`
+    本就會回報失敗，`devflow_topic.ensure` 有 `_alive`）。回傳的第三個元素是
+    **issue 的 state（OPEN／CLOSED）**，不是 thread 的存活狀態；本函式的回傳值
+    不宣稱該 thread 存在。
+
     掃到 `T>1` 的 issue 時 raise `_marker.InvalidMarker`——**不**退回 `thread NNNN`
     的 fallback、**不**續掃。下面的 `except Exception` 是給「forge 不可用」用的，
     INVALID 必須穿過它（`#285` `BLOCK-1` 第 2 輪：續掃可能在另一張 issue 命中同一
@@ -435,11 +444,23 @@ def issue_meta(thread: str) -> tuple[str | None, str, str | None]:
             ["gh", "issue", "list", "-R", "AugustusHsu/agent-devflow", "--state", "all",
              "--limit", "300", "--json", "number,title,body,state"],
             capture_output=True, stdin=subprocess.DEVNULL, timeout=60, text=True).stdout
-        hits = []
-        for item in json.loads(out or "[]"):
-            # 掃完才回傳：不在第一個命中就 return，否則排在後面的 T>1 不會被看到。
-            if _marker.has_topic(item.get("body") or "", thread):
-                hits.append(item)
+        items = json.loads(out or "[]")
+        by_num = {str(it["number"]): it for it in items}
+        # 掃描走共用模組（`#287` `AC-1`／`AC-2`）：`gh` 查詢留在這裡，marker 解析
+        # 交給 `_marker.scan_topic`。對外行為一字不變的三個要點：
+        #   1. 不給 `on_invalid` → `T>1` 的 `InvalidMarker` 直接穿出去，被下面的
+        #      `except _marker.InvalidMarker: raise` 接住再拋，不落入 `except Exception`。
+        #   2. **掃完才回傳**：共用函式自己掃完整個列表，故「多張單主張同一 thread」
+        #      仍發現得了（`#285` `BLOCK-1` 第 3 輪）。
+        #   3. **只掃 `topic` 一式**，且仍以 `kind == "topic"` 過濾。兩個理由：
+        #      (a) 本函式的語意是「thread → 寫過 topic 標記的那張單」，已封存的單
+        #          （只剩 `archived` 標記）不得被命中，否則對外行為就變了；
+        #      (b) 若改掃兩式，某張單的 `A>1` 會在這裡變成新的 `InvalidMarker`
+        #          ——本函式原本只對 `T>1` 停下，那同樣是對外行為的改變。
+        hits = [by_num[num] for num, tid, kind
+                in _marker.scan_topic((str(it["number"]), it.get("body") or "")
+                                      for it in items)
+                if kind == "topic" and str(tid) == str(thread)]
         if len(hits) > 1:
             raise _marker.InvalidMarker(
                 "topic",
@@ -464,6 +485,52 @@ def stem_for(thread: str, issue: str | None) -> str:
 
 
 # ── 指令 ────────────────────────────────────────────────────────────────────
+# `scan` 的 thread id 上界（`#287` `AC-3`）。寫死值只是**零命中時**的退路，不是來源。
+SCAN_HI_FLOOR = 400        # 歷史下限：`#247` 時 thread id 已到 669，故 400 僅為地板
+SCAN_HI_MARGIN = 50        # 餘裕：最大已知 id 之後可能已新建、尚未寫進任何 issue body
+
+
+def scan_upper_bound(items, *, floor: int = SCAN_HI_FLOOR,
+                     margin: int = SCAN_HI_MARGIN, on_invalid=None) -> int:
+    """給定一批 `(issue, body)` → `scan` 要探到的 thread id 上界 `hi`。
+
+    **純函式、零 I/O**（`#287` `AC-3` 要求可對純字串 fixture 驗證）：`gh` 查詢在
+    `_forge_scan_items`，marker 解析在 `_marker`，本函式只做「取最大值加餘裕」。
+
+    `topic` 與 `archived` 兩式**都算**：封存過的單在 forge 上只剩 `archived` 標記
+    （`#291` 之後），而它承載的 thread id 一樣是群組活動上界的證據
+    （`AC-3`(c)）。零命中 → 回 `floor`（`AC-3`(b)）。
+
+    `T>1`／`A>1` 的單：交給 `on_invalid` 並跳過（預設靜默跳過）。這裡不停下——
+    本函式算的是**探測範圍**，不是「該單的分區是哪一個」，`CH3` 的 INVALID 收容
+    分支管的是後者。`cmd_scan` 會把 `on_invalid` 接到 stderr，人工處置的線索不丟。
+    """
+    rows = list(items)
+    hits = (_marker.scan_topic(rows, on_invalid=on_invalid)
+            + _marker.scan_archived(rows, on_invalid=on_invalid))
+    ids = [int(tid) for _num, tid, _kind in hits]
+    return max(ids) + margin if ids else floor
+
+
+def _forge_scan_items(repo: str = "AugustusHsu/agent-devflow"):
+    """從 forge 取 `[(issue, body), …]`。`scan` 上界的**來源**（`#287` `AC-3`）。
+
+    ⚠ **代價**：`scan` 因此從「純本機讀 cache」變成**依賴一次 `gh` 查詢**——慢
+    （掃 300 張單的 body）、要網路、forge 不可用時取不到。接受這個代價的理由是
+    舊來源（cache）**與封存動作耦合**：封存會把條目從 cache 移除，於是封存得越
+    乾淨 `scan` 能探到的範圍越小（`#287` 材料 ①；實測 cache 為 `{}` 時 `hi=450`
+    而現行 thread id 已到 3724，`scan` 探不到任何現存 topic）。issue body 的
+    `topic`／`archived` 標記不隨封存消失 —— **這個來源與封存動作無關，正是循環
+    依賴的斷點**。
+    """
+    import subprocess
+    out = subprocess.run(
+        ["gh", "issue", "list", "-R", repo, "--state", "all",
+         "--limit", "300", "--json", "number,body"],
+        capture_output=True, stdin=subprocess.DEVNULL, timeout=60, text=True).stdout
+    return [(str(it["number"]), it.get("body") or "") for it in json.loads(out or "[]")]
+
+
 def cmd_scan(args) -> int:
     """探測實際存在的 topic。cache 不是權威（已刪 thread 會殘留）。"""
     from concurrent.futures import ThreadPoolExecutor
@@ -477,17 +544,27 @@ def cmd_scan(args) -> int:
             return ("closed", tid)
         return None
 
-    # 上界不能寫死：thread id 隨群組活動單調成長，`#247` 時已到 669，而舊的 range(2, 400)
-    # 根本沒探到它——scan 因此把活著的 topic 報成「cache 過期項（指向已刪除的 thread）」。
-    # 以 cache 內最大 id 再加一段餘裕為界，並保留一個不低於歷史值的下限。
-    hi = 400
-    if CACHE.exists():
-        try:
-            ids = [int(r["thread_id"]) for r in json.loads(CACHE.read_text() or "{}").values()
-                   if str(r.get("thread_id", "")).isdigit()]
-            hi = max([hi] + ids) + 50
-        except Exception:  # noqa: BLE001 — cache 壞掉不該讓 scan 停擺
-            pass
+    # 上界的**來源**是 forge，不是 cache（`#287` `AC-3`）。
+    #
+    # 這段註解原本記載的是前一次發作（`#247`：thread id 已到 669 而上界寫死 400，
+    # `scan` 因此把活著的 topic 報成「cache 過期項」），而**那次的修法是把一個會
+    # 失效的來源換成另一個會失效的來源**——改取自 cache，而 cache 的生命週期由
+    # 封存程序決定：封存會清 cache，於是「封存得越乾淨，`scan` 能探到的範圍越小」。
+    # 寫死 400 與取自 cache 是同一個病的兩種形態，不是一個修好了另一個。
+    #
+    # 現在改從 forge 推：所有 issue body 的 `topic`／`archived` 標記的最大 thread id
+    # ＋餘裕。issue body 的標記不隨封存消失（`#291` 之後封存標記也在），**與封存
+    # 動作無關**。代價見 `_forge_scan_items` 的 docstring：多一次 `gh` 查詢。
+    # cache 在這裡**不再參與上界計算**，故 cache 不存在／為 `{}`／損壞都不影響 `hi`。
+    try:
+        hi = scan_upper_bound(
+            _forge_scan_items(),
+            on_invalid=lambda exc, issue: print(f"  ⚠ #{issue} {exc}", file=sys.stderr))
+    except Exception as exc:  # noqa: BLE001 — forge 不可用時退回寫死地板，不讓 scan 停擺
+        print(f"  ⚠ 無法從 forge 推上界（{type(exc).__name__}: {exc}），"
+              f"退回寫死值 {SCAN_HI_FLOOR}", file=sys.stderr)
+        hi = SCAN_HI_FLOOR
+    print(f"（上界 hi={hi}，由 forge 的分區標記推出；探測 range(2, {hi})）")
 
     found = []
     with ThreadPoolExecutor(max_workers=32) as pool:
@@ -521,12 +598,42 @@ def cmd_scan(args) -> int:
 
 
 def _ts(val: str) -> float:
-    """`--since`／`--until` 的值：`HH:MM`（今天）或 epoch 秒。"""
-    if ":" in val:
-        h, m = val.split(":", 1)
-        today = _dt.date.today()
-        return _dt.datetime.combine(today, _dt.time(int(h), int(m))).timestamp()
-    return float(val)
+    """`--since`／`--until` 的值：**明確日期**（`YYYY-MM-DDTHH:MM`）或 epoch 秒。
+
+    **裸 `HH:MM` 不再接受**（`#287` `AC-4`）。原實作把 `HH:MM` 補成「今天」，而
+    那個假設在**跨午夜**時失效：`#286` 封存從 2026-10-06 19:0x 跑到 10-07 04:06，
+    `--since 19:00` 於 04:06 被解成「今天（10-07）19:00」＝**未來時刻**，時間窗
+    為負、`collect` 撈到 0 則、只印「沒有任何訊息」，**無任何告警**。
+
+    這不是「時間窗算錯」，是 `HH:MM` 這個介面**本身**在跨午夜時無法表達使用者的
+    意圖。故處置是**改介面要求明確日期**，而不是「自動退一天」——後者會讓「真的
+    想指今天稍晚」變成無法表達，只是把失效的假設換個方向（`#287` 裁定 1）。
+
+    接受的形式：
+      * `_dt.datetime.fromisoformat` 吃得下的明確日期形式（`2026-10-06T19:00`、
+        `2026-10-06 19:00`、`2026-10-06`、含秒／時區者亦可）
+      * epoch 秒（整數或小數，如 `$(date -d 'yesterday 18:30' +%s)`）
+
+    不合者一律 `argparse.ArgumentTypeError`（argparse 會印訊息並 exit 2）——
+    **不猜日期**。訊息含可照抄的正確形式。
+    """
+    raw = (val or "").strip()
+    try:
+        return float(raw)                       # epoch 秒
+    except ValueError:
+        pass
+    try:
+        return _dt.datetime.fromisoformat(raw).timestamp()
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError(
+        f"看不懂的時間值 {val!r}——需要**明確日期**或 epoch 秒，不接受裸 HH:MM。\n"
+        f"  正確形式（可照抄）：\n"
+        f"    --since 2026-10-06T19:00                   # 明確日期＋時間\n"
+        f"    --until 2026-10-07T04:10\n"
+        f"    --since $(date -d 'yesterday 18:30' +%s)   # epoch 秒\n"
+        f"  裸 HH:MM（例如 19:00）已移除：它在跨午夜時無法表達意圖——被解成\n"
+        f"  「今天 HH:MM」可能是未來時刻，時間窗為負而匯出 0 則且無告警（#286 實地發生）。")
 
 
 def _export(thread: str, since: float | None = None,
@@ -714,10 +821,11 @@ def main() -> int:
                            ("archive", "publish + 刪除 topic + 清 cache")):
         sp = sub.add_parser(name, help=helptext)
         sp.add_argument("thread")
-        sp.add_argument("--since", type=_ts, metavar="HH:MM|EPOCH",
-                        help="時間窗起點（預設由 topic 訊息推導；topic session 很短時要手動給）")
-        sp.add_argument("--until", type=_ts, metavar="HH:MM|EPOCH",
-                        help="時間窗終點")
+        sp.add_argument("--since", type=_ts, metavar="YYYY-MM-DDTHH:MM|EPOCH",
+                        help="時間窗起點，明確日期或 epoch 秒（不接受裸 HH:MM）"
+                             "（預設由 topic 訊息推導；topic session 很短時要手動給）")
+        sp.add_argument("--until", type=_ts, metavar="YYYY-MM-DDTHH:MM|EPOCH",
+                        help="時間窗終點，形式同 --since")
         if name == "archive":
             sp.add_argument("--yes", action="store_true", help="確認執行刪除")
             sp.add_argument("--no-publish", action="store_true",

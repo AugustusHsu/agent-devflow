@@ -112,6 +112,72 @@ def read_archived(body: str, *, detail: str = "") -> int | None:
     return int(ids[0])
 
 
+# ── 批次掃描：一批 (issue, body) → 所有命中的 (issue, thread, kind) ───────────
+# 為什麼住在這裡（`#287` 乙案）：「從一批 issue body 抽出所有 thread id」就是 marker
+# 讀取，屬本模組的定位（見模組 docstring：`CH3` grammar 的**單一實作**）。三個呼叫端
+# 原本各寫一份掃描迴圈——`devflow_topic.sync`、`devflow_archive.issue_meta`，以及
+# `#287` 的新上界會是第三份；`devflow_archive.py:665` 的註解「故此處重寫一次而非抽
+# 常數」就是「已被迫寫第二次」的紀錄，不是可接受的現狀。
+#
+# ⚠ **本區段不打 `gh`、不開子程序、不碰網路**（`#287` `AC-1`）：查詢留在呼叫端，
+# 模組只吃字串。這讓三個呼叫端的掃描都能以純字串 fixture 驗證（不必真的掃 forge），
+# 也使本模組維持零 I/O ——「grammar 的實作」與「資料從哪來」是兩件事。
+def _scan_markers(items, *, kinds=("topic", "archived"), on_invalid=None):
+    """一批 `(issue_number, body)` → `[(issue_number, thread_id, kind), …]`。
+
+    `kind` ∈ {`"topic"`, `"archived"`}。**`kind` 不是附帶資訊**：呼叫端據它過濾
+    （`#287` `AC-2`：`issue_meta` 只認 `topic` 標記，若把 `archived` 也算進反向
+    查找，已封存的單會被命中 → 對外行為就變了）。
+
+    `T>1`／`A>1` 的處置由呼叫端決定，語意與 `read_topic`／`read_archived` 一致：
+
+      * `on_invalid is None`（預設）→ `InvalidMarker` 直接穿出去。
+        `issue_meta` 要的是這個：INVALID 不得被它的 `except Exception` 吞掉
+        （`#285` `BLOCK-1`：續掃可能在別張單命中同一 thread，匯出檔就掛錯單）。
+      * 給了 `on_invalid(exc, issue_number)` → 呼叫它之後**跳過該單續掃**。
+        `sync` 要的是這個：一張壞單不該讓其餘兩百多張單重建不了，而呼叫端仍以
+        回報的單號 exit 非 0（`channels/README.md:61`：不得靜默取其一）。
+
+    跳過時整張單都跳過（不續掃它的另一式）：該單的分區「是哪一個」已無單一答案。
+
+    **掃完才回傳**，順序即輸入順序（同一張單先 `topic` 後 `archived`）。
+    `issue_meta` 的「多張單主張同一 thread」只有掃完才發現得了（`#285`
+    `BLOCK-1` 第 3 輪：早退使「停不停下」取決於 `gh issue list` 的回傳順序）。
+    """
+    rows: list[tuple] = []
+    for issue, body in items:
+        for kind in kinds:
+            try:
+                # 讀側一律走本模組的既有 `read_*`（同一份 grammar、同一個 `InvalidMarker`）。
+                # 以模組全域名稱解析、不預先綁進表格：呼叫端換掉 `read_topic` 時這裡
+                # 跟著換，否則會出現「共用模組有兩條讀路徑」的分歧。
+                tid = (read_topic if kind == "topic" else read_archived)(
+                    body or "", detail=f"issue #{issue}")
+            except InvalidMarker as exc:
+                if on_invalid is None:
+                    raise
+                on_invalid(exc, issue)
+                break
+            if tid is not None:
+                rows.append((issue, tid, kind))
+    return rows
+
+
+def scan_topic(items, *, on_invalid=None):
+    """批次掃 `topic` 標記 → `[(issue, thread, "topic"), …]`。細節見 `_scan_markers`。"""
+    return _scan_markers(items, kinds=("topic",), on_invalid=on_invalid)
+
+
+def scan_archived(items, *, on_invalid=None):
+    """批次掃 `archived` 標記 → `[(issue, thread, "archived"), …]`。見 `_scan_markers`。
+
+    封存過的單**沒有** `topic` 標記以外的另一條線索：`archived` 標記是它在 forge 上
+    唯一留下的 thread id（`#291` 之後），故推 thread id 上界時必須把它算進去
+    （`#287` `AC-3`(c)）。
+    """
+    return _scan_markers(items, kinds=("archived",), on_invalid=on_invalid)
+
+
 # ── 反向：thread id → 此 body 是否屬該 thread ────────────────────────────────
 def has_topic(body: str, thread) -> bool:
     """body 是否有**獨立一行**恰等於 `<!-- devflow:topic thread=<thread> -->`。

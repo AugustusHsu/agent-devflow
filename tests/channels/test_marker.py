@@ -338,11 +338,15 @@ BLOCK1_ROWS = [
 ]
 
 
-def _issue_meta_with(rows, *, has_topic=None):
-    """在假 gh 輸出與（可選）替換過的 has_topic 下跑 issue_meta，回傳值或擲出的例外。
+def _issue_meta_with(rows, *, scan_topic=None):
+    """在假 gh 輸出與（可選）替換過的 `scan_topic` 下跑 issue_meta，回傳值或擲出的例外。
 
-    `has_topic` 參數供鑑別力子測試注入「回 False 的舊版」——證明本測試真的在
-    檢驗停下的行為，而不是任何實作都會過。
+    `scan_topic` 參數供鑑別力子測試注入「跳過 INVALID 續掃的舊版」——證明本測試
+    真的在檢驗停下的行為，而不是任何實作都會過。
+
+    `#287` 起 `issue_meta` 的掃描走 `_marker.scan_topic`（共用函式），注入點隨之
+    從 `has_topic` 移到這裡；受檢驗的行為一字未變（遇 `T>1` 必須 raise、不得續掃
+    後回傳別人的單）。
     """
     def fake_run(cmd, *a, **kw):
         assert cmd[:2] == ["gh", "issue"], cmd
@@ -350,18 +354,18 @@ def _issue_meta_with(rows, *, has_topic=None):
 
     with tempfile.TemporaryDirectory() as td:
         orig_cache, orig_run = archive.CACHE, subprocess.run
-        orig_has = marker.has_topic
+        orig_scan = marker.scan_topic
         archive.CACHE = Path(td) / "nonexistent.json"
         subprocess.run = fake_run
-        if has_topic is not None:
-            marker.has_topic = has_topic          # issue_meta 經 `_marker.has_topic` 取用
+        if scan_topic is not None:
+            marker.scan_topic = scan_topic     # issue_meta 經 `_marker.scan_topic` 取用
         try:
             return ("return", archive.issue_meta("2620"))
         except marker.InvalidMarker as e:
             return ("raise", e)
         finally:
             archive.CACHE, subprocess.run = orig_cache, orig_run
-            marker.has_topic = orig_has
+            marker.scan_topic = orig_scan
 
 
 @case("AC-5／BLOCK-1 issue_meta 遇 T>1：raise INVALID，不得回傳 ('286', …)")
@@ -384,15 +388,16 @@ def _ac5_block1():
               type(val) is marker.InvalidMarker
               and isinstance(val, marker.InvalidMarker), f"{type(val)!r}")
 
-    # 鑑別力：換成第 1 輪「回 False」的 has_topic，本子測試必須 FAIL
-    def has_topic_returning_false(body, thread):
-        ids, lines = marker.find_topic(body)
-        if len(lines) > 1:
-            return False                      # ← 第 1 輪被 BLOCK-1 擋下的那個行為
-        return bool(ids) and ids[0] == str(thread)
+    # 鑑別力：換成「跳過 INVALID 續掃」的舊行為，本子測試必須 FAIL。
+    # 這就是 `#285` 第 1 輪被 BLOCK-1 擋下的那個行為，`#287` 之後它的等價寫法是
+    # 「給 scan_topic 一個靜默吞掉 InvalidMarker 的 on_invalid」——同樣是跳過該單
+    # 續掃，於是在下一張合法的 #286 命中並回傳它。
+    def scan_topic_skipping_invalid(items, *, on_invalid=None):
+        return marker._scan_markers(items, kinds=("topic",),
+                                    on_invalid=lambda _exc, _issue: None)
 
-    kind2, val2 = _issue_meta_with(BLOCK1_ROWS, has_topic=has_topic_returning_false)
-    check("AC-5／BLOCK-1 鑑別力：換回『回 False』版後 issue_meta 不再 raise",
+    kind2, val2 = _issue_meta_with(BLOCK1_ROWS, scan_topic=scan_topic_skipping_invalid)
+    check("AC-5／BLOCK-1 鑑別力：換回『跳過 INVALID 續掃』版後 issue_meta 不再 raise",
           kind2 == "return", f"實得 {kind2}={val2!r}")
     check("AC-5／BLOCK-1 鑑別力：且確實回傳了別人的單 #286（＝BLOCK-1 的危害）",
           kind2 == "return" and val2 == ("286", "other", "OPEN"),
@@ -528,15 +533,18 @@ def _early_return_copy(td: Path) -> Path:
 
     與 `_marker.py` 放同一個暫存目錄，故突變複本的 `import _marker` 仍解析得到
     （受測的是 archive 的迴圈，不是 grammar）。
+
+    `#287` 起 `issue_meta` 的掃描走 `_marker.scan_topic`，故突變的切點改為那個
+    list comprehension；突變後的行為與第 2 輪逐字等價——**在第一個命中就 return**，
+    排在它後面的 `T>1` 單根本不會被解析。
     """
     src = (SCRIPTS / "devflow_archive.py").read_text()
     mutated = src.replace(
-        """        hits = []
-        for item in json.loads(out or "[]"):
-            # 掃完才回傳：不在第一個命中就 return，否則排在後面的 T>1 不會被看到。
-            if _marker.has_topic(item.get("body") or "", thread):
-                hits.append(item)""",
-        """        for item in json.loads(out or "[]"):
+        """        hits = [by_num[num] for num, tid, kind
+                in _marker.scan_topic((str(it["number"]), it.get("body") or "")
+                                      for it in items)
+                if kind == "topic" and str(tid) == str(thread)]""",
+        """        for item in items:
             if _marker.has_topic(item.get("body") or "", thread):
                 return str(item["number"]), item["title"], (item.get("state") or "").upper()
         hits = []""",
@@ -1018,8 +1026,9 @@ def _p291_ac3():
     check("#291 AC-3 兩者皆為模組的可呼叫屬性（源碼與模組一致）",
           all(callable(getattr(marker, n, None))
               for n in ("archived_line", "upsert_archived")))
-    check("#291 AC-3 五組配對齊備（find／has／read／upsert／LINE:line）",
-          set(table) == {"find", "has", "read", "upsert", "LINE:line"},
+    check("#291 AC-3 五組配對齊備（find／has／read／upsert／LINE:line）"
+          "＋ `#287` 新增的 scan 一組",
+          set(table) == {"find", "has", "read", "upsert", "LINE:line", "scan"},
           f"{sorted(table)!r}")
 
 
@@ -1045,8 +1054,9 @@ def _p291_ac3_mutations():
           gaps_a == ["upsert"], f"實得 {gaps_a!r}")
 
     # 突變 A'：兩側**個數相等**但仍有缺口 —— 證明「個數相等」不足以當判準。
-    # base 是 topic 側 5（find／read／has／topic_line／upsert）、archived 側 3；
-    # 補 archived_line ＋ 一個無配對的 archived_foo 後兩側皆 5，而缺口仍非空。
+    # base 是 topic 側 6（find／read／scan／has／topic_line／upsert）、archived 側 4
+    # （`#287` 起兩側各多一個 scan_*）；補 archived_line ＋ 一個無配對的 archived_foo
+    # 後兩側皆 6，而缺口仍非空。
     mut_a2 = (base_src
               + "\ndef archived_line(thread, file) -> str:\n    return ''\n"
               + "\ndef archived_foo(x):\n    return x\n")
@@ -1055,9 +1065,9 @@ def _p291_ac3_mutations():
     arch_side = [n for n in names_a2
                  if n.endswith("_archived") or n.startswith("archived_")]
     gaps_a2, _, _ = _pair_gaps(names_a2)
-    check("#291 AC-3 鑑別力：突變 A' 兩側個數相等（5 vs 5）而缺口非空 "
+    check("#291 AC-3 鑑別力：突變 A' 兩側個數相等（6 vs 6）而缺口非空 "
           "→「個數相等」不足以當判準",
-          len(topic_side) == len(arch_side) == 5 and gaps_a2 != [],
+          len(topic_side) == len(arch_side) == 6 and gaps_a2 != [],
           f"topic 側 {topic_side!r}\n        archived 側 {arch_side!r}"
           f"\n        缺口 {gaps_a2!r}")
     check("#291 AC-3 鑑別力：突變 A' 的缺口 == ['LINE:foo', 'upsert']",
@@ -1555,16 +1565,23 @@ def _p291_ac7():
     o, n = funcs(old), funcs(ARCHIVE_SRC)
     changed = sorted(k for k in o.keys() & n.keys() if o[k] != n[k])
     # `#293` 起 `cmd_publish`／`send_document` 亦改（caption 轉 HTML parse mode
-    # ＋ `esc_html` 轉義）。本子測試守的是「`#291` 的 `cmd_archive` 改動仍在、
+    # ＋ `esc_html` 轉義）；`#287` 起再加 `_ts`／`cmd_scan`／`issue_meta`／`main`
+    # （三缺陷 ＋ 共用掃描函式；`main` 僅 `--since`／`--until` 的 metavar 與 help，
+    # 由審查位以 git diff 逐行核）。本子測試守的是「`#291` 的 `cmd_archive` 改動仍在、
     # 且沒有別的函式被順手改」，故期望集合隨已合併的後續單增長，不是放寬。
-    check("#291 AC-7 改變的函式只有 cmd_archive（＋#293 的 cmd_publish／send_document）",
-          changed == ["cmd_archive", "cmd_publish", "send_document"],
+    # `#287` 新增的頂層 helper（`scan_upper_bound`／`_forge_scan_items`）不在
+    # `changed` 內——它們是新增，不在 `o.keys() & n.keys()`，由下面的「一個都沒被
+    # 移除」與 detail 的「新增」欄位把守。
+    check("#291 AC-7 改變的函式只有 cmd_archive"
+          "（＋#293 的 cmd_publish／send_document、#287 的 _ts／cmd_scan／issue_meta／main）",
+          changed == ["_ts", "cmd_archive", "cmd_publish", "cmd_scan", "issue_meta",
+                      "main", "send_document"],
           f"改變的函式: {changed!r} | 新增: {sorted(n.keys() - o.keys())!r} "
           f"| 移除: {sorted(o.keys() - n.keys())!r}")
     check("#291 AC-7 既有函式一個都沒被移除", not (o.keys() - n.keys()),
           f"{sorted(o.keys() - n.keys())!r}")
-    for name in ("cmd_scan", "cmd_export", "collect", "issue_meta",
-                 "api", "stem_for", "_export"):
+    # `#287` 起 `cmd_scan`／`issue_meta` 移出本清單（它們是本單修的缺陷所在）。
+    for name in ("cmd_export", "collect", "api", "stem_for", "_export"):
         check(f"#291 AC-7 {name} 的 AST 與 6b72933 相同",
               name in o and name in n and o[name] == n[name])
     check("#291 AC-7 cmd_publish 自 #293 起改動（本單之後的事實，見 #293 AC-7）",
@@ -1573,10 +1590,59 @@ def _p291_ac7():
 
 
 # ── #291 AC-8／AC-9 版本與 import-path 不回歸 ───────────────────────────────
-@case("#291 AC-8 devflow/VERSION 恰 0.15.4.0（#286 進位後）")
+# `#287` `AC-8` 治本：原斷言寫死 `== "0.15.4.0"`（`#286` 的治標），每次 `V7` 進位
+# 就假 FAIL 一次 —— 與本單在修的那一族同形（程式持有的假設在狀態變動後失效）。
+# 改為「合 `V1` 四碼形狀 **且嚴格大於下界**」。
+#
+# 下界寫死 `0.15.4.0` 這個字面（協調位依技術判斷，`#287` 未決 5）：取自
+# `git show origin/main~1:devflow/VERSION` 會引入另一個會失效的假設——
+# `origin/main~1` 在 rebase／多單並行時不是本單的 base，**正是本單在修的那一族**。
+# 寫死的是**下界**不是等值，故不隨每次進位失效；下次要抬高下界時是明確的一次決定。
+#
+# **嚴格大於、不是 `≥`**（裁決位 2026-10-06）：`≥` 會讓「忘記進位」也通過。
+VERSION_SHAPE = re.compile(r"\d+\.\d+\.\d+\.\d+")
+P287_VERSION_FLOOR = "0.15.4.0"       # 前一單（#286）的版本＝本單的下界
+P287_VERSION_NEXT = "0.15.5.0"        # 本單的期望值（V2 的 c 位；#287 未決 6）
+
+
+def _version_gt(val: str, floor: str) -> tuple[bool, str]:
+    """`val` 是否合四碼形狀**且**嚴格大於 `floor`。回 (結果, 理由)。
+
+    **元組比較，不是字串比較**：字串比較下 `"0.15.10.0" < "0.15.4.0"`（逐字元比
+    `1` < `4`），於是進位到第十個修正版時斷言會假 FAIL。唯一的判定函式——鑑別力
+    子測試對它餵三個對照值，必須給出 T 預跑的答案。
+    """
+    if not VERSION_SHAPE.fullmatch(val):
+        return False, "形狀不合四碼（^\\d+\\.\\d+\\.\\d+\\.\\d+$）"
+    got = tuple(int(x) for x in val.split("."))
+    want = tuple(int(x) for x in floor.split("."))
+    return got > want, f"{got} > {want} ＝ {got > want}"
+
+
+@case("#291 AC-8 devflow/VERSION 合四碼形狀且嚴格大於 0.15.4.0（#287 治本）")
 def _p291_ac8():
     raw = (REPO / "devflow" / "VERSION").read_text()
-    check("#291 AC-8 內容（strip 後）恰 0.15.4.0", raw.strip() == "0.15.4.0", repr(raw))
+    check("#291 AC-8 形狀合 V1 的四碼（^\\d+\\.\\d+\\.\\d+\\.\\d+$）",
+          bool(VERSION_SHAPE.fullmatch(raw.strip())), repr(raw))
+    ok, why = _version_gt(raw.strip(), P287_VERSION_FLOOR)
+    check(f"#291 AC-8 嚴格大於下界 {P287_VERSION_FLOOR}（元組比較，非字串比較）",
+          ok, f"{raw.strip()!r}：{why}")
+
+    # 鑑別力：同一個判定函式對三個對照值須給出 T の預跑值
+    for val, want, label in ((P287_VERSION_NEXT, True, "本單的 0.15.5.0 → PASS"),
+                             (P287_VERSION_FLOOR, False,
+                              "下界自身 0.15.4.0 → FAIL（嚴格大於，不是 ≥）"),
+                             ("0.15.4", False, "三碼 0.15.4 → FAIL（四碼形狀）")):
+        got, why = _version_gt(val, P287_VERSION_FLOOR)
+        check(f"#291 AC-8 鑑別力：{label}", got is want, f"實得 {got}（{why}）")
+
+    # 元組比較而非字串比較的鑑別力：`0.15.10.0` 字串上小於 `0.15.4.0`，元組上大於。
+    got_str = "0.15.10.0" > P287_VERSION_FLOOR
+    got_tuple, _ = _version_gt("0.15.10.0", P287_VERSION_FLOOR)
+    check("#291 AC-8 鑑別力：0.15.10.0 字串比較為 False、元組比較為 True "
+          "→ 證明用的是元組",
+          got_str is False and got_tuple is True,
+          f"字串 {got_str} 元組 {got_tuple}")
 
 
 @case("#291 AC-9 telegram/*.py 與本測試檔零 import-path 操作")
@@ -1795,6 +1861,494 @@ def _p293_ac6():
     check("#293 AC-6 鑑別力：三種突變確實改到了內容（非空操作）",
           len({*muts.values(), sec}) == 4,
           f"{len({*muts.values(), sec})} 種相異內容（期望 4）")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# `#287`／K4c-3：`archive.py` 三缺陷（同族）＋ 共用 marker 掃描 ＋ 版本斷言治本
+# ════════════════════════════════════════════════════════════════════════════
+# 本單的四個缺陷**是同一族**：程式持有的位置／時間假設在狀態變動後失效。
+#   ① `cmd_scan` 的上界取自 cache，而封存會清 cache
+#   ② `_ts` 的裸 `HH:MM` 假設「指今天」，跨午夜時失效
+#   ③ `issue_meta` 的 cache 命中假設「命中即有效」，封存刪 topic 後失效
+#   ④ `test_marker.py` 的版本硬編碼假設「VERSION 恆為某字面」，每次 `V7` 進位失效
+# 故 AC 一律驗「假設在狀態變動後是否仍成立」，而**不以量測當下的實況為基準**。
+# 本區段零 Telegram API、零 `gh`：所有 fixture 都是純字串（`AC-3` 的真 API 佐證
+# 由實作者實跑一次並記進 issue 留言，見 `#287` `AC-3`）。
+#
+# `AC-1` 的四張 fixture body。每張都刻意放入**表格列內與散文裡的同形字串**——
+# 錨定（`^…$`）成立時它們一律不算，拔掉錨定就會被計入，列數變多（鑑別力）。
+P287_F_TOPIC = """# 只有 topic 的單
+
+| 形態 | 字面 |
+|---|---|
+| 表格列內 | `<!-- devflow:topic thread=111 -->` |
+
+散文也提一次 <!-- devflow:topic thread=222 --> 當旁註。
+
+<!-- devflow:topic thread=3054 -->
+"""
+
+P287_F_BOTH = """# topic ＋ archived 的單（已封存但 topic 標記仍在）
+
+| 表格列內 | `<!-- devflow:archived thread=333 file=/t/333.md -->` |
+
+<!-- devflow:topic thread=3363 -->
+<!-- devflow:archived thread=3363 file=/home/x/.hermes/archives/topics/291.md -->
+"""
+
+P287_F_ARCH = """# 只有 archived 的單（topic 標記被清掉、只剩封存標記）
+
+散文提一次 <!-- devflow:archived thread=444 file=/t/444.md --> 當旁註。
+
+<!-- devflow:archived thread=3724 file=/home/x/.hermes/archives/topics/286.md -->
+"""
+
+P287_F_NONE = """# 無標記的單
+
+| 表格列內 | `<!-- devflow:topic thread=555 -->` |
+
+散文提一次 thread=666，以及完整字面 <!-- devflow:topic thread=666 --> 當旁註。
+"""
+
+P287_ITEMS = [("285", P287_F_TOPIC), ("291", P287_F_BOTH),
+              ("286", P287_F_ARCH), ("999", P287_F_NONE)]
+
+
+def _p287_noanchor_marker(td: Path):
+    """載入「拔掉 `^…$` 錨定」的 `_marker.py` 突變複本（對源碼字串操作，不改真檔）。
+
+    `AC-1` 的鑑別力：錨定是共用掃描函式正確性的全部依據——拔掉它，表格列內與
+    散文裡的同形字串都會被計入，回傳的列數變多（且混進錯的 thread id）。
+    """
+    mutated = (MARKER_SRC
+               .replace('r"^<!-- devflow:topic thread=[0-9]+ -->$"',
+                        'r"<!-- devflow:topic thread=[0-9]+ -->"')
+               .replace('r"^<!-- devflow:archived thread=[0-9]+ file=[^ >]+ -->$"',
+                        'r"<!-- devflow:archived thread=[0-9]+ file=[^ >]+ -->"'))
+    assert mutated != MARKER_SRC, "突變未套用——grammar 常數的字面已變，鑑別力失效"
+    assert "^<!-- devflow:topic" not in mutated, "突變殘留行首錨點"
+    path = td / "_marker_noanchor.py"
+    path.write_text(mutated)
+    spec = importlib.util.spec_from_file_location("_marker_noanchor", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["_marker_noanchor"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+# ── #287 AC-1 共用掃描函式：一批 (issue, body) → (issue, thread, kind) 的列 ───
+@case("#287 AC-1 scan_topic／scan_archived 對四張 fixture 回傳正確的列")
+def _p287_ac1():
+    topic_rows = marker.scan_topic(P287_ITEMS)
+    arch_rows = marker.scan_archived(P287_ITEMS)
+    check("#287 AC-1 topic 側的列逐項正確（表格列與散文的同形字串不計入）",
+          topic_rows == [("285", 3054, "topic"), ("291", 3363, "topic")],
+          f"實得 {topic_rows!r}")
+    check("#287 AC-1 archived 側的列逐項正確",
+          arch_rows == [("291", 3363, "archived"), ("286", 3724, "archived")],
+          f"實得 {arch_rows!r}")
+    check("#287 AC-1 kind 恰為 topic／archived 兩種（AC-2 的過濾依據）",
+          {k for _, _, k in topic_rows + arch_rows} == {"topic", "archived"},
+          f"{sorted({k for _, _, k in topic_rows + arch_rows})!r}")
+    check("#287 AC-1 無標記的單不產出任何列",
+          not [r for r in topic_rows + arch_rows if r[0] == "999"],
+          f"{topic_rows + arch_rows!r}")
+    check("#287 AC-1 兩式一起掃時掃完才回傳（順序即輸入順序、同單先 topic 後 archived）",
+          marker._scan_markers(P287_ITEMS) == [
+              ("285", 3054, "topic"), ("291", 3363, "topic"),
+              ("291", 3363, "archived"), ("286", 3724, "archived")],
+          f"{marker._scan_markers(P287_ITEMS)!r}")
+
+    # 不打網路／子程序：函式自身與其呼叫鏈只引用模組內的 read_*／grammar 常數。
+    names = set(marker._scan_markers.__code__.co_names)
+    check("#287 AC-1 掃描函式不引用 subprocess／urllib／gh／run 之類的名稱",
+          not ({"subprocess", "urllib", "run", "gh", "Popen", "urlopen", "open"}
+               & names),
+          f"{sorted(names)!r}")
+    check("#287 AC-1 `_marker.py` 全檔零網路／子程序 import（模組層的保證）",
+          not re.search(r"^\s*import (subprocess|urllib|socket|http)", MARKER_SRC,
+                        re.M)
+          and not re.search(r"^\s*from (subprocess|urllib|socket|http)", MARKER_SRC,
+                            re.M),
+          "MARKER_SRC 的 import 區段：" + repr(
+              [ln for ln in MARKER_SRC.splitlines() if ln.startswith("import ")]))
+
+    # INVALID：預設穿出去（issue_meta 要的），給 on_invalid 則跳過該單續掃（sync 要的）
+    bad = [("285", F3), ("286", P287_F_TOPIC)]
+    try:
+        marker.scan_topic(bad)
+        check("#287 AC-1 預設（on_invalid=None）遇 T>1 raise InvalidMarker",
+              False, "沒有擲出例外")
+    except marker.InvalidMarker as e:
+        check("#287 AC-1 預設（on_invalid=None）遇 T>1 raise InvalidMarker",
+              "INVALID" in str(e) and all(ln in str(e) for ln in F3_LINES), str(e))
+    seen = []
+    rows = marker.scan_topic(bad, on_invalid=lambda exc, issue: seen.append(issue))
+    check("#287 AC-1 給了 on_invalid → 回報該單並跳過，續掃其餘的單",
+          seen == ["285"] and rows == [("286", 3054, "topic")],
+          f"seen={seen!r} rows={rows!r}")
+
+
+@case("#287 AC-1 鑑別力：拔掉 ^…$ 錨定的突變 → 同形字串被計入 → 斷言須 FAIL")
+def _p287_ac1_mutation():
+    with tempfile.TemporaryDirectory() as td:
+        mut = _p287_noanchor_marker(Path(td))
+        # (1) 計數層：錨定拔掉後，表格列內與散文裡的同形字串都被計入 → 命中行變多。
+        counts = {}
+        for label, body in (("只有 topic", P287_F_TOPIC), ("兩式都有", P287_F_BOTH),
+                            ("只有 archived", P287_F_ARCH), ("無標記", P287_F_NONE)):
+            good_t = len(marker.find_topic(body)[1])
+            mut_t = len(mut.find_topic(body)[1])
+            good_a = len(marker.find_archived(body)[1])
+            mut_a = len(mut.find_archived(body)[1])
+            counts[label] = ((good_t, mut_t), (good_a, mut_a))
+            check(f"#287 AC-1 鑑別力：{label} 的命中行數變多（T {good_t}→{mut_t}、"
+                  f"A {good_a}→{mut_a}）",
+                  mut_t + mut_a > good_t + good_a,
+                  f"錨定版 T={good_t} A={good_a}；突變版 T={mut_t} A={mut_a}")
+        check("#287 AC-1 鑑別力：無標記的單在突變版下也有命中（＝誤判，T 從 0 變 2）",
+              counts["無標記"][0] == (0, 2), f"{counts['無標記']!r}")
+
+        # (2) 掃描層：列數變多的直接後果是 `T>1` → AC-1 的主斷言拿不到那四列。
+        #     突變版對四張 fixture 全部擲 InvalidMarker（連「無標記」那張都是），
+        #     而錨定版回傳正確的列 —— 斷言值不同，故 AC-1 確實有鑑別力。
+        outcomes = {}
+        for label, body in (("只有 topic", P287_F_TOPIC), ("無標記", P287_F_NONE)):
+            try:
+                outcomes[label] = ("return", mut.scan_topic([("x", body)]))
+            except mut.InvalidMarker as e:
+                outcomes[label] = ("raise", f"T={len(e.lines)}")
+        check("#287 AC-1 鑑別力：突變版對「只有 topic」擲 INVALID（錨定版回 1 列）",
+              outcomes["只有 topic"][0] == "raise"
+              and marker.scan_topic([("x", P287_F_TOPIC)]) == [("x", 3054, "topic")],
+              f"突變版 {outcomes['只有 topic']!r}")
+        check("#287 AC-1 鑑別力：突變版對「無標記」亦擲 INVALID（錨定版回 0 列）",
+              outcomes["無標記"][0] == "raise"
+              and marker.scan_topic([("x", P287_F_NONE)]) == [],
+              f"突變版 {outcomes['無標記']!r}")
+        # (3) 跳過 INVALID 時突變版的列與錨定版不同（兩種處置下都 FAIL）
+        mut_rows = mut.scan_topic(P287_ITEMS, on_invalid=lambda *a: None)
+        good_rows = marker.scan_topic(P287_ITEMS)
+        check("#287 AC-1 鑑別力：即使跳過 INVALID，突變版的列仍與錨定版不同",
+              mut_rows != good_rows,
+              f"錨定版 {good_rows!r}\n        突變版 {mut_rows!r}")
+
+
+# ── #287 AC-2 sync／issue_meta 改用共用函式後對外行為一字不變 ─────────────────
+@case("#287 AC-2 issue_meta 以 kind == topic 過濾：只有 archived 標記的單不得命中")
+def _p287_ac2_kind():
+    # 已封存的單（只剩 archived 標記）。若共用函式的 archived 列也被算進反向查找，
+    # 這裡會回傳 ("286", …) ——那就是對外行為改變，AC-2 FAIL。
+    kind, val = _issue_meta_with(
+        [{"number": 286, "title": "已封存", "body": P287_F_ARCH, "state": "CLOSED"}])
+    check("#287 AC-2 只有 archived 標記時不命中（退回 thread 命名）",
+          (kind, val) == ("return", (None, "thread 2620", None)), f"實得 {kind}={val!r}")
+    # 以該單自己的 thread 查也不得命中（archived 標記不是 topic 標記）
+    def _meta_for(thread, rows):
+        def fake_run(cmd, *a, **kw):
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(rows), "")
+        with tempfile.TemporaryDirectory() as td:
+            orig_cache, orig_run = archive.CACHE, subprocess.run
+            archive.CACHE = Path(td) / "nonexistent.json"
+            subprocess.run = fake_run
+            try:
+                return archive.issue_meta(thread)
+            finally:
+                archive.CACHE, subprocess.run = orig_cache, orig_run
+
+    got = _meta_for("3724", [{"number": 286, "title": "已封存",
+                              "body": P287_F_ARCH, "state": "CLOSED"}])
+    check("#287 AC-2 以封存單自己的 thread 查亦不命中（kind 過濾生效）",
+          got == (None, "thread 3724", None), f"實得 {got!r}")
+    # 對照組：topic 標記在時照常命中（過濾不是一律不命中）
+    got2 = _meta_for("3363", [{"number": 291, "title": "兩式都有",
+                               "body": P287_F_BOTH, "state": "OPEN"}])
+    check("#287 AC-2 對照組：topic 標記在時照常命中（含同時有 archived 的單）",
+          got2 == ("291", "兩式都有", "OPEN"), f"實得 {got2!r}")
+    check("#287 AC-2 未達成候選：若不以 kind 過濾，封存單會被 archived 列命中",
+          [r for r in marker.scan_archived([("286", P287_F_ARCH)])] ==
+          [("286", 3724, "archived")],
+          "對照組：archived 側確實有 (286, 3724) 這一列")
+
+
+@case("#287 AC-2 sync 改用共用函式後：映射、INVALID 跳過、回傳值形狀皆不變")
+def _p287_ac2_sync():
+    with tempfile.TemporaryDirectory() as td:
+        cache = Path(td) / "devflow-topics.json"
+        listing = [{"number": 285, "title": "單 A", "body": P287_F_TOPIC,
+                    "state": "OPEN"},
+                   {"number": 999, "title": "壞單", "body": F3, "state": "CLOSED"},
+                   {"number": 286, "title": "只有封存標記", "body": P287_F_ARCH,
+                    "state": "CLOSED"}]
+        orig_gh, orig_cache = topic.gh, topic.CACHE
+        topic.gh, topic.CACHE = (lambda *a: json.dumps(listing)), cache
+        try:
+            n, invalid = topic.sync()
+        finally:
+            topic.gh, topic.CACHE = orig_gh, orig_cache
+        data = json.loads(cache.read_text())
+    check("#287 AC-2 sync 映射取獨立一行的 3054（非表格列的 111／散文的 222）",
+          data.get("285", {}).get("thread_id") == 3054,
+          json.dumps(data, ensure_ascii=False))
+    check("#287 AC-2 sync 遇 T>1 跳過該單續掃（#286 仍被掃到、#999 不入 cache）",
+          "999" not in data and invalid == ["999"], f"invalid={invalid!r} {data!r}")
+    check("#287 AC-2 sync 只認 topic 標記（只有 archived 的 #286 不入 cache）",
+          "286" not in data, json.dumps(data, ensure_ascii=False))
+    check("#287 AC-2 sync 回傳 (映射數, INVALID 單號清單)，映射數與 cache 筆數一致",
+          (n, invalid) == (1, ["999"]) and len(data) == n, f"n={n} invalid={invalid!r}")
+    check("#287 AC-2 sync 保留 state／title 欄（cache 形狀不變）",
+          data["285"] == {"thread_id": 3054, "state": "open", "title": "單 A"},
+          json.dumps(data["285"], ensure_ascii=False))
+
+
+# ── #287 AC-3 cmd_scan 的上界改從 forge 推 ─────────────────────────────────
+@case("#287 AC-3 scan_upper_bound 是純函式：三組 fixture 的 hi 逐組正確")
+def _p287_ac3():
+    hi_a = archive.scan_upper_bound([("286", P287_F_ARCH), ("291", P287_F_BOTH)])
+    check("#287 AC-3(a) 含 thread=3724 → hi > 3724",
+          hi_a > 3724 and hi_a == 3724 + archive.SCAN_HI_MARGIN, f"hi={hi_a}")
+    hi_b = archive.scan_upper_bound([("999", P287_F_NONE)])
+    check(f"#287 AC-3(b) 全無標記 → hi ＝ 寫死值 {archive.SCAN_HI_FLOOR}",
+          hi_b == archive.SCAN_HI_FLOOR == 400, f"hi={hi_b}")
+    hi_c = archive.scan_upper_bound([("286", P287_F_ARCH)])
+    check("#287 AC-3(c) 只有 archived 標記（已封存的單）→ 仍計入",
+          hi_c == 3724 + archive.SCAN_HI_MARGIN, f"hi={hi_c}")
+    check("#287 AC-3 空輸入 → 退回寫死值（零命中的極端）",
+          archive.scan_upper_bound([]) == archive.SCAN_HI_FLOOR)
+    check("#287 AC-3 未達成候選：舊來源（cache 為 {} ）得 hi=450 < 3724",
+          max([400]) + 50 == 450 < 3724,
+          "舊實作 hi = max([400] + cache 內的 ids) + 50，cache 空時即 450")
+    # 純函式：不讀 CACHE、不開子程序
+    names = set(archive.scan_upper_bound.__code__.co_names)
+    check("#287 AC-3 scan_upper_bound 不引用 CACHE／subprocess／api",
+          not ({"CACHE", "subprocess", "api", "urlopen", "read_text"} & names),
+          f"{sorted(names)!r}")
+    check("#287 AC-3 T>1 的單交給 on_invalid 並跳過（算的是探測範圍，不是分區歸屬）",
+          archive.scan_upper_bound([("285", F3), ("286", P287_F_ARCH)],
+                                   on_invalid=lambda *a: None)
+          == 3724 + archive.SCAN_HI_MARGIN)
+
+
+def _p287_cmd_scan_hi(cache_state: str) -> tuple[int | None, str]:
+    """在指定的 CACHE 狀態下跑 `cmd_scan`，回傳它實際用的 `hi` 與全部輸出。
+
+    `api` 與 `_forge_scan_items` 都換成假的 → 零 Telegram API、零 `gh`。
+    `cache_state` ∈ {`"missing"`, `"empty"`, `"corrupt"`}。
+    """
+    import contextlib
+    import io
+
+    with tempfile.TemporaryDirectory() as td:
+        cache = Path(td) / "devflow-topics.json"
+        if cache_state == "empty":
+            cache.write_text("{}\n")
+        elif cache_state == "corrupt":
+            cache.write_text("{not json at all")
+        orig = (archive.CACHE, archive.api, archive._forge_scan_items)
+        archive.CACHE = cache
+        archive.api = lambda *a, **kw: {"ok": False, "description": ""}
+        archive._forge_scan_items = lambda *a, **kw: list(P287_ITEMS)
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                # cache 損壞時 `cmd_scan` 的「cache 過期項」區段會自己拋——那段不在
+                # 本 AC 的範圍（上界已在它之前印出）。
+                with contextlib.suppress(Exception):
+                    archive.cmd_scan(argparse.Namespace(prune=False))
+        finally:
+            archive.CACHE, archive.api, archive._forge_scan_items = orig
+        out = buf.getvalue()
+    m = re.search(r"上界 hi=(\d+)", out)
+    return (int(m.group(1)) if m else None), out
+
+
+@case("#287 AC-3／AC-5① cache 不存在／為 {}／損壞三種狀態下 hi 皆由 forge 推出")
+def _p287_ac3_cache_states():
+    want = 3724 + archive.SCAN_HI_MARGIN
+    got = {}
+    for state in ("missing", "empty", "corrupt"):
+        hi, out = _p287_cmd_scan_hi(state)
+        got[state] = hi
+        check(f"#287 AC-3 cache {state}：hi == {want}（> 3724，由 forge 的標記推出）",
+              hi == want and hi > 3724, f"hi={hi!r}\n--- 輸出 ---\n{out}")
+    check("#287 AC-3 三種 cache 狀態的 hi 完全相同 → 上界不再依賴 cache",
+          len(set(got.values())) == 1, f"{got!r}")
+    check("#287 AC-5① 狀態變動（cache 被封存清空）後 hi 仍 > 3724",
+          got["empty"] == want, f"{got!r}")
+    # 註解要求：代價須寫明（`AC-3` 明文）
+    hi_seg = ARCHIVE_SRC.split("def cmd_scan(")[1].split("found = []")[0]
+    check("#287 AC-3 cmd_scan 的上界段註解寫明「從 forge 推」與 cache 的失效",
+          "forge" in hi_seg and "封存" in hi_seg and "cache" in hi_seg, hi_seg)
+    check("#287 AC-3 :480-482 的舊註解已更新（不再寫「以 cache 內最大 id 為界」）",
+          "以 cache 內最大 id 再加一段餘裕為界" not in ARCHIVE_SRC
+          and "那次的修法是把一個會" in ARCHIVE_SRC, hi_seg)
+    fetch_doc = archive._forge_scan_items.__doc__ or ""
+    check("#287 AC-3 代價寫在來源函式的 docstring（依賴一次 gh 查詢、慢、要網路）",
+          "gh" in fetch_doc and "網路" in fetch_doc and "代價" in fetch_doc,
+          fetch_doc)
+
+
+# ── #287 AC-4／AC-5② `_ts` 改為要求日期或 epoch ─────────────────────────────
+@case("#287 AC-4 _ts 拒絕裸 HH:MM、接受明確日期與 epoch（兩者同一時間戳）")
+def _p287_ac4():
+    import datetime as _dt
+    try:
+        archive._ts("19:00")
+        check("#287 AC-4 裸 19:00 被拒（擲 ArgumentTypeError）", False, "竟回傳了值")
+    except argparse.ArgumentTypeError as e:
+        msg = str(e)
+        check("#287 AC-4 裸 19:00 被拒（擲 ArgumentTypeError）", True)
+        check("#287 AC-4 訊息印出可照抄的正確形式（YYYY-MM-DDTHH:MM ＋ epoch）",
+              "2026-10-06T19:00" in msg and "+%s" in msg, msg)
+        check("#287 AC-4 訊息說明理由（跨午夜無法表達意圖），不靜默猜日期",
+              "跨午夜" in msg and "HH:MM" in msg, msg)
+
+    want = _dt.datetime(2026, 10, 6, 19, 0).timestamp()
+    got_iso = archive._ts("2026-10-06T19:00")
+    got_epoch = archive._ts(str(int(want)))
+    check("#287 AC-4 2026-10-06T19:00 與對應 epoch 解出同一時間戳",
+          got_iso == got_epoch == want,
+          f"iso={got_iso!r} epoch={got_epoch!r} 期望={want!r}")
+    check("#287 AC-4 等義的明確日期形式亦接受（空白分隔、純日期）",
+          archive._ts("2026-10-06 19:00") == want
+          and archive._ts("2026-10-06") == _dt.datetime(2026, 10, 6).timestamp())
+    check("#287 AC-4 小數 epoch 亦接受（collect 的時間戳是浮點）",
+          archive._ts("1759748400.5") == 1759748400.5)
+    for bad in ("19:00", "9:5", "下午七點", "", "2026-13-45T99:99"):
+        raised = False
+        try:
+            archive._ts(bad)
+        except argparse.ArgumentTypeError:
+            raised = True
+        check(f"#287 AC-4 {bad!r} 被拒（不猜日期）", raised)
+
+    # main 的 metavar／help 同步（`AC-4` 明文；`main` 的改動僅限這兩個欄位）
+    main_src = ARCHIVE_SRC.split("def main(")[1]
+    check("#287 AC-4 main 的 --since／--until metavar 已改為 YYYY-MM-DDTHH:MM|EPOCH",
+          main_src.count('metavar="YYYY-MM-DDTHH:MM|EPOCH"') == 2
+          and 'metavar="HH:MM|EPOCH"' not in ARCHIVE_SRC,
+          "\n".join(ln for ln in main_src.splitlines() if "metavar" in ln))
+    check("#287 AC-4 help 文字亦同步（明文寫出不接受裸 HH:MM）",
+          "不接受裸 HH:MM" in main_src,
+          "\n".join(ln for ln in main_src.splitlines() if "help=" in ln))
+
+
+@case("#287 AC-5② 跨午夜：當前時刻 < --since 的 HH:MM → 明確錯誤（CLI 層 rc 非 0）")
+def _p287_ac5_midnight():
+    import datetime as _dt
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        home, bin_ = td / "home", td / "bin"
+        bin_.mkdir()
+        _fake_gh(bin_, [])
+        _seed_home(home)
+        env = dict(os.environ, HOME=str(home),
+                   PATH=f"{bin_}:{os.environ.get('PATH', '')}",
+                   PYTHONDONTWRITEBYTECODE="1")
+        r = subprocess.run([PY, str(SCRIPTS / "devflow_archive.py"),
+                            "export", "2620", "--since", "19:00",
+                            "--until", "04:10"],
+                           capture_output=True, text=True, env=env,
+                           stdin=subprocess.DEVNULL, timeout=120)
+        leftovers = [str(p) for p in (home / ".hermes" / "archives").rglob("*")
+                     if p.is_file()]
+    detail = f"exit={r.returncode}\n--- stdout ---\n{r.stdout}--- stderr ---\n{r.stderr}"
+    check("#287 AC-5② CLI 對 --since 19:00 回非 0", r.returncode != 0, detail)
+    check("#287 AC-5② stderr 含可照抄的正確形式",
+          "2026-10-06T19:00" in r.stderr, detail)
+    check("#287 AC-5② 未靜默匯出（不得產生以錯誤時間窗撈出的檔）",
+          not leftovers, detail + f"\n殘留：{leftovers}")
+    check("#287 AC-5② 未印「沒有任何訊息」（那是舊實作的靜默失敗面貌）",
+          "沒有任何訊息" not in r.stdout, detail)
+
+    # 未達成候選：`6b72933` 的 `_ts` 在「當前時刻 < HH:MM」時解出**未來**時刻。
+    def _ts_old(val: str, now: _dt.datetime) -> float:
+        h, m = val.split(":", 1)
+        return _dt.datetime.combine(now.date(),
+                                    _dt.time(int(h), int(m))).timestamp()
+
+    now = _dt.datetime(2026, 10, 7, 4, 6)       # #286 封存實地發生的時刻
+    old_since = _ts_old("19:00", now)
+    check("#287 AC-5② 未達成候選：舊 _ts 在 04:06 把 19:00 解成未來時刻",
+          old_since > now.timestamp(),
+          f"舊 since={old_since} ({_dt.datetime.fromtimestamp(old_since)}) "
+          f"> now={now.timestamp()} ({now})")
+    check("#287 AC-5② 未達成候選：舊版的時間窗因此為負（故匯出 0 則且無告警）",
+          _ts_old("04:10", now) - old_since < 0,
+          f"until-since = {_ts_old('04:10', now) - old_since}")
+
+
+# ── #287 AC-6 issue_meta 的 cache 死條目：不驗活、不宣稱存在 ─────────────────
+@case("#287 AC-6／AC-5③ cache 含已刪 thread 的條目：issue 號正確且不宣稱該 thread 存在")
+def _p287_ac6():
+    calls = []
+    with tempfile.TemporaryDirectory() as td:
+        cache = Path(td) / "devflow-topics.json"
+        # 3958 是本單自己的 thread；假設它已被刪除而 cache 殘留（封存刪 topic 後的狀態）
+        cache.write_text(json.dumps(
+            {"287": {"thread_id": 3958, "state": "open", "title": "🐛 K4c-3"}},
+            ensure_ascii=False))
+        orig = (archive.CACHE, archive.api, subprocess.run)
+        archive.CACHE = cache
+        archive.api = lambda method, **kw: (calls.append(method)
+                                            or {"ok": False,
+                                                "description": "TOPIC_ID_INVALID"})
+        subprocess.run = lambda *a, **kw: (_ for _ in ()).throw(
+            AssertionError("cache 命中時不得查 forge"))
+        try:
+            got = archive.issue_meta("3958")
+        finally:
+            archive.CACHE, archive.api, subprocess.run = orig
+    check("#287 AC-6 issue 號與標題取自 cache 且正確",
+          got == ("287", "🐛 K4c-3", "OPEN"), f"實得 {got!r}")
+    check("#287 AC-6 不額外打 API 驗活（熱路徑上不多一次網路往返）",
+          calls == [], f"實際 API 呼叫：{calls!r}")
+    check("#287 AC-6 回傳值是三元組 (issue, title, issue 的 state)，不含存活狀態",
+          len(got) == 3 and got[2] in ("OPEN", "CLOSED", "", None)
+          and not any(isinstance(x, bool) for x in got),
+          f"實得 {got!r}")
+    check("#287 AC-6 issue_meta 不呼叫 api／_alive（源碼層）",
+          not ({"api", "_alive"} & set(archive.issue_meta.__code__.co_names)),
+          f"{sorted(archive.issue_meta.__code__.co_names)!r}")
+    doc = archive.issue_meta.__doc__ or ""
+    check("#287 AC-6 docstring 寫明分工（cache 只取 issue 號與標題、存活由呼叫端探）",
+          "存活" in doc and "呼叫端" in doc and "不宣稱" in doc, doc)
+    check("#287 AC-6／AC-5③ 呼叫端的既有探活仍在（ensure 的 _alive、archive 的 delete）",
+          "_alive(tid)" in (SCRIPTS / "devflow_topic.py").read_text()
+          and "deleteForumTopic" in ARCHIVE_SRC)
+
+
+# ── #287 AC-9 `#293` 的結論重驗：parse_mode 仍一處、caption 外部值全轉義 ──────
+@case("#287 AC-9 parse_mode 恰一處、cmd_publish 的四個外部值仍全過 esc_html")
+def _p287_ac9():
+    r = subprocess.run(["grep", "-c", "parse_mode",
+                        *[str(p) for p in sorted(SCRIPTS.glob("*.py"))]],
+                       capture_output=True, text=True)
+    counts = dict(ln.rsplit(":", 1) for ln in r.stdout.strip().splitlines())
+    total = sum(int(v) for v in counts.values())
+    check("#287 AC-9 telegram/*.py 的 parse_mode 總數恰 1（僅 archive.py）",
+          total == 1 and int(counts.get(
+              str(SCRIPTS / "devflow_archive.py"), "0")) == 1,
+          f"{counts!r}")
+    pub = ARCHIVE_SRC.split("def cmd_publish(")[1].split("\ndef ")[0]
+    for val in ("esc_html(head)", "esc_html(title)", "esc_html(args.thread)",
+                "esc_html(state)"):
+        check(f"#287 AC-9 cmd_publish 的 {val} 仍在", val in pub, pub)
+    check("#287 AC-9 本單未新增送訊息路徑（sendDocument 的字面數與 7f7b2bb 相同）",
+          ARCHIVE_SRC.count("sendDocument") == 2
+          and ARCHIVE_SRC.count("sendMessage") == 0,
+          f"sendDocument={ARCHIVE_SRC.count('sendDocument')}（期望 2："
+          f"`send_document` 的 URL 一處 ＋ 其 docstring 的 `#293` 紀錄一處）"
+          f" sendMessage={ARCHIVE_SRC.count('sendMessage')}")
+    base = subprocess.run(
+        ["git", "show", "7f7b2bb:devflow/channels/scripts/telegram/devflow_archive.py"],
+        capture_output=True, text=True, cwd=REPO).stdout
+    check("#287 AC-9 與 base（7f7b2bb）逐項比對：送訊息字面數一字未增",
+          bool(base) and base.count("sendDocument") == ARCHIVE_SRC.count("sendDocument")
+          and base.count("sendMessage") == ARCHIVE_SRC.count("sendMessage")
+          and base.count("api(\"send") == ARCHIVE_SRC.count("api(\"send"),
+          f"base sendDocument={base.count('sendDocument')} "
+          f"本單={ARCHIVE_SRC.count('sendDocument')}")
 
 
 # ── 收尾 ────────────────────────────────────────────────────────────────────
