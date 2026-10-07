@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`#298`／K4c-7：`devflow_relay.py` 的 `--then-wake` 銜接（`AC-1`～`AC-7`）。
+"""`#298`／K4c-7：`devflow_relay.py` 的 `--then-wake` 銜接（`AC-1`～`AC-7`、`AC-12`）。
 
 直接執行：`/usr/bin/python3 tests/channels/test_relay.py`
 全過 exit 0、任一項失敗 exit 非 0，stdout 逐項列 PASS／FAIL（風格同 `test_marker.py`）。
@@ -442,6 +442,116 @@ _probe = _only_pipe_probe()
 check("AC-7 鑑別力：只定義 PIPE 的假類會在 Popen 的 kwargs 求值時掛 AttributeError",
       _probe[0] == "AttributeError" and "DEVNULL" in _probe[1],
       f"probe={_probe}")
+
+
+# ── AC-12：SKILL.md 的派審指令補 --then-wake ────────────────────────────────
+print("\n── AC-12：SKILL.md 的派審指令補 --then-wake（指令 ∧ 說明，合取）")
+
+SKILL_MD = REPO / "devflow" / "orchestrators" / "hermes" / "SKILL.md"
+SKILL = SKILL_MD.read_text()
+
+# 定位 `launch: agent` 的 block 與它下方的說明清單。判準刻意不是整檔 grep：
+# `--then-wake` 出現在檔案別處也會讓整檔 grep 通過，而讀者照抄的是這一個 block。
+_agent_sec = SKILL.split("#### launch: agent", 1)
+AGENT_SEC = _agent_sec[1].split("\n#### ", 1)[0] if len(_agent_sec) > 1 else ""
+_fences = re.findall(r"```bash\n(.*?)```", AGENT_SEC, re.S)
+RELAY_BLOCK = next((b for b in _fences if "devflow_relay.py" in b), "")
+# 說明清單 ＝ 該 block 收尾到本小節結束之間的 `- ` 項
+_after = AGENT_SEC.split("```", 2)[-1] if "```" in AGENT_SEC else ""
+BULLETS = [ln for ln in _after.splitlines() if ln.startswith("- ")]
+
+check("AC-12 `launch: agent` 小節內找得到含 devflow_relay.py 的 bash block",
+      bool(RELAY_BLOCK) and "-p <instance>" in RELAY_BLOCK and "--issue" in RELAY_BLOCK,
+      f"block={RELAY_BLOCK[:200]!r}")
+check("AC-12 第一項：該 block 的派審指令含 `--then-wake`",
+      "--then-wake" in RELAY_BLOCK, f"block={RELAY_BLOCK[:300]!r}")
+_wake_val = re.search(r"--then-wake\s+<([^>]+)>", RELAY_BLOCK)
+check("AC-12 第一項：`--then-wake` 的值不是 `<instance>`（那是審查位）",
+      _wake_val is not None and _wake_val.group(1).strip() != "instance",
+      f"值={_wake_val.group(1) if _wake_val else None!r}")
+
+_wake_bullets = [b for b in BULLETS if "--then-wake" in b]
+check("AC-12 第二項：該 block 下方的說明清單有一條講 `--then-wake`（block 鄰近，非整檔 grep）",
+      len(_wake_bullets) >= 1, f"清單共 {len(BULLETS)} 條，含 --then-wake 的 {len(_wake_bullets)} 條")
+check("AC-12 第二項：該條含「派工者自己」字樣（否則下一個照抄的人會填審查位的 instance）",
+      any("派工者自己" in b for b in _wake_bullets),
+      f"bullets={[b[:120] for b in _wake_bullets]}")
+check("AC-12 第二項：該條載明「不可省」與拒絕的後果",
+      any("不可省" in b and ("拒絕" in b or "AC-3" in b) for b in _wake_bullets),
+      f"bullets={[b[:160] for b in _wake_bullets]}")
+check("AC-12 合取：只補指令不補說明 ＝ FAIL（兩項皆須成立）",
+      "--then-wake" in RELAY_BLOCK and any("派工者自己" in b for b in _wake_bullets),
+      "指令與說明須同時命中")
+
+# ── AC-12 的鑑別力：把 SKILL.md 自己那行的參數形狀餵進 relay 實跑 ──
+# T v2 載 base（bdc4cc4）實測「SKILL.md:131 同形指令 → rc=2 spawned=0」。
+# 這裡不另寫一份指令，直接從該 block 解析——文件與行為因此綁在一起，
+# 改壞任一邊都會在這裡掛（只改測試不改文件、或只改文件把值填錯皆然）。
+def _skill_argv(block: str, prompt_file: Path) -> list[str]:
+    """從 block 解析 relay 的參數列，占位符代入可跑的值。"""
+    line = ""
+    taking = False
+    for raw in block.splitlines():
+        if "devflow_relay.py" in raw:
+            taking = True
+            line = raw.split("devflow_relay.py", 1)[1]
+            if not raw.rstrip().endswith("\\"):
+                break
+            continue
+        if taking:
+            line += " " + raw
+            if not raw.rstrip().endswith("\\"):
+                break
+    line = line.replace("\\", " ")
+    line = re.sub(r"\[[^\]]*\]", " ", line)          # `[-m <model> …]` 是選配，拿掉
+
+    def sub(m: re.Match) -> str:
+        inner = m.group(1)
+        if "thread" in inner:
+            return "4149"
+        if "派工者自己" in inner:
+            return "dfmgr"
+        if inner.strip() == "instance":
+            return "dfrev"
+        if inner.strip() == "N":
+            return "287"
+        return "x"
+
+    line = re.sub(r"<([^>]+)>", sub, line)
+    toks = [t for t in line.split() if t]
+    return [str(prompt_file) if "prompt.md" in t else t for t in toks]
+
+
+_pf = Path(tempfile.gettempdir()) / "ac12-prompt.md"
+_pf.write_text("審查稿（AC-12 的測試用）")
+SKILL_ARGV = _skill_argv(RELAY_BLOCK, _pf)
+check("AC-12 解析出的參數列形狀正確（thread ＋ --file ＋ -p ＋ --issue ＋ --fresh ＋ --pace）",
+      SKILL_ARGV[:1] == ["4149"]
+      and all(k in SKILL_ARGV for k in ("--file", "-p", "--issue", "--fresh", "--pace")),
+      f"argv={SKILL_ARGV}")
+
+f12 = FakeSub(LINES)
+rc12, _, err12 = run(SKILL_ARGV, f12)
+check("AC-12 鑑別力：SKILL.md 那行的同形指令現在被接受（rc=0、len(spawned)==2）",
+      rc12 == 0 and len(f12.spawned) == 2,
+      f"rc={rc12} spawned={len(f12.spawned)} err={err12[:300]!r}")
+check("AC-12 鑑別力：喚醒的是派工者（dfmgr），不是審查位（dfrev）",
+      len(f12.spawned) == 2
+      and f12.spawned[0][f12.spawned[0].index("-p") + 1] == "dfrev"
+      and f12.spawned[1][f12.spawned[1].index("-p") + 1] == "dfmgr",
+      f"spawned profiles={[c[c.index('-p') + 1] for c in f12.spawned]}")
+check("AC-12 鑑別力：--fresh 仍生效（審查位不續接，R1 要每輪 fresh）",
+      bool(f12.spawned) and "-c" not in f12.spawned[0], f"spawned[0]={f12.spawned[0] if f12.spawned else None}")
+
+# 反例組：拿掉 `--then-wake <值>` 兩個 token，重現 T v2 所載的 base 實測。
+_pre = [t for i, t in enumerate(SKILL_ARGV)
+        if t != "--then-wake" and (i == 0 or SKILL_ARGV[i - 1] != "--then-wake")]
+f12b = FakeSub(LINES)
+rc12b, _, err12b = run(_pre, f12b)
+check("AC-12 反例組：同一行拿掉 --then-wake → rc 非 0、len(spawned)==0（重現 T v2 的 base 實測）",
+      rc12b not in (0, None) and len(f12b.spawned) == 0,
+      f"rc={rc12b} spawned={len(f12b.spawned)} err={err12b[:200]!r}")
+_pf.unlink(missing_ok=True)
 
 
 # ── AC-8／AC-9／AC-11：文件與版本 ───────────────────────────────────────────

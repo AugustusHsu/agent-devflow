@@ -61,9 +61,12 @@ OPENING_DELAY = 20
 # 分不出還在跑還是死了。超過這個秒數沒有任何事件就送一則心跳。
 HEARTBEAT_AFTER = 300
 
-# 鏈結深度上限（`#298` `AC-4`）。真實流程最深三層：coordinator → manager → coder／reviewer。
-# 深度只計**巢狀**（relay 內的子程序再開 relay），不隨同一張單的輪次累加：被 `--then-wake`
-# 喚醒的 manager 與呼叫這支 relay 的 manager 是同一個 seat 的續接，深度相同。
+# 鏈結深度上限（`#298` `AC-4`）。深度**只計巢狀**（relay 內的子程序再開 relay），
+# 不計同一 seat 的續接：relay 讀自身環境的 `DEVFLOW_RELAY_DEPTH`（未設 ＝ 0），對它派出的
+# **每個**子程序傳 `depth+1`——首個子程序與 `--then-wake` 喚醒者皆然。被喚醒的 seat 與呼叫
+# relay 的 seat 是同一 seat 的續接，深度相同，故多輪修正不累加。真實流程
+# `coord(0) → mgr(1) → coder／rev(2)`，最深 **2**，上限 3 留一層餘裕；真巢狀遞迴
+# （mgr 內 relay 再 then-wake mgr 再開 relay…）仍會被擋。
 # 值只寫在這裡一處——散落的話下一個改上限的人會漏改。
 MAX_RELAY_DEPTH = 3
 DEPTH_ENV = "DEVFLOW_RELAY_DEPTH"
