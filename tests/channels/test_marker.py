@@ -2154,7 +2154,11 @@ def _p287_cmd_scan_hi(cache_state: str) -> tuple[int | None, str]:
                 # cache 損壞時 `cmd_scan` 的「cache 過期項」區段會自己拋——那段不在
                 # 本 AC 的範圍（上界已在它之前印出）。
                 with contextlib.suppress(Exception):
-                    archive.cmd_scan(argparse.Namespace(prune=False))
+                    # `full=True`：上界那行自 `#296` 起**只在 `--full` 印出**（預設
+                    # 模式改探「本 kit 管理過的」候選集合，不再掃 `range(2, hi)`）。
+                    # 本 helper 以 `上界 hi=(\d+)` 讀輸出、驗的本來就是上界推導那條
+                    # 路徑，故須走 `--full`；`#287` 的斷言語意一字不變。
+                    archive.cmd_scan(argparse.Namespace(prune=False, full=True))
         finally:
             archive.CACHE, archive.api, archive._forge_scan_items = orig
         out = buf.getvalue()
@@ -2349,6 +2353,567 @@ def _p287_ac9():
           and base.count("api(\"send") == ARCHIVE_SRC.count("api(\"send"),
           f"base sendDocument={base.count('sendDocument')} "
           f"本單={ARCHIVE_SRC.count('sendDocument')}")
+
+
+# ── #296 AC-1～AC-5／AC-7 scan 的探活集合改由「管理過的 thread id」決定 ──────
+# fixtures 沿用 `#287` 的四張（它們已含表格列內與散文裡的同形字串＝錨定的鑑別力），
+# 另加一張把 `AC-2` 要求的其餘反例集中起來：缺 `file=` 欄、`thread=` 非數字、
+# `file=` 值含空白、縮排。每個反例旁邊都有一個**會命中**的真標記（4100），
+# 否則「不命中」與「整張單沒掃到」分不開。
+P296_F_BAD = """# 反例集中的單
+
+缺 file= 欄（archived 式要求 file=）：
+<!-- devflow:archived thread=4001 -->
+
+thread= 非數字：
+<!-- devflow:topic thread=abc -->
+
+file= 值含空白（`[^ >]+` 不收空白）：
+<!-- devflow:archived thread=4002 file=/t/a b.md -->
+
+縮排（不是行首）：
+  <!-- devflow:topic thread=4003 -->
+
+| 表格列內 | `<!-- devflow:topic thread=4004 -->` |
+
+散文旁註一次 <!-- devflow:topic thread=4005 --> 如上。
+
+<!-- devflow:topic thread=4100 -->
+"""
+
+# 只有 topic 標記、且**不**在 cache 內的單（`AC-3` 第三組對照要移除的就是它）
+P296_F_BAD_NOTOPIC = P296_F_BAD.replace(
+    "<!-- devflow:topic thread=4100 -->\n", "")
+
+P296_ITEMS = [("285", P287_F_TOPIC),      # topic 3054（亦在 cache → 去重對照）
+              ("291", P287_F_BOTH),       # topic ＋ archived 同為 3363
+              ("286", P287_F_ARCH),       # 只有 archived 3724（已封存的單）
+              ("999", P287_F_NONE),       # 無標記
+              ("295", P296_F_BAD)]        # 反例集中 ＋ 真標記 4100
+
+# 自造 cache（**不得**用真 cache：本機現為 `{}`，拿它驗會讓 cache 那組恆真，`R6`）。
+#   * `"300"` → 4394：只有 cache 記得的 thread（`ensure` 建了 topic 但寫回 forge
+#     失敗的形態，`#285` ⑤-c）——拿掉 cache 來源就漏掉它。
+#   * `"285"` → 3054：與 forge 標記重複 —— 聯集須去重，不得出現兩次。
+P296_CACHE = {"300": {"thread_id": 4394, "state": "open", "title": "單 X"},
+              "285": {"thread_id": 3054, "state": "open", "title": "單 A"}}
+
+P296_WANT = [261, 3054, 3363, 3724, 4100, 4394]
+
+# `R1` 第 1 輪 `BLOCK 1` 的交叉形態：**一式 INVALID、另一式合法**。
+# 第 1 輪的實作把 `on_invalid` 直接交給 `scan_topic`／`scan_archived` 兩次呼叫，
+# 於是 `_marker.py:141` 的「跳過時整張單都跳過」只在各自那一次內成立 ——
+# 壞單**另一式**的 id 仍進候選（複驗得 `[7999]`／`[8001]`，期望 `[]`）。
+# 這兩張 fixture 的字面即 BLOCK 1 複驗腳本的 body，逐字相同。
+P296_F_T2_A1 = ("<!-- devflow:topic thread=7001 -->\n"
+                "<!-- devflow:topic thread=7002 -->\n"
+                "<!-- devflow:archived thread=7999 file=/t/x.md -->\n")
+P296_F_T1_A2 = ("<!-- devflow:topic thread=8001 -->\n"
+                "<!-- devflow:archived thread=8998 file=/t/a.md -->\n"
+                "<!-- devflow:archived thread=8999 file=/t/b.md -->\n")
+# 兩式都 INVALID：`on_invalid` 對**一張**單只該被呼叫一次（第 1 輪叫兩次）
+P296_F_T2_A2 = ("<!-- devflow:topic thread=9001 -->\n"
+                "<!-- devflow:topic thread=9002 -->\n"
+                "<!-- devflow:archived thread=9998 file=/t/a.md -->\n"
+                "<!-- devflow:archived thread=9999 file=/t/b.md -->\n")
+
+
+@case("#296 AC-2／BLOCK-1 交叉形態：一式 INVALID → 該單**全部** id 都不進候選")
+def _p296_block1_cross():
+    # ① 單獨驗（＝ BLOCK 1 複驗腳本的兩個 case，期望 candidates == []）
+    for label, body, kind, leaked in (
+            ("T>1 + A=1", P296_F_T2_A1, "topic", 7999),
+            ("T=1 + A>1", P296_F_T1_A2, "archived", 8001)):
+        seen = []
+        got = archive.scan_candidates(
+            [("900", body)], {}, None,
+            on_invalid=lambda exc, issue: seen.append((issue, exc.kind)))
+        check(f"#296 BLOCK-1 {label}：候選為空（整張單跳過）",
+              got == [], f"實得 {got!r}；期望 []")
+        check(f"#296 BLOCK-1 {label}：on_invalid 收到該單號恰一次，kind=={kind}",
+              seen == [("900", kind)], f"實得 {seen!r}")
+        check(f"#296 BLOCK-1 {label}：另一式的合法 id {leaked} 未漏進候選"
+              f"（第 1 輪的實作在此回 [{leaked}]）",
+              leaked not in got, f"實得 {got!r}")
+
+    # ② 同批其他合法單不受影響 —— 期望集合逐一相等（不比長度）
+    for label, body in (("T>1 + A=1", P296_F_T2_A1),
+                        ("T=1 + A>1", P296_F_T1_A2),
+                        ("T>1 + A>1", P296_F_T2_A2)):
+        seen = []
+        got = archive.scan_candidates(
+            P296_ITEMS + [("900", body)], P296_CACHE, archive.ARCHIVES_THREAD,
+            on_invalid=lambda exc, issue: seen.append(issue))
+        check(f"#296 BLOCK-1 {label} 混在合法單中：其餘 id 一字不少、壞單一個不進",
+              got == P296_WANT, f"實得 {got!r}\n期望 {P296_WANT!r}")
+        check(f"#296 BLOCK-1 {label}：on_invalid 對同一壞單恰呼叫一次"
+              "（非阻擋建議：第 1 輪的 T>1＋A>1 會叫兩次）",
+              seen == ["900"], f"實得 {seen!r}")
+        for leaked in (7001, 7002, 7999, 8001, 8998, 8999, 9001, 9002, 9998, 9999):
+            if leaked in got:
+                check(f"#296 BLOCK-1 {label}：壞單的 id {leaked} 不在集合內",
+                      False, f"實得 {got!r}")
+
+    # ③ `on_invalid is None` 時語意不變：`InvalidMarker` 原樣穿出去（不靜默跳過）
+    for label, body in (("T>1 + A=1", P296_F_T2_A1), ("T=1 + A>1", P296_F_T1_A2)):
+        raised = False
+        try:
+            archive.scan_candidates([("900", body)], {}, None)
+        except marker.InvalidMarker:
+            raised = True
+        check(f"#296 BLOCK-1 {label}：未給 on_invalid → InvalidMarker 穿出"
+              "（與 scan_upper_bound 的預設一致）", raised)
+
+    # ④ 鑑別力：同一壞單若「只有 INVALID 的那一式」，第 1 輪也會回 [] ——
+    #    故交叉形態（另一式合法）才是有鑑別力的 fixture。
+    only_t2 = archive.scan_candidates([("900", F3)], {}, None,
+                                      on_invalid=lambda *a: None)
+    check("#296 BLOCK-1 鑑別力：單一式 INVALID（F3，無 archived 式）兩版實作都回 []"
+          " → 本 BLOCK 只有交叉形態驗得出來",
+          only_t2 == [], f"實得 {only_t2!r}")
+
+    # ⑤ scan_sources 亦整張跳過，且 on_invalid 不因分解而重複呼叫
+    seen = []
+    src = archive.scan_sources(
+        P296_ITEMS + [("900", P296_F_T2_A1)], P296_CACHE, archive.ARCHIVES_THREAD,
+        on_invalid=lambda exc, issue: seen.append(issue))
+    check("#296 BLOCK-1 scan_sources 的 all 與 marks 亦不含壞單的 id",
+          src["all"] == P296_WANT and src["marks"] == [3054, 3363, 3724, 4100],
+          f"{src!r}")
+    check("#296 非阻擋建議：scan_sources 不重複解析 → on_invalid 恰一次",
+          seen == ["900"], f"實得 {seen!r}")
+
+
+@case("#296 AC-1／R2-BLOCK-1 三來源聯集只有一處定義：scan_sources[\"all\"] "
+      "逐一等於 scan_candidates(...)")
+def _p296_r2_block1_single_union():
+    # ① 合法批：`all` 與直接呼叫 `scan_candidates` 逐一相等
+    direct = archive.scan_candidates(P296_ITEMS, P296_CACHE,
+                                     archive.ARCHIVES_THREAD)
+    src = archive.scan_sources(P296_ITEMS, P296_CACHE, archive.ARCHIVES_THREAD)
+    check("#296 R2-BLOCK-1 合法批：scan_sources['all'] == scan_candidates(...)",
+          src["all"] == direct == P296_WANT,
+          f"all={src['all']!r}\ndirect={direct!r}\n期望={P296_WANT!r}")
+
+    # ② 交叉 INVALID 批（一式 INVALID、另一式合法）：兩者仍逐一相等
+    #    —— 第 2 輪的第二套聯集是 `set(marks) | set(cids) | set(arch)`，而 `marks`
+    #    那次餵的來源組合與 `all` 不同，兩處定義一旦漂移就在這裡分岔。
+    for label, body in (("T>1 + A=1", P296_F_T2_A1),
+                        ("T=1 + A>1", P296_F_T1_A2),
+                        ("T>1 + A>1", P296_F_T2_A2)):
+        items = P296_ITEMS + [("900", body)]
+        quiet = (lambda *_a: None)
+        direct = archive.scan_candidates(items, P296_CACHE,
+                                         archive.ARCHIVES_THREAD,
+                                         on_invalid=quiet)
+        src = archive.scan_sources(items, P296_CACHE, archive.ARCHIVES_THREAD,
+                                   on_invalid=quiet)
+        check(f"#296 R2-BLOCK-1 {label}：scan_sources['all'] == "
+              "scan_candidates(...) 逐一相等",
+              src["all"] == direct == P296_WANT,
+              f"all={src['all']!r}\ndirect={direct!r}\n期望={P296_WANT!r}")
+
+    # ③ 三來源的各種空／非空組合：`all` 恆等於直接呼叫（不是只在滿載時相等）
+    for label, items, cache, arch in (
+            ("三來源皆空", [], {}, None),
+            ("只有標記", P296_ITEMS, {}, None),
+            ("只有 cache", [], P296_CACHE, None),
+            ("只有 archives", [], {}, 261),
+            ("標記 ＋ cache（無 archives）", P296_ITEMS, P296_CACHE, None),
+            ("cache ＋ archives（無標記）", [], P296_CACHE, 261)):
+        direct = archive.scan_candidates(items, cache, arch)
+        src = archive.scan_sources(items, cache, arch)
+        check(f"#296 R2-BLOCK-1 {label}：all == scan_candidates(...)",
+              src["all"] == direct,
+              f"all={src['all']!r} direct={direct!r}")
+
+    # ④ 四欄全部是 scan_candidates 的回傳值（子集呼叫，不是另一套邏輯）
+    src = archive.scan_sources(P296_ITEMS, P296_CACHE, archive.ARCHIVES_THREAD)
+    check("#296 R2-BLOCK-1 marks 欄 == scan_candidates(items, {}, None)",
+          src["marks"] == archive.scan_candidates(P296_ITEMS, {}, None),
+          f"{src['marks']!r}")
+    check("#296 R2-BLOCK-1 cache 欄 == scan_candidates([], cache, None)",
+          src["cache"] == archive.scan_candidates([], P296_CACHE, None),
+          f"{src['cache']!r}")
+    check("#296 R2-BLOCK-1 archives 欄 == scan_candidates([], {}, archives)",
+          src["archives"] == archive.scan_candidates(
+              [], {}, archive.ARCHIVES_THREAD) == [261],
+          f"{src['archives']!r}")
+
+    # ⑤ 源碼層反向斷言：第二套聯集的字面與 cmd_scan 的取用路徑都須 0 命中
+    check("#296 R2-BLOCK-1 全檔 `\"all\": sorted(set` 0 命中"
+          "（聯集不得在 scan_candidates 外再定義一次）",
+          ARCHIVE_SRC.count('"all": sorted(set') == 0,
+          "\n".join(ln for ln in ARCHIVE_SRC.splitlines() if "sorted(set" in ln))
+    check("#296 R2-BLOCK-1 全檔 `sorted(set` 0 命中（含任何改寫形態）",
+          ARCHIVE_SRC.count("sorted(set") == 0,
+          "\n".join(ln for ln in ARCHIVE_SRC.splitlines() if "sorted(set" in ln))
+    scan_src = ARCHIVE_SRC.split("def cmd_scan(")[1].split("\ndef ")[0]
+    check("#296 R2-BLOCK-1 cmd_scan 段內 `src[\"all\"]` 0 命中"
+          "（targets 不經分解字典）",
+          scan_src.count('src["all"]') == 0,
+          "\n".join(ln for ln in scan_src.splitlines() if 'src["all"]' in ln))
+    check("#296 R2-BLOCK-1 cmd_scan 的 targets 直接來自 "
+          "scan_candidates(items, cache_data, ARCHIVES_THREAD, …)",
+          "targets = scan_candidates(items, cache_data, ARCHIVES_THREAD,"
+          in scan_src,
+          "\n".join(ln for ln in scan_src.splitlines() if "targets" in ln))
+    sources_src = ARCHIVE_SRC.split("def scan_sources(")[1].split("\ndef ")[0]
+    # 去掉函式自己的 docstring（maxsplit=2：只切到主 docstring 結束，`_quiet` 的
+    # 巢狀 docstring 留在函式體內，它本身也不得含集合運算）。
+    body_only = (sources_src.split('"""', 2)[2] if '"""' in sources_src
+                 else sources_src)
+    check("#296 R2-BLOCK-1 scan_sources 的函式體無任何集合運算"
+          "（set(／|／sorted( 皆 0 命中）",
+          body_only.count("set(") == 0 and body_only.count("sorted(") == 0
+          and "|" not in body_only, body_only)
+    check("#296 R2-BLOCK-1 scan_sources 的四欄各是一次 scan_candidates 呼叫",
+          body_only.count("scan_candidates(") == 4, body_only)
+
+
+@case("#296 AC-1／AC-2 候選集合＝標記 ∪ cache ∪ archives，逐一相等（含反例）")
+def _p296_ac1_ac2():
+    got = archive.scan_candidates(P296_ITEMS, P296_CACHE, archive.ARCHIVES_THREAD)
+    check("#296 AC-2 候選集合逐一相等（不是只比長度）",
+          got == P296_WANT, f"實得 {got!r}\n期望 {P296_WANT!r}")
+    check("#296 AC-1 回傳已排序、去重、全為 int（3054 同時來自標記與 cache）",
+          got == sorted(set(got)) and all(isinstance(x, int) for x in got)
+          and got.count(3054) == 1, f"{got!r}")
+
+    # 反例：P296_F_BAD 的六個同形字串一個都不得命中，只有 4100 在集合內
+    only_bad = archive.scan_candidates([("295", P296_F_BAD)], {}, None)
+    check("#296 AC-2 反例單只命中 4100（缺 file=／非數字／file 含空白／縮排／"
+          "表格列／散文旁註一律不計）",
+          only_bad == [4100], f"實得 {only_bad!r}")
+    for bad in (4001, 4002, 4003, 4004, 4005):
+        check(f"#296 AC-2 反例 thread={bad} 不在集合內", bad not in only_bad,
+              f"{only_bad!r}")
+    # 鑑別力：拔掉錨定後，縮排／表格列內／散文裡的同形字串都會被計入（fixture 有效）
+    check("#296 AC-2 鑑別力：未錨定的 re.search 在同一 body 讀到 4003（縮排那行）",
+          re.search(r"<!-- devflow:topic thread=(\d+) -->",
+                    P296_F_BAD).group(1) == "4003",
+          "對照組：證明反例 fixture 對錨定有鑑別力")
+    check("#296 AC-2 鑑別力：未錨定的 findall 命中 3 個（4003 縮排／4004 表格／"
+          "4005 散文），錨定下一個都不算",
+          re.findall(r"<!-- devflow:topic thread=(\d+) -->", P296_F_BAD)
+          == ["4003", "4004", "4005", "4100"],
+          repr(re.findall(r"<!-- devflow:topic thread=(\d+) -->", P296_F_BAD)))
+
+    # T>1 的單：經 on_invalid 回報並跳過**該單**，其餘 id 仍在集合內
+    seen = []
+    with_bad = archive.scan_candidates(
+        P296_ITEMS + [("288", F3)], P296_CACHE, archive.ARCHIVES_THREAD,
+        on_invalid=lambda exc, issue: seen.append(issue))
+    check("#296 AC-2 T>1 的單經 on_invalid 回報（單號正確）",
+          seen == ["288"], f"實得 {seen!r}")
+    check("#296 AC-2 一張壞單不得吃掉整個集合（其餘 id 一字不少）",
+          with_bad == P296_WANT, f"實得 {with_bad!r}\n期望 {P296_WANT!r}")
+    check("#296 AC-2 壞單自己的 id（2620／999）不進集合（分區歸屬無單一答案）",
+          2620 not in with_bad and 999 not in with_bad, f"{with_bad!r}")
+
+    # A>1 亦同（archived 式的 INVALID）
+    seen_a = []
+    f_a2 = ("<!-- devflow:archived thread=5001 file=/t/a.md -->\n\n中間\n\n"
+            "<!-- devflow:archived thread=5002 file=/t/b.md -->\n")
+    got_a = archive.scan_candidates([("289", f_a2), ("286", P287_F_ARCH)], {}, None,
+                                    on_invalid=lambda exc, i: seen_a.append(i))
+    check("#296 AC-2 A>1 的單亦經 on_invalid 跳過，其餘單不受影響",
+          seen_a == ["289"] and got_a == [3724],
+          f"on_invalid={seen_a!r} 集合={got_a!r}")
+
+    # 三個來源皆空 → 空集合
+    check("#296 AC-2 三來源皆空 → 空集合（不是 None、不是 [0]）",
+          archive.scan_candidates([], {}, None) == [],
+          repr(archive.scan_candidates([], {}, None)))
+    check("#296 AC-2 只有無標記的單 ＋ 空 cache ＋ 無 archives → 空集合",
+          archive.scan_candidates([("999", P287_F_NONE)], {}, None) == [])
+
+    # `AC-1`：解析一律經 `_marker`，不自備正則
+    names = set(archive.scan_candidates.__code__.co_names)
+    check("#296 AC-1 scan_candidates 經 _marker 解析（不自備正則、不碰 I/O）",
+          "_marker" in names
+          and not ({"re", "compile", "search", "findall", "finditer",
+                    "CACHE", "subprocess", "api", "read_text"} & names),
+          f"{sorted(names)!r}")
+    check("#296 AC-1 scan_candidates 是頂層純函式（模組屬性、可直接餵 fixture）",
+          callable(getattr(archive, "scan_candidates", None)))
+
+
+@case("#296 AC-3 鑑別力：三個來源各移除一筆 → 集合恰少該 id、其餘不變")
+def _p296_ac3():
+    base = archive.scan_candidates(P296_ITEMS, P296_CACHE, archive.ARCHIVES_THREAD)
+    check("#296 AC-3 基準集合 == 期望", base == P296_WANT, f"{base!r}")
+
+    # ① 移除 cache 的那一筆（4394 只有 cache 記得）
+    cache_minus = {k: v for k, v in P296_CACHE.items() if k != "300"}
+    got = archive.scan_candidates(P296_ITEMS, cache_minus, archive.ARCHIVES_THREAD)
+    check("#296 AC-3① 移除 cache 的 4394 → 集合恰少 4394，其餘不變",
+          got == [i for i in P296_WANT if i != 4394],
+          f"實得 {got!r}；差集 {sorted(set(base) - set(got))!r}")
+
+    # ② 移除 archived 標記（3724 只有 archived 式承載）
+    items_minus_arch = [(n, b) for n, b in P296_ITEMS if n != "286"]
+    got = archive.scan_candidates(items_minus_arch, P296_CACHE,
+                                  archive.ARCHIVES_THREAD)
+    check("#296 AC-3② 移除 archived 標記 3724 → 集合恰少 3724，其餘不變",
+          got == [i for i in P296_WANT if i != 3724],
+          f"實得 {got!r}；差集 {sorted(set(base) - set(got))!r}")
+
+    # ③ 移除 topic 標記（4100 只有 topic 式承載、且不在 cache）
+    items_minus_topic = [(n, P296_F_BAD_NOTOPIC if n == "295" else b)
+                         for n, b in P296_ITEMS]
+    got = archive.scan_candidates(items_minus_topic, P296_CACHE,
+                                  archive.ARCHIVES_THREAD)
+    check("#296 AC-3③ 移除 topic 標記 4100 → 集合恰少 4100，其餘不變",
+          got == [i for i in P296_WANT if i != 4100],
+          f"實得 {got!r}；差集 {sorted(set(base) - set(got))!r}")
+
+    # ④ archives 來源亦有貢獻（261 無 issue、不會有標記）
+    got = archive.scan_candidates(P296_ITEMS, P296_CACHE, None)
+    check("#296 AC-3④ archives_thread=None → 集合恰少 261，其餘不變",
+          got == [i for i in P296_WANT if i != 261],
+          f"實得 {got!r}；差集 {sorted(set(base) - set(got))!r}")
+
+    # cache 的補位語意：3054 的 topic 標記不見了，但 cache 記得 → 仍在集合
+    # （`#285` ⑤-c：`ensure` 建了 topic 而寫回 forge 失敗的單只有 cache 記得）
+    items_no_3054 = [(n, P287_F_NONE if n == "285" else b) for n, b in P296_ITEMS]
+    got = archive.scan_candidates(items_no_3054, P296_CACHE,
+                                  archive.ARCHIVES_THREAD)
+    check("#296 AC-3 cache 的補位：forge 標記消失但 cache 記得 → 3054 仍在集合",
+          got == P296_WANT, f"實得 {got!r}")
+    check("#296 AC-3 同一情形若拿掉 cache 來源就漏掉 3054（cache 不可省的證據）",
+          archive.scan_candidates(items_no_3054, {}, archive.ARCHIVES_THREAD)
+          == [i for i in P296_WANT if i not in (3054, 4394)],
+          repr(archive.scan_candidates(items_no_3054, {},
+                                       archive.ARCHIVES_THREAD)))
+
+    # 來源分解與聯集一致（`AC-5` 那一行的數字來源）
+    src = archive.scan_sources(P296_ITEMS, P296_CACHE, archive.ARCHIVES_THREAD)
+    check("#296 AC-5 scan_sources 的 all 與 scan_candidates 逐一相等",
+          src["all"] == base, f"{src!r}")
+    check("#296 AC-5 三欄分解正確：標記 4 ／ cache 2 ／ archives 1",
+          src["marks"] == [3054, 3363, 3724, 4100]
+          and src["cache"] == [3054, 4394] and src["archives"] == [261],
+          f"{src!r}")
+    check("#296 AC-5 分解之和 > 聯集大小（3054 重複）→ 去重確實發生",
+          len(src["marks"]) + len(src["cache"]) + len(src["archives"])
+          > len(src["all"]) == 6,
+          f"4+2+1=7 vs 聯集 {len(src['all'])}")
+
+
+@case("#296 AC-4 full=True 的集合與 range(2, hi) 逐一相等（零 API）")
+def _p296_ac4():
+    for H in (400, 450, 3774, 4442):
+        got = archive.scan_candidates([], {}, None, full=True, hi=H)
+        check(f"#296 AC-4 hi={H}：scan_candidates(full=True) == list(range(2, {H}))",
+              got == list(range(2, H)),
+              f"len={len(got)} 期望 {H - 2}；首尾={got[:1]!r}…{got[-1:]!r}")
+    # `--full` 是「全區間」：給了 items／cache 也不改變結果（＝ `#287` 的舊行為）
+    check("#296 AC-4 full=True 時 items／cache 不參與（舊行為一字不變）",
+          archive.scan_candidates(P296_ITEMS, P296_CACHE, archive.ARCHIVES_THREAD,
+                                  full=True, hi=450) == list(range(2, 450)))
+    # hi 未給 → 明確錯誤，不靜默猜一個上界
+    raised = False
+    try:
+        archive.scan_candidates(P296_ITEMS, P296_CACHE, 261, full=True)
+    except ValueError:
+        raised = True
+    check("#296 AC-4 full=True 而 hi=None → ValueError（不靜默猜上界）", raised)
+    # 未達成候選：舊實作在**預設**模式也走 range(2, hi) → 4442 個
+    check("#296 AC-4 未達成候選：#287 的預設模式探 4442 個（本單降為 6 個 fixture 候選）",
+          len(archive.scan_candidates([], {}, None, full=True, hi=4442)) == 4440
+          and len(archive.scan_candidates(P296_ITEMS, P296_CACHE,
+                                          archive.ARCHIVES_THREAD)) == 6,
+          "全區間 4440 vs 候選 6 —— 同一 fixture 下的成本差")
+
+
+def _p296_run_cmd_scan(items, cache_obj, *, full, archives=261):
+    """以假 `api`／假 `_forge_scan_items`／假 CACHE 跑 `cmd_scan`，回 (stdout, stderr)。
+
+    零 Telegram API、零 `gh`（`AC-5` 明文要求以假 `api` 攔截驗輸出字面）。
+    """
+    import contextlib
+    import io
+
+    with tempfile.TemporaryDirectory() as td:
+        cache = Path(td) / "devflow-topics.json"
+        if cache_obj is not None:
+            cache.write_text(cache_obj if isinstance(cache_obj, str)
+                             else json.dumps(cache_obj, ensure_ascii=False))
+        orig = (archive.CACHE, archive.api, archive._forge_scan_items,
+                archive.ARCHIVES_THREAD)
+        archive.CACHE = cache
+        archive.api = lambda *a, **kw: {"ok": False, "description": ""}
+        archive._forge_scan_items = (items if callable(items)
+                                     else (lambda *a, **kw: list(items)))
+        archive.ARCHIVES_THREAD = archives
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                archive.cmd_scan(argparse.Namespace(prune=False, full=full))
+        finally:
+            (archive.CACHE, archive.api, archive._forge_scan_items,
+             archive.ARCHIVES_THREAD) = orig
+    return out.getvalue(), err.getvalue()
+
+
+@case("#296 AC-5 預設模式印出候選量與三來源分解；--full 印出上界那行")
+def _p296_ac5():
+    out, _err = _p296_run_cmd_scan(P296_ITEMS, P296_CACHE, full=False)
+    want = "（候選 6 個：forge 標記 4 ／ cache 2 ／ archives 1；探測 6 個 thread）"
+    check("#296 AC-5 預設模式的輸出字面逐字相等", want in out,
+          f"期望字面：{want}\n--- 實際輸出 ---\n{out}")
+    check("#296 AC-5 預設模式**不**印上界那行（上界不再等於探活集合）",
+          "上界 hi=" not in out, out)
+    check("#296 AC-5 預設模式的宣稱字面為「本 kit 管理過的」，不是「群組實際」",
+          "本 kit 管理過的 topic（" in out and "群組實際 topic（" not in out, out)
+
+    full_out, _err = _p296_run_cmd_scan(P296_ITEMS, P296_CACHE, full=True)
+    want_full = "（上界 hi=4150，由 forge 的分區標記推出；探測 range(2, 4150)）"
+    check("#296 AC-5 --full 印出現行那行（字面與 #287 相同，hi=4100+50）",
+          want_full in full_out,
+          f"期望字面：{want_full}\n--- 實際輸出 ---\n{full_out[:600]}")
+    check("#296 AC-5 --full 的宣稱字面維持「群組實際」",
+          "群組實際 topic（" in full_out, full_out[:600])
+    check("#296 AC-5 --full 不印候選分解那行（兩種模式的宣稱不混用）",
+          "（候選 " not in full_out, full_out[:600])
+
+    # 三來源皆空 → 不得靜默當成「群組沒有 topic」
+    zero_out, _err = _p296_run_cmd_scan([("999", P287_F_NONE)], {},
+                                        full=False, archives=None)
+    check("#296 AC-2／AC-5 候選 0 時印出「候選 0 個」",
+          "（候選 0 個：forge 標記 0 ／ cache 0 ／ archives 0；探測 0 個 thread）"
+          in zero_out, zero_out)
+    check("#296 AC-2／AC-5 候選 0 時明說沒探測任何 thread（不靜默）",
+          "候選 0" in zero_out and "沒有探測任何 thread" in zero_out, zero_out)
+    check("#296 AC-2／AC-5 候選 0 時提示 --full，且不宣稱群組沒有 topic",
+          "`scan --full`" in zero_out
+          and "這不代表群組沒有 topic" in zero_out, zero_out)
+
+    # cache 損壞／不存在：候選少掉 cache 來源，但 scan 不停擺（prune 語意不動）
+    broken, err = _p296_run_cmd_scan(P296_ITEMS, "{not json at all", full=False)
+    check("#296 AC-5 cache 損壞 → 候選不計 cache 來源，scan 仍跑完",
+          "（候選 5 個：forge 標記 4 ／ cache 0 ／ archives 1；探測 5 個 thread）"
+          in broken, f"--- stdout ---\n{broken}--- stderr ---\n{err}")
+    check("#296 AC-5 cache 損壞時 stderr 有警告（不靜默）",
+          "cache 無法解析" in err, err)
+    missing, _err = _p296_run_cmd_scan(P296_ITEMS, None, full=False)
+    check("#296 AC-5 cache 不存在 → 同樣視為 {}（候選 5 個）",
+          "（候選 5 個：forge 標記 4 ／ cache 0 ／ archives 1；探測 5 個 thread）"
+          in missing, missing)
+
+    # cache 過期項那段語意不動（`#296` 射程外）：fake api 全失敗 → 兩筆都算過期
+    check("#296 預設模式仍報 cache 過期項（prune 語意不動）",
+          "cache 過期項（2）" in out and "（加 --prune 可清除）" in out, out)
+    check("#296 cache 過期項列出的是 cache 的兩筆（#300 → 4394、#285 → 3054）",
+          "#300 → thread 4394" in out and "#285 → thread 3054" in out, out)
+
+    # forge 不可用 → items 視為 []，stderr 警告，不停擺
+    def _forge_down(*_a, **_kw):
+        raise RuntimeError("gh 不可用")
+
+    down, err2 = _p296_run_cmd_scan(_forge_down, {}, full=False)
+    check("#296 AC-5 forge 不可用 → 候選只剩 archives，scan 不停擺",
+          "（候選 1 個：forge 標記 0 ／ cache 0 ／ archives 1；探測 1 個 thread）"
+          in down, f"--- stdout ---\n{down}--- stderr ---\n{err2}")
+    check("#296 AC-5 forge 不可用時 stderr 警告（照現行 try/except 風格）",
+          "無法從 forge 取 issue body" in err2 and "RuntimeError" in err2, err2)
+    # `--full` 路徑的 forge 不可用：退回寫死地板（`#287` 的行為一字不變）
+    full_down, err3 = _p296_run_cmd_scan(_forge_down, {}, full=True)
+    check("#296 AC-5 --full 且 forge 不可用 → 退回寫死值 400（#287 行為不變）",
+          f"（上界 hi={archive.SCAN_HI_FLOOR}，由 forge 的分區標記推出；"
+          f"探測 range(2, {archive.SCAN_HI_FLOOR})）" in full_down,
+          f"--- stdout ---\n{full_down[:400]}--- stderr ---\n{err3}")
+
+
+@case("#296 AC-1 cmd_scan 只呼叫 scan_candidates，不自算 id 集合")
+def _p296_ac1_cmd_scan():
+    names = set(archive.cmd_scan.__code__.co_names)
+    check("#296 AC-1 cmd_scan 呼叫 scan_candidates／scan_sources",
+          {"scan_candidates", "scan_sources"} <= names, f"{sorted(names)!r}")
+    check("#296 AC-1 cmd_scan 不自備標記解析（不引用 _marker、不引用 re）",
+          not ({"_marker", "re", "scan_topic", "scan_archived"} & names),
+          f"{sorted(names)!r}")
+    seg = ARCHIVE_SRC.split("def cmd_scan(")[1].split("\ndef ")[0]
+    check("#296 AC-1 cmd_scan 的探活迴圈餵 targets（不是 range(2, hi)）",
+          "pool.map(probe, targets)" in seg
+          and "pool.map(probe, range(" not in seg, seg)
+    check("#296 AC-1 cmd_scan 以 getattr(args, \"full\", False) 讀旗標"
+          "（既有測試以 Namespace(prune=False) 呼叫）",
+          'getattr(args, "full", False)' in seg, seg)
+    check("#296 AC-1 --full 路徑仍呼叫 scan_upper_bound（故它不是死碼）",
+          "scan_upper_bound" in names and "scan_upper_bound(items" in seg, seg)
+
+    # 宣稱字面的分化（usage 行 ＋ argparse help）
+    check("#296 usage 行分化：預設＝本 kit 管理過的、--full＝群組實際存在的",
+          "scan                    掃描**本 kit 管理過的** topic" in ARCHIVE_SRC
+          and "scan --full             掃描**群組實際存在的** topic" in ARCHIVE_SRC,
+          ARCHIVE_SRC[:1400])
+    main_src = ARCHIVE_SRC.split("def main(")[1]
+    check("#296 argparse：scan 的 help 改為「掃描本 kit 管理過的 topic」",
+          'add_parser("scan", help="掃描本 kit 管理過的 topic' in main_src,
+          "\n".join(ln for ln in main_src.splitlines() if "add_parser(\"scan\"" in ln))
+    check("#296 argparse：--full 旗標存在且 help 寫明是全區間與其成本",
+          '"--full"' in main_src and "群組實際存在的 topic" in main_src
+          and "16.5 分鐘" in main_src,
+          "\n".join(ln for ln in main_src.splitlines() if "full" in ln))
+    check("#296 argparse：--prune 仍在（prune 語意不動）",
+          '"--prune"' in main_src, main_src[:400])
+    # CLI 層確實收 --full（不是只有 help 寫著）
+    r = subprocess.run([PY, str(SCRIPTS / "devflow_archive.py"), "scan", "--help"],
+                       capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                       timeout=60, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+    check("#296 CLI `scan --help` rc=0 且列出 --full",
+          r.returncode == 0 and "--full" in r.stdout,
+          f"rc={r.returncode}\n{r.stdout}{r.stderr}")
+
+
+@case("#296 AC-7 射程：scan_upper_bound／_forge_scan_items 的 AST 與 base 逐一相同")
+def _p296_ac7():
+    import ast
+    old = subprocess.run(
+        ["git", "show", "1f4368d:devflow/channels/scripts/telegram/devflow_archive.py"],
+        capture_output=True, text=True, cwd=REPO).stdout
+    check("#296 AC-7 取得 base（1f4368d）的原檔", bool(old.strip()), "git show 無輸出")
+    if not old.strip():
+        return
+
+    def funcs(src: str) -> dict:
+        return {n.name: ast.dump(n) for n in ast.parse(src).body
+                if isinstance(n, ast.FunctionDef)}
+
+    o, n = funcs(old), funcs(ARCHIVE_SRC)
+    for name in ("scan_upper_bound", "_forge_scan_items"):
+        check(f"#296 AC-7 {name} 的 AST 與 base 逐一相同（不動上界來源的機械證明）",
+              name in o and name in n and o[name] == n[name],
+              f"base 有={name in o} 本單有={name in n}")
+    check("#296 AC-7 既有函式一個都沒被移除",
+          not (o.keys() - n.keys()), f"{sorted(o.keys() - n.keys())!r}")
+    changed = sorted(k for k in o.keys() & n.keys() if o[k] != n[k])
+    check("#296 AC-7 相對 base 改變的函式恰為 cmd_scan ＋ main（write scope 之內）",
+          changed == ["cmd_scan", "main"], f"改變的函式: {changed!r}")
+    added = sorted(n.keys() - o.keys())
+    check("#296 AC-7 scan_candidates 在新增集合內（故不落在 o.keys() & n.keys()）",
+          "scan_candidates" in added, f"新增: {added!r}")
+    check("#296 AC-7 新增的頂層函式恰為本單宣告的三個",
+          added == ["_scan_read_cache", "scan_candidates", "scan_sources"],
+          f"新增: {added!r}")
+    # 上界的兩個常數亦不動（來源不只是函式）
+    check("#296 AC-7 SCAN_HI_FLOOR／SCAN_HI_MARGIN 的字面與 base 相同",
+          "SCAN_HI_FLOOR = 400" in old and "SCAN_HI_FLOOR = 400" in ARCHIVE_SRC
+          and "SCAN_HI_MARGIN = 50" in old
+          and "SCAN_HI_MARGIN = 50" in ARCHIVE_SRC)
+    check("#296 AC-7 上界推導未退回以 cache 為來源",
+          "CACHE" not in set(archive.scan_upper_bound.__code__.co_names),
+          f"{sorted(archive.scan_upper_bound.__code__.co_names)!r}")
+
+
+@case("#296 AC-9 devflow/VERSION ＝ 0.16.0.0（V2 的 b 位：新增 --full 是新的流程能力）")
+def _p296_ac9():
+    raw = (REPO / "devflow" / "VERSION").read_text().strip()
+    check("#296 AC-9 VERSION == 0.16.0.0", raw == "0.16.0.0", repr(raw))
+    ok, why = _version_gt(raw, "0.15.7.0")
+    check("#296 AC-9 嚴格大於前一單（#300）的 0.15.7.0", ok, f"{raw!r}：{why}")
 
 
 # ── 收尾 ────────────────────────────────────────────────────────────────────
