@@ -3516,11 +3516,11 @@ P306_REQUIRED_IDS: dict[str, set[str]] = {
 #
 # 同樣是**下界**而非等值，理由同 `P306_REQUIRED_IDS`。
 #
-# ⚠ 一處刻意缺漏：`coordinator.md` 另引用了 `telegram.md` 的「第二棒的…行」那一格，
+# ⚠ 一處缺漏仍在：`coordinator.md` 另引用了 `telegram.md` 的「第二棒的…行」那一格，
 # 其格名含一個英文詞，而 `#300` `AC-2` 的既有斷言（`test_relay.py`）要求本檔**零**該
 # 字面；`test_relay.py` 不在本單的 write scope 內，故本常數不收那一鍵（連註解也不能
-# 寫出該詞）。該處引用仍受本族的零懸空檢查（跑時從範本讀，不經本常數），只是不被釘進
-# 下界。此缺漏已回報待裁決。
+# 寫出該詞）。該鍵的下界已由 `_p306_ac3_omitted_locator` 以**位置型**斷言補上：格名以
+# 字元類別捕獲、不寫出字面，因此不觸發 `#300` `AC-2`。
 P306_REQUIRED_LOCATORS: dict[str, dict[tuple[str, str], int]] = {
     "coordinator": {
         ("channels/README.md", "分區三態"): 1,
@@ -3796,6 +3796,52 @@ def _p306_ac3_mutation():
                 check(f"#306 AC-3 鑑別力：{name}.md 拔掉 {src}「{label}」後"
                       f"舊判準（≥1）仍 PASS（假陰性）",
                       sum(got.values()) >= 1, f"實得 {sum(got.values())} 處")
+
+
+@case("#306 AC-3 常數缺漏的那一鍵：以位置型斷言補上下界（不寫出禁字面）")
+def _p306_ac3_omitted_locator():
+    """`coordinator.md` 引用 `telegram.md` 的「第二棒的 ⟨英文詞⟩ 行」那一格。
+
+    該格名含 `#300` `AC-2` 禁在本檔出現的英文詞，故 `P306_REQUIRED_LOCATORS` 不收該鍵
+    （鍵是字串字面，寫進去就會觸發那條斷言）。這裡改以**位置型**判準釘住下界：格名用
+    字元類別捕獲、不寫出字面，並連同它後面那段敘述一起錨定——拔掉 locator、只留敘述
+    就會 FAIL。
+    """
+    # 該格名含 `#300` `AC-2` 禁在本檔出現的英文詞，故以字元類別捕獲、不寫出字面。
+    pat = re.compile(r"telegram\.md「(第二棒的 [A-Za-z]+ 行)」那格記載轉播器發出第二棒")
+    t = _p306_tpl_text("coordinator")
+    got = pat.findall(t)
+    check("#306 AC-3 coordinator.md 命中該 locator 恰 1 次（位置型，含後續敘述）",
+          len(got) == 1, f"實得 {len(got)} 次：{got!r}")
+    cells = _p306_cell_names()
+    check("#306 AC-3 telegram.md 的格名集合非空（否則下方核對空轉）",
+          len(cells) >= 8, f"{len(cells)} 格")
+    check("#306 AC-3 捕獲的格名存在於 telegram.md 的「面向」欄（零懸空）",
+          bool(got) and got[0] in cells, f"捕獲 {got!r}")
+    # 反測 1（記憶體內，不寫檔）：拔掉 locator、保留敘述 → 位置型主斷言 FAIL。
+    bare = t.replace(f"telegram.md「{got[0]}」", "那格", 1) if got else t
+    check("#306 AC-3 鑑別力：該 locator 換成「那格」（敘述留著）→ 主斷言 FAIL",
+          len(pat.findall(bare)) == 0, f"變異後仍命中 {pat.findall(bare)!r}")
+    check("#306 AC-3 鑑別力：變異後敘述仍在（證明只拔掉定位、不是整段消失）",
+          "那格記載轉播器發出第二棒" in bare, "")
+    # 反測 2（記憶體內）：格名改成不存在的格名 → 面向欄核對 FAIL。
+    # 變異落在中段那個英文詞（`[A-Za-z]+` 捕獲得到，故位置型仍命中）；若改尾字
+    # 「行」→「列」，位置型自己就不命中了，那驗到的是另一件事。
+    if got:
+        fake = got[0].replace(got[0].split(" ")[1], "zzz")
+        check("#306 AC-3 鑑別力：變異格名與原格名不同", fake != got[0], f"{fake!r}")
+        mutant = t.replace(f"telegram.md「{got[0]}」",
+                           f"telegram.md「{fake}」", 1)
+        mut_got = pat.findall(mutant)
+        check("#306 AC-3 鑑別力：改格名後位置型仍命中（變異落在格名、不在位置）",
+              mut_got == [fake], f"實得 {mut_got!r}")
+        check("#306 AC-3 鑑別力：改過的格名不在「面向」欄 → 零懸空核對 FAIL",
+              fake not in cells, f"{fake!r} 竟存在於面向欄")
+        # 另一種變異：改尾字「行」→「列」，位置型判準自己就擋下（兩層各有效）。
+        tail = t.replace(f"telegram.md「{got[0]}」",
+                         f"telegram.md「{got[0][:-1]}列」", 1)
+        check("#306 AC-3 鑑別力：格名尾字改「列」→ 位置型主斷言 FAIL",
+              pat.findall(tail) == [], f"變異後仍命中 {pat.findall(tail)!r}")
 
 
 @case("#306 AC-3 反向：範本不得含「沒有條文依據」字面（該缺口已由 CH3／C5 補上）")
