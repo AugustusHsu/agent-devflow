@@ -2908,12 +2908,362 @@ def _p296_ac7():
           f"{sorted(archive.scan_upper_bound.__code__.co_names)!r}")
 
 
-@case("#296 AC-9 devflow/VERSION ＝ 0.16.0.0（V2 的 b 位：新增 --full 是新的流程能力）")
+@case("#296 AC-9 devflow/VERSION 嚴格大於 0.15.7.0（#296 進 b 位至 0.16.0.0 之後的下界）")
 def _p296_ac9():
     raw = (REPO / "devflow" / "VERSION").read_text().strip()
-    check("#296 AC-9 VERSION == 0.16.0.0", raw == "0.16.0.0", repr(raw))
+    # `#304` 改法：原斷言寫死 `== "0.16.0.0"`，而 `#296` 合併後的**每一次**進位都會
+    # 讓它假 FAIL 一次（本單進 c 位至 `0.16.1.0` 即第一次）。這與 `#287` `AC-8` 治本
+    # 掉的那條同形（見 `:1593` 的註解：「程式持有的假設在狀態變動後失效」），故照同一
+    # 個模式改成「合四碼形狀 ＋ **嚴格大於下界**」。
+    # 下界取 `0.16.0.0`——它就是 `#296` 當時的期望值，故 `#296` 的宣稱（VERSION 已達
+    # `0.16.0.0`）仍被守住，只是不再禁止後續單進位。本單自己的等值斷言在 `AC-10`。
+    check("#296 AC-9 形狀合 V1 的四碼", bool(VERSION_SHAPE.fullmatch(raw)), repr(raw))
     ok, why = _version_gt(raw, "0.15.7.0")
     check("#296 AC-9 嚴格大於前一單（#300）的 0.15.7.0", ok, f"{raw!r}：{why}")
+    ok2, why2 = _version_gt(raw, "0.15.7.0")
+    check("#296 AC-9 已達 #296 的 0.16.0.0（≥，本單之後由 #304 AC-10 定等值）",
+          ok2 and tuple(int(x) for x in raw.split(".")) >= (0, 16, 0, 0),
+          f"{raw!r}：{why2}")
+
+
+# ── #304 探活的寫入副作用：三態分支、還原失敗回報、射程 ─────────────────────
+# 本族全部**零 Telegram API**：`api` 被換成記錄呼叫序列的樁。
+#
+# ⚠ 斷言為何同時驗「回傳值」與「API 呼叫序列」（`AC-2`）：缺陷版實作在
+# `TOPIC_NOT_MODIFIED` 那一支也回 `True`（它 reopen 完才回 True），**只驗回傳值的
+# 斷言在修正前後同樣 PASS**，零鑑別力。有鑑別力的是「呼叫序列不含 reopen」。
+P304_BASE = "11e5c13"           # 本單的 base（＝ origin/main，`#296` 合併後）
+
+# 真 API 的字面（`#304` 誘餌分區 thread 4863 與 `#296` 的 `--full` 那輪實測形態）
+P304_INVALID = {"ok": False, "description": "Bad Request: TOPIC_ID_INVALID"}
+P304_NOT_MOD = {"ok": False, "description": "Bad Request: TOPIC_NOT_MODIFIED"}
+P304_OK = {"ok": True, "result": True}
+P304_REOPEN_FAIL_DESC = "Bad Request: TOPIC_ID_INVALID (reopen 在尾延遲下 timeout)"
+P304_REOPEN_FAIL = {"ok": False, "description": P304_REOPEN_FAIL_DESC}
+
+
+def _p304_alive(responses, thread_id=4863, mod=None):
+    """以 `api` 樁跑 `_alive`，回 `(回傳值, API 呼叫序列, stderr)`。
+
+    `mod` 可指定別的模組物件（用來對 base 的實作跑同一組斷言，證明有鑑別力）。
+    """
+    import contextlib
+    import io
+
+    target = mod or topic
+    calls = []
+
+    def fake_api(method, **kw):
+        calls.append(method)
+        if method not in responses:
+            raise AssertionError(f"未預期的 API 呼叫：{method}（序列 {calls!r}）")
+        return responses[method]
+
+    orig = target.api
+    target.api = fake_api
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err):
+            got = target._alive(thread_id)
+    finally:
+        target.api = orig
+    return got, calls, err.getvalue()
+
+
+@case("#304 AC-1／AC-2／AC-4 _alive 的四支：回傳值 ＋ API 呼叫序列（零 API）")
+def _p304_alive_states():
+    # ① 不存在 → 不動、回 False
+    got, calls, err = _p304_alive({"closeForumTopic": P304_INVALID})
+    check("#304 AC-4① TOPIC_ID_INVALID → 回 False",
+          got is False, f"實得 {got!r}")
+    check("#304 AC-4① TOPIC_ID_INVALID → 呼叫序列僅 closeForumTopic（不 reopen 不存在的分區）",
+          calls == ["closeForumTopic"], f"實際序列 {calls!r}")
+
+    # ② 原本 closed（本呼叫沒改到它）→ **不動**、回 True ← 本單的核心反例
+    got, calls, err = _p304_alive({"closeForumTopic": P304_NOT_MOD})
+    check("#304 AC-2 TOPIC_NOT_MODIFIED → 回 True（分區存在）",
+          got is True, f"實得 {got!r}")
+    check("#304 AC-2 TOPIC_NOT_MODIFIED → **呼叫序列不含 reopenForumTopic**"
+          "（刻意關閉的分區探活後仍為 closed）",
+          calls == ["closeForumTopic"] and "reopenForumTopic" not in calls,
+          f"實際序列 {calls!r}")
+    check("#304 AC-2 TOPIC_NOT_MODIFIED → 不印警示（沒有任何狀態需要還原）",
+          err == "", repr(err))
+
+    # ③ 原本 open（本呼叫剛關了它）→ reopen 還原、回 True
+    got, calls, err = _p304_alive({"closeForumTopic": P304_OK,
+                                   "reopenForumTopic": P304_OK})
+    check("#304 AC-4③ ok: true → 回 True", got is True, f"實得 {got!r}")
+    check("#304 AC-4③ ok: true → 呼叫序列恰為 close 後 reopen（還原本呼叫改掉的狀態）",
+          calls == ["closeForumTopic", "reopenForumTopic"], f"實際序列 {calls!r}")
+    check("#304 AC-4③ 還原成功時不印警示", err == "", repr(err))
+
+    # ④ 還原失敗 → 回 True、警示含 thread id 與 description 字面、**不重試**
+    got, calls, err = _p304_alive({"closeForumTopic": P304_OK,
+                                   "reopenForumTopic": P304_REOPEN_FAIL})
+    check("#304 AC-3／AC-4④ 還原失敗仍回 True（分區存在是已知事實）",
+          got is True, f"實得 {got!r}")
+    check("#304 AC-3 還原失敗**不重試**（reopenForumTopic 恰一次）",
+          calls == ["closeForumTopic", "reopenForumTopic"], f"實際序列 {calls!r}")
+    check("#304 AC-3(a) 警示含 thread id（4863）與 API 的 description 字面",
+          "4863" in err and P304_REOPEN_FAIL_DESC in err, repr(err))
+    check("#304 AC-3(a) 警示明說狀態未還原（不只是「有印東西」）",
+          "未還原" in err and "closed" in err, repr(err))
+    check("#304 AC-3(a) 警示為單行（可定位、不是多行堆疊）",
+          len([ln for ln in err.strip().splitlines() if ln.strip()]) == 1, repr(err))
+
+
+@case("#304 AC-1 _alive 的 docstring 前提已修正（不再寫無條件的「回到原點」保證）")
+def _p304_alive_doc():
+    doc = topic._alive.__doc__ or ""
+    base_src = subprocess.run(
+        ["git", "show",
+         f"{P304_BASE}:devflow/channels/scripts/telegram/devflow_topic.py"],
+        capture_output=True, text=True, cwd=REPO).stdout
+    stale = "一關一開後狀態回到原點"
+    check("#304 AC-1 docstring 載三態的判準字面（TOPIC_NOT_MODIFIED／TOPIC_ID_INVALID）",
+          "TOPIC_NOT_MODIFIED" in doc and "TOPIC_ID_INVALID" in doc, doc[:400])
+    check("#304 AC-1 docstring 寫明只對原本 open 的分區還原",
+          "open" in doc and "還原" in doc, doc[:400])
+    # 鑑別力：base 的 docstring **有**那句無條件保證，本單的**沒有**。
+    check(f"#304 AC-1 鑑別力：base（{P304_BASE}）的 docstring 確實含「{stale}」",
+          stale in base_src, "git show 無輸出或字面不符")
+    check(f"#304 AC-1 本單的 docstring 不再出現「{stale}」"
+          "（它只在原本 open 時成立）", stale not in doc, doc[:400])
+    check("#304 AC-3 docstring 寫明還原失敗只回報不重試",
+          "不重試" in doc, doc[:600])
+
+
+def _p304_run_cmd_scan(per_tid, cache_obj, *, archives=None):
+    """以 `api` 樁跑 `cmd_scan`，回 `(stdout, stderr, {tid: 該 tid 的呼叫序列})`。
+
+    `per_tid` ＝ `{tid: {method: 回傳}}`。零 Telegram API、零 `gh`（候選與
+    `issue_meta` 全部由自造 cache 餵），故 `probe` 的四支可逐一驗（`AC-4`）。
+    """
+    import contextlib
+    import io
+
+    calls: dict[int, list[str]] = {}
+    with tempfile.TemporaryDirectory() as td:
+        cache = Path(td) / "devflow-topics.json"
+        cache.write_text(json.dumps(cache_obj, ensure_ascii=False))
+        orig = (archive.CACHE, archive.api, archive._forge_scan_items,
+                archive.ARCHIVES_THREAD)
+
+        def fake_api(method, **kw):
+            tid = kw.get("message_thread_id")
+            calls.setdefault(tid, []).append(method)
+            return per_tid.get(tid, {}).get(method, P304_INVALID)
+
+        archive.CACHE = cache
+        archive.api = fake_api
+        archive._forge_scan_items = lambda *a, **kw: []
+        archive.ARCHIVES_THREAD = archives
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                archive.cmd_scan(argparse.Namespace(prune=False, full=False))
+        finally:
+            (archive.CACHE, archive.api, archive._forge_scan_items,
+             archive.ARCHIVES_THREAD) = orig
+    return out.getvalue(), err.getvalue(), calls
+
+
+# 四個 thread 各對應 probe 的一支；id 取 9001-9004（本群組不存在，純樁）
+P304_SCAN_CACHE = {
+    "901": {"thread_id": 9001, "state": "open", "title": "單 不存在"},
+    "902": {"thread_id": 9002, "state": "open", "title": "單 closed"},
+    "903": {"thread_id": 9003, "state": "open", "title": "單 open"},
+    "904": {"thread_id": 9004, "state": "open", "title": "單 還原失敗"},
+}
+P304_SCAN_API = {
+    9001: {"closeForumTopic": P304_INVALID},
+    9002: {"closeForumTopic": P304_NOT_MOD},
+    9003: {"closeForumTopic": P304_OK, "reopenForumTopic": P304_OK},
+    9004: {"closeForumTopic": P304_OK, "reopenForumTopic": P304_REOPEN_FAIL},
+}
+
+
+@case("#304 AC-3／AC-4 probe（cmd_scan 內嵌）的四支：呼叫序列 ＋ 結果那一行（零 API）")
+def _p304_probe_states():
+    out, err, calls = _p304_run_cmd_scan(P304_SCAN_API, P304_SCAN_CACHE)
+    ctx = f"--- stdout ---\n{out}--- stderr ---\n{err}--- calls ---\n{calls!r}"
+
+    # 四支的呼叫序列（逐 tid 比，執行緒池的完成順序不影響）
+    check("#304 AC-4① probe 不存在 → 僅 closeForumTopic",
+          calls.get(9001) == ["closeForumTopic"], ctx)
+    check("#304 AC-2／AC-4② probe closed → 僅 closeForumTopic"
+          "（**不含 reopenForumTopic**）",
+          calls.get(9002) == ["closeForumTopic"], ctx)
+    check("#304 AC-4③ probe open → close 後 reopen 還原",
+          calls.get(9003) == ["closeForumTopic", "reopenForumTopic"], ctx)
+    check("#304 AC-3／AC-4④ probe 還原失敗 → reopen 恰一次（不重試）",
+          calls.get(9004) == ["closeForumTopic", "reopenForumTopic"], ctx)
+
+    # 回傳值（經 cmd_scan 的 stdout 觀測：探不到的不列入結果區、closed／open 如實標）
+    # ⚠ 不可寫成 `"thread 9001" not in out`：探不到的 thread 會以 cache 過期項的面貌
+    # 出現在**另一區**（`  #901 → thread 9001`），那是既有語意（`#296` 射程外）。
+    results = out.split("本 kit 管理過的 topic")[1].split("\ncache 過期項")[0]
+    check("#304 AC-4 probe 的回傳值：9001 探不到故不在結果區內",
+          "thread 9001" not in results, ctx)
+    check("#304 AC-4 9001 仍以 cache 過期項的面貌被報出（既有語意不動）",
+          "#901 → thread 9001" in out, ctx)
+    check("#304 AC-4② probe closed → 結果那一行標 closed",
+          "thread 9002  closed  #902 單 closed" in results, ctx)
+    check("#304 AC-4③ probe open → 結果那一行標 open 且無未還原標記",
+          "thread 9003  open    #903 單 open\n" in results, ctx)
+
+    # `AC-3`(b)：未還原的狀態印進**該 thread 的結果那一行**
+    want = (f"thread 9004  open    #904 單 還原失敗 "
+            f"⚠ 狀態未還原（仍為 closed）：{P304_REOPEN_FAIL_DESC}")
+    check("#304 AC-3(b) cmd_scan 把未還原狀態印進該 thread 的結果那一行"
+          "（含 description 字面）", want in out, f"期望字面：{want}\n{ctx}")
+    check("#304 AC-3(b) 未還原的標記只落在該 thread 那一行，不汙染其他行",
+          out.count("狀態未還原") == 1, ctx)
+
+    # `AC-3`(a)：stderr 亦有一行可定位的警示（含 thread id 與 description 字面）
+    check("#304 AC-3(a) probe 的 stderr 警示含 thread id 與 description 字面",
+          "thread 9004" in err and P304_REOPEN_FAIL_DESC in err, ctx)
+    check("#304 AC-3(a) probe 的 stderr 警示只對還原失敗那一個 thread 發出",
+          err.count("狀態未還原") == 1, ctx)
+    check("#304 AC-3 還原成功的 9003 不留任何警示",
+          "9003" not in err, ctx)
+
+    # 鑑別力的對照：缺陷版實作會對 9002 發 reopen，上面 `calls.get(9002)` 那條會轉 FAIL
+    check("#304 AC-2 鑑別力記錄：本組斷言驗的是呼叫序列，"
+          "只驗回傳值的版本在缺陷實作下同樣 PASS（故不可只驗回傳值）",
+          "reopenForumTopic" not in calls.get(9002, []), ctx)
+
+
+@case("#304 AC-5 射程：devflow_archive.py 的掃描函式 AST 與 base 逐一相同")
+def _p304_scope_archive():
+    import ast
+    old = subprocess.run(
+        ["git", "show",
+         f"{P304_BASE}:devflow/channels/scripts/telegram/devflow_archive.py"],
+        capture_output=True, text=True, cwd=REPO).stdout
+    check(f"#304 AC-5 取得 base（{P304_BASE}）的 devflow_archive.py",
+          bool(old.strip()), "git show 無輸出")
+    if not old.strip():
+        return
+
+    def funcs(src: str) -> dict:
+        return {n.name: ast.dump(n) for n in ast.parse(src).body
+                if isinstance(n, ast.FunctionDef)}
+
+    o, n = funcs(old), funcs(ARCHIVE_SRC)
+    # `#296` 的成果本單一字不動（候選集合與上界來源）
+    for name in ("scan_upper_bound", "scan_candidates", "_forge_scan_items",
+                 "scan_sources"):
+        check(f"#304 AC-5 {name} 的 AST 與 base 逐一相同（不動 #296／#287 的成果）",
+              name in o and name in n and o[name] == n[name],
+              f"base 有={name in o} 本單有={name in n}")
+    check("#304 AC-5 devflow_archive.py 既有函式一個都沒被移除",
+          not (o.keys() - n.keys()), f"{sorted(o.keys() - n.keys())!r}")
+    changed = sorted(k for k in o.keys() & n.keys() if o[k] != n[k])
+    # 期望集合**不放寬**：本單只改 `cmd_scan`（內嵌的 `probe` ＋ 結果那一行）。
+    # `cmd_scan` 自 `#287` 起已在 `:1577` 那條的期望集合內，本單不必動它。
+    check("#304 AC-5 相對 base 改變的函式恰為 cmd_scan（write scope 之內，不含 main）",
+          changed == ["cmd_scan"], f"改變的函式: {changed!r}")
+    check("#304 AC-5 本單不新增任何頂層函式（不抽共用 helper、不新開 _probe.py）",
+          not (n.keys() - o.keys()), f"新增: {sorted(n.keys() - o.keys())!r}")
+
+
+@case("#304 AC-5 射程：devflow_topic.py 除 _alive 外的頂層函式 AST 與 base 相同")
+def _p304_scope_topic():
+    import ast
+    old = subprocess.run(
+        ["git", "show",
+         f"{P304_BASE}:devflow/channels/scripts/telegram/devflow_topic.py"],
+        capture_output=True, text=True, cwd=REPO).stdout
+    check(f"#304 AC-5 取得 base（{P304_BASE}）的 devflow_topic.py",
+          bool(old.strip()), "git show 無輸出")
+    if not old.strip():
+        return
+
+    def funcs(src: str) -> dict:
+        return {n.name: ast.dump(n) for n in ast.parse(src).body
+                if isinstance(n, ast.FunctionDef)}
+
+    o, n = funcs(old), funcs((SCRIPTS / "devflow_topic.py").read_text())
+    changed = sorted(k for k in o.keys() & n.keys() if o[k] != n[k])
+    check("#304 AC-5 devflow_topic.py 相對 base 改變的函式恰為 _alive",
+          changed == ["_alive"], f"改變的函式: {changed!r}")
+    for name in ("ensure", "close", "sync", "api", "_from_forge", "_to_forge",
+                 "_topic_name", "_cache", "_save"):
+        check(f"#304 AC-5 {name} 的 AST 與 base 相同",
+              name in o and name in n and o[name] == n[name],
+              f"base 有={name in o} 本單有={name in n}")
+    check("#304 AC-5 devflow_topic.py 既有函式一個都沒被移除",
+          not (o.keys() - n.keys()), f"{sorted(o.keys() - n.keys())!r}")
+    check("#304 AC-5 devflow_topic.py 不新增頂層函式（不抽共用 helper）",
+          not (n.keys() - o.keys()), f"新增: {sorted(n.keys() - o.keys())!r}")
+    # `ensure` 未動，故「呼叫端不依賴 reopen 副作用」在機械層亦可見：
+    # 它只讀 `_alive` 的布林回傳（`if tid and _alive(tid)`）。
+    check("#304 AC-10 ensure 仍只用 _alive 的布林回傳（不依賴狀態被改變的副作用）",
+          "_alive(tid)" in (SCRIPTS / "devflow_topic.py").read_text()
+          and o["ensure"] == n["ensure"])
+
+
+@case("#304 AC-7／AC-8 telegram.md 新增兩格：分區探活（📝）與 scan 探活集合（✅）")
+def _p304_telegram_md():
+    md = (REPO / "devflow" / "channels" / "telegram.md").read_text()
+    rows = [ln for ln in md.splitlines() if ln.startswith("| ")]
+    probe_row = [ln for ln in rows if ln.startswith("| 分區探活 |")]
+    scan_row = [ln for ln in rows if ln.startswith("| `scan` 探活集合 |")]
+    check("#304 AC-7 有恰一格「分區探活」（單行、`|` 分欄）", len(probe_row) == 1,
+          f"命中 {len(probe_row)} 行")
+    check("#304 AC-8 有恰一格「`scan` 探活集合」", len(scan_row) == 1,
+          f"命中 {len(scan_row)} 行")
+    if not (probe_row and scan_row):
+        return
+    pr, sr = probe_row[0], scan_row[0]
+
+    # `AC-7`：三態判準、只對原本 open 還原、還原失敗處置、兩處實作位置、狀態 📝
+    for frag, why in (("TOPIC_ID_INVALID", "三態判準之一"),
+                      ("TOPIC_NOT_MODIFIED", "三態判準之一"),
+                      ("只對原本 open", "只對原本 open 的分區還原"),
+                      ("不重試", "還原失敗的處置"),
+                      ("`_alive`", "實作位置一"),
+                      ("`probe`", "實作位置二"),
+                      ("devflow_topic.py", "實作位置一的檔"),
+                      ("devflow_archive.py", "實作位置二的檔"),
+                      ("administrator", "`R10` 受測環境"),
+                      ("`#304` `AC-6`", "證據欄指向協調位的 AC-6 留言")):
+        check(f"#304 AC-7 分區探活格載「{frag}」（{why}）", frag in pr,
+              pr[:200])
+    check("#304 AC-7 分區探活格的狀態欄為 📝（R9 子類「驗證未達 ✅」）",
+          "| 📝 " in pr and "| ✅ " not in pr and "| ⬜ " not in pr,
+          pr[-300:])
+
+    # `AC-8`：兩種宣稱、兩個集合、實測值、差集判準、狀態 ✅、牆鐘不作門檻
+    for frag, why in (("標記 ∪ cache ∪ archives", "預設的探活集合"),
+                      ("range(2, hi)", "--full 的探活集合"),
+                      ("26", "預設實測探活量"),
+                      ("36.5s", "預設實測牆鐘"),
+                      ("4639", "--full 實測探活量"),
+                      ("4641", "--full 的 hi"),
+                      ("15m14s", "--full 實測牆鐘"),
+                      ("本 kit 管理過的", "預設的宣稱"),
+                      ("群組實際存在的", "--full 的宣稱"),
+                      ("261, 4591", "兩模式的命中相同"),
+                      ("尾延遲", "牆鐘受尾延遲支配"),
+                      ("不設上限門檻", "牆鐘不得寫成門檻"),
+                      ("issues/296#issuecomment", "證據連結指向 #296 的 AC-6 留言")):
+        check(f"#304 AC-8 scan 探活集合格載「{frag}」（{why}）", frag in sr,
+              sr[:200])
+    check("#304 AC-8 scan 探活集合格的狀態欄為 ✅（#296 有真 API 實跑可引）",
+          "| ✅ " in sr, sr[-300:])
+    check("#304 AC-8 差集判準三項俱在（full ⊇ 預設、差集全為探活失敗、反向差集空）",
+          "⊇" in sr and "差集" in sr and "反向差集" in sr, sr[:400])
+
+
+@case("#304 AC-10 devflow/VERSION ＝ 0.16.1.0（V2 的 c 位：修正既有能力的缺陷）")
+def _p304_version():
+    raw = (REPO / "devflow" / "VERSION").read_text().strip()
+    check("#304 AC-10 VERSION == 0.16.1.0", raw == "0.16.1.0", repr(raw))
+    ok, why = _version_gt(raw, "0.16.0.0")
+    check("#304 AC-10 嚴格大於 base（#296）的 0.16.0.0", ok, f"{raw!r}：{why}")
 
 
 # ── 收尾 ────────────────────────────────────────────────────────────────────
