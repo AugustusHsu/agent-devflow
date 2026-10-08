@@ -23,6 +23,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 sys.dont_write_bytecode = True          # 不在受測目錄留 __pycache__（repo 慣例）
@@ -3485,22 +3486,75 @@ P306_WIN = 20                           # 滑動視窗長度（Python len，中�
 # `AC-2` 正向：範本內的 ID 引用只認 `` `ID` `` 反引號形式（裸 ID 不算引用）。
 P306_ID_RE = re.compile(r"`([A-Z]+[0-9]+)`")
 
-# `AC-2` 正向的必含 ID：每份範本「述及條文可套之處」至少要以 ID 引用到的那些條。
-# 來源：依各範本現況逐節核對——該節在講哪條規則的後果，就把那條列進來；零懸空擋不住
-# 「該引而未引」，這個集合才擋得住（見 `_p306_ac2_forward_mutation`）。
+# `AC-2` 正向的必含 ID：**逐檔的現況完整集合**——該範本現在所有的 `` `ID` `` 引用。
+# 來源：head `90324c0` 的範本現況，以 `re.findall(P306_ID_RE, …)` 跑一次寫死；範本增刪
+# 引用時同步更新本常數。
+#
+# 為什麼不手選「該引的那幾條」：手選集合只擋得住被選中的那幾個 ID，移除集合外的既有
+# 引用（例如 manager 的 `R2`、coordinator 的 `G2`）會被放過。以現況全集為下界，
+# **任一既有引用被移除都擋得住**。
+#
+# 為什麼是 ⊇ 而非 ==：常數是**下界**。範本新增 ID 引用是好事（`AC-2` 的方向正是
+# 「凡述及條文可套之處皆以 ID 引用」），等值斷言會讓每次補引用都得先改測試，與該方向
+# 相反。反方向（新增引用）刻意不擋。
 P306_REQUIRED_IDS: dict[str, set[str]] = {
-    # `I5` 與 `CH1` 四份皆須：前者是「職位本體不複製」的依據（首段就靠它），後者是
-    # 「通道不是權威」——這兩條在每份範本都有適用處，缺任一就是在無依據地述規則。
-    # 分區界線與通道權威、收尾封存、派單前的材料齊備、合併前提
-    "coordinator": {"I5", "CH1", "CH2", "CH3", "C5", "L1", "M1", "R1"},
-    # 派工材料、唯讀執行的雙方註明、阻擋項處置、綁定候選不得自行新增
-    "manager": {"I5", "CH1", "L2", "R11", "R12", "I7", "I1", "I2"},
-    # 每輪全新 context、唯讀執行、證據住 forge、受測環境記載
-    "reviewer": {"I5", "CH1", "R1", "R12", "R5", "R10"},
-    # 一單一分支一 worktree、不在主 checkout、未決事項的停續判準、累積與全新的對偶
-    "implementer": {"I5", "CH1", "I1", "I2", "L3", "R1"},
-    # 一個事實只住一處、不由安裝產生的理由、操作層不得新增綁定候選
+    "coordinator": {"C5", "CH1", "CH2", "CH3", "G2", "I5", "L1", "M1", "R1"},
+    "manager": {"CH1", "I1", "I2", "I5", "I7", "L2", "L3", "R1", "R10", "R11",
+                "R12", "R2"},
+    "reviewer": {"CH1", "I5", "R1", "R10", "R12", "R5"},
+    "implementer": {"CH1", "I1", "I2", "I5", "L3", "R1"},
     "README": {"I5", "I6", "I7"},
+}
+
+# `AC-3` 的 locator 多重集合：逐檔現況的 `telegram.md「格名」`／
+# `channels/README.md「節名」` 全部命中與其**次數**。鍵為 `(來源檔, 格名或節名)`。
+# 來源：head `90324c0` 的範本現況，以同一組正則跑一次寫死；範本增刪引用時同步更新。
+#
+# 為什麼要帶次數、不只驗「每檔 ≥1」：只驗存在時，移掉某一處 locator、保留敘述與該檔
+# 其他引用會被放過（例如 manager 的兩處「子程序退出後的銜接」拔掉一處）。逐鍵 ≥ 的
+# 多重集合下界擋得住「任一處 locator 被拔掉」。
+#
+# 同樣是**下界**而非等值，理由同 `P306_REQUIRED_IDS`。
+#
+# ⚠ 一處刻意缺漏：`coordinator.md` 另引用了 `telegram.md` 的「第二棒的…行」那一格，
+# 其格名含一個英文詞，而 `#300` `AC-2` 的既有斷言（`test_relay.py`）要求本檔**零**該
+# 字面；`test_relay.py` 不在本單的 write scope 內，故本常數不收那一鍵（連註解也不能
+# 寫出該詞）。該處引用仍受本族的零懸空檢查（跑時從範本讀，不經本常數），只是不被釘進
+# 下界。此缺漏已回報待裁決。
+P306_REQUIRED_LOCATORS: dict[str, dict[tuple[str, str], int]] = {
+    "coordinator": {
+        ("channels/README.md", "分區三態"): 1,
+        ("channels/README.md", "四職能"): 1,
+        ("channels/README.md", "通道側收尾（`C5`、`CH3`）"): 1,
+        ("telegram.md", "`scan` 探活集合"): 1,
+        ("telegram.md", "seat 間喚醒"): 1,
+        ("telegram.md", "session 與 thread 的綁定"): 1,
+        ("telegram.md", "分區探活"): 1,
+        ("telegram.md", "分區狀態 INVALID 判定"): 1,
+        ("telegram.md", "分區狀態判準"): 1,
+        ("telegram.md", "在 General 下指令的限制"): 1,
+        ("telegram.md", "子程序退出後的銜接"): 1,
+        ("telegram.md", "封存標記 upsert 反測"): 1,
+        ("telegram.md", "封存標記寫入"): 1,
+        ("telegram.md", "封存程序"): 2,
+    },
+    "manager": {
+        ("telegram.md", "seat 間喚醒"): 1,
+        ("telegram.md", "子程序退出後的銜接"): 2,
+    },
+    "reviewer": {
+        ("channels/README.md", "四職能"): 1,
+        ("telegram.md", "seat 間喚醒"): 1,
+        ("telegram.md", "子程序退出後的銜接"): 1,
+    },
+    "implementer": {
+        ("channels/README.md", "四職能"): 1,
+        ("telegram.md", "seat 間喚醒"): 1,
+        ("telegram.md", "子程序退出後的銜接"): 1,
+    },
+    "README": {
+        ("channels/README.md", "為什麼這層會有實作"): 1,
+    },
 }
 
 # `AC-5`：persona 前言（四份人格檔的第 1 行逐字相同，default profile 亦有）。
@@ -3619,10 +3673,11 @@ def _p306_ac2_forward():
         check(f"#306 AC-2 {name}.md 的 ID 引用零懸空（{len(ids)} 個相異 ID）",
               not dangling, f"懸空 {dangling!r}")
         # 零懸空只擋「引用了不存在的 ID」，擋不住「該引而未引」——後者才是 (c) 會漂的
-        # 方向：述及條文可套之處若不以 ID 引用，就是在複述規則而非引用它。故另驗必含集合。
+        # 方向：述及條文可套之處若不以 ID 引用，就是在複述規則而非引用它。故另驗現況
+        # 全集為下界（移除任一既有引用即 FAIL）。
         missing = sorted(P306_REQUIRED_IDS[name] - ids)
-        check(f"#306 AC-2 {name}.md 述及條文可套之處皆以 ID 引用"
-              f"（必含 {sorted(P306_REQUIRED_IDS[name])}）",
+        check(f"#306 AC-2 {name}.md 的 ID 引用涵蓋現況全集"
+              f"（{len(P306_REQUIRED_IDS[name])} 個，下界非等值）",
               not missing, f"缺 {missing!r}；實得 {sorted(ids)!r}")
     check("#306 AC-2 五檔合計的相異 ID 引用數非 0（否則懸空檢查空轉）", total >= 20,
           f"{total} 個")
@@ -3633,15 +3688,17 @@ def _p306_ac2_forward():
           f"{fake} in rules={fake in rules}")
 
 
-@case("#306 AC-2 鑑別力：移除任一必含 ID 的反引號引用 → 正向判準 FAIL")
+@case("#306 AC-2 鑑別力：移除任一既有 ID 引用的反引號 → 正向判準 FAIL")
 def _p306_ac2_forward_mutation():
     """記憶體內反測（不寫檔）：逐檔逐 ID 把 `` `ID` `` 的反引號拆掉。
 
     拆掉反引號模擬的正是「述及該條文但不以 ID 引用」——文字還在、引用沒了。
+    迴圈跑的是 `P306_REQUIRED_IDS`（現況全集），所以每一個既有引用都各有一條反測；
+    `R1` 第 2 輪的候選（manager 的 `R2`、coordinator 的 `G2`）因此自然涵蓋。
     """
     for name in P306_FILES:
         base_ids = set(_p306_tpl_ids(name))
-        check(f"#306 AC-2 鑑別力：{name}.md 現狀含齊必含 ID（判準非恆假）",
+        check(f"#306 AC-2 鑑別力：{name}.md 現狀涵蓋現況全集（判準非恆假）",
               P306_REQUIRED_IDS[name] <= base_ids,
               f"缺 {sorted(P306_REQUIRED_IDS[name] - base_ids)!r}")
         for rid in sorted(P306_REQUIRED_IDS[name]):
@@ -3670,29 +3727,75 @@ def _p306_readme_headings() -> set[str]:
             if re.match(r"^##+ ", ln)}
 
 
+P306_CELL_RE = re.compile(r"telegram\.md「([^」]+)」")
+P306_HEAD_RE = re.compile(r"channels/README\.md「([^」]+)」")
+
+
+def _p306_locators(text: str) -> Counter[tuple[str, str]]:
+    """文本內的 locator 多重集合：`(來源檔, 格名或節名)` → 出現次數。
+
+    固定寫法：`telegram.md「<格名>」` 與 `channels/README.md「<節名>」`（全形引號）。
+    帶次數是 `AC-3` 的一部分——只驗「存在」時，拔掉同檔的其中一處引用會被放過。
+    """
+    c: Counter[tuple[str, str]] = Counter(
+        ("telegram.md", x) for x in P306_CELL_RE.findall(text))
+    c.update(("channels/README.md", x) for x in P306_HEAD_RE.findall(text))
+    return c
+
+
 @case("#306 AC-3 範本引用的 telegram.md 格名與 channels/README.md 節名零懸空")
 def _p306_ac3():
     cells, heads = _p306_cell_names(), _p306_readme_headings()
     check("#306 AC-3 telegram.md 的格名集合非空", len(cells) >= 8, f"{len(cells)} 格")
     check("#306 AC-3 channels/README.md 的節名集合非空", len(heads) >= 5,
           f"{len(heads)} 節")
-    # 固定寫法：`telegram.md「<格名>」` 與 `channels/README.md「<節名>」`（全形引號）。
-    cell_re = re.compile(r"telegram\.md「([^」]+)」")
-    head_re = re.compile(r"channels/README\.md「([^」]+)」")
     for name in P306_FILES:
-        t = _p306_tpl_text(name)
-        got_cells, got_heads = cell_re.findall(t), head_re.findall(t)
-        n = len(got_cells) + len(got_heads)
-        # **每份至少一處**——否則零懸空只是因為一處引用都沒有（斷言空轉）。
-        check(f"#306 AC-3 {name}.md 至少一處對照表引用（實得 {n} 處）", n >= 1,
-              f"格名 {got_cells!r} 節名 {got_heads!r}")
-        bad = ([c for c in got_cells if c not in cells]
-               + [h for h in got_heads if h not in heads])
+        got = _p306_locators(_p306_tpl_text(name))
+        # 「每份至少一處」只擋得住「一處都沒有」；逐鍵 ≥ 現況多重集合才擋得住
+        # 「拔掉其中一處、保留敘述與其他引用」（`R1` 第 2 輪的候選 3）。
+        need = P306_REQUIRED_LOCATORS[name]
+        short = {k: (need[k], got[k]) for k in need if got[k] < need[k]}
+        check(f"#306 AC-3 {name}.md 的 locator 涵蓋現況多重集合"
+              f"（{sum(need.values())} 處，逐鍵 ≥、下界非等值）",
+              not short, f"不足 {short!r}（期望, 實得）")
+        check(f"#306 AC-3 {name}.md 至少一處對照表引用（實得 {sum(got.values())} 處）",
+              sum(got.values()) >= 1, f"{sorted(got.items())!r}")
+        bad = sorted(k for k in got
+                     if not (k[1] in cells if k[0] == "telegram.md"
+                             else k[1] in heads))
         check(f"#306 AC-3 {name}.md 的對照表引用零懸空", not bad, f"懸空 {bad!r}")
     # 鑑別力：捏一個不存在的格名，同一組判準須判懸空。
     fake = "telegram.md「這格不存在」"
     check("#306 AC-3 鑑別力：不存在的格名會被判懸空",
-          cell_re.findall(fake) == ["這格不存在"] and "這格不存在" not in cells)
+          P306_CELL_RE.findall(fake) == ["這格不存在"] and "這格不存在" not in cells)
+
+
+@case("#306 AC-3 鑑別力：拔掉任一處 locator（保留敘述）→ 判準 FAIL")
+def _p306_ac3_mutation():
+    """記憶體內反測（不寫檔）：`R1` 第 2 輪的候選 3。
+
+    逐檔逐 locator 把 `telegram.md「X」`／`channels/README.md「X」` 換成無 locator 的
+    裸文字「那格」／「那節」，敘述仍在、定位沒了。只驗「每檔 ≥1」時這種變異會被放過。
+    """
+    for name in P306_FILES:
+        need = P306_REQUIRED_LOCATORS[name]
+        base = _p306_locators(_p306_tpl_text(name))
+        check(f"#306 AC-3 鑑別力：{name}.md 現狀涵蓋現況多重集合（判準非恆假）",
+              all(base[k] >= v for k, v in need.items()),
+              f"實得 {sorted(base.items())!r}")
+        for src, label in sorted(need):
+            bare = "那格" if src == "telegram.md" else "那節"
+            # 只換掉第一處（count=1）：同鍵有多處時，拔一處即應 FAIL。
+            mutant = _p306_tpl_text(name).replace(f"{src}「{label}」", bare, 1)
+            got = _p306_locators(mutant)
+            short = {k: (need[k], got[k]) for k in need if got[k] < need[k]}
+            check(f"#306 AC-3 鑑別力：{name}.md 拔掉 {src}「{label}」一處 → 判準 FAIL",
+                  bool(short), f"變異後仍涵蓋：{sorted(got.items())!r}")
+            # 對偶證明舊判準（每檔 ≥1）放過了這個候選——除非該檔本來只有一處。
+            if sum(need.values()) > 1:
+                check(f"#306 AC-3 鑑別力：{name}.md 拔掉 {src}「{label}」後"
+                      f"舊判準（≥1）仍 PASS（假陰性）",
+                      sum(got.values()) >= 1, f"實得 {sum(got.values())} 處")
 
 
 @case("#306 AC-3 反向：範本不得含「沒有條文依據」字面（該缺口已由 CH3／C5 補上）")
