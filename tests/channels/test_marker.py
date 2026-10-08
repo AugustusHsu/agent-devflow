@@ -2952,12 +2952,14 @@ def _p304_alive(responses, thread_id=4863, mod=None):
 
     target = mod or topic
     calls = []
+    # 未在 `responses` 內的呼叫**不 raise**：缺陷版實作會對 `TOPIC_NOT_MODIFIED`
+    # 那支多發一次 reopen，raise 會讓整個子測試以「未預期例外」收場、後面的斷言跑不到，
+    # 看不出是哪一條在擋。回一個 `ok: false` 讓那一條斷言自己 FAIL 得明確。
+    unexpected = {"ok": False, "description": "stub: 未預期的 API 呼叫"}
 
     def fake_api(method, **kw):
         calls.append(method)
-        if method not in responses:
-            raise AssertionError(f"未預期的 API 呼叫：{method}（序列 {calls!r}）")
-        return responses[method]
+        return responses.get(method, unexpected)
 
     orig = target.api
     target.api = fake_api
