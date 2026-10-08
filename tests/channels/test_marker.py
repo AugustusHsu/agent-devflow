@@ -3017,6 +3017,7 @@ def _p304_alive_states():
 
 @case("#304 AC-1 _alive 的 docstring 前提已修正（不再寫無條件的「回到原點」保證）")
 def _p304_alive_doc():
+    import ast
     doc = topic._alive.__doc__ or ""
     base_src = subprocess.run(
         ["git", "show",
@@ -3034,6 +3035,81 @@ def _p304_alive_doc():
           "（它只在原本 open 時成立）", stale not in doc, doc[:400])
     check("#304 AC-3 docstring 寫明還原失敗只回報不重試",
           "不重試" in doc, doc[:600])
+
+    # ── `R1` 第 1 輪 BLOCK 1：禁同義的錯誤通則，不只禁 base 的精確舊字串 ──────
+    # 第 1 輪的斷言只擋 `stale`（base 的原句），於是修正稿自己寫出的
+    # 「現在『狀態回到原點』對三態都成立」通則**穿過了全部斷言**——而該通則與同函式
+    # 的還原失敗分支矛盾（reopen 失敗時狀態停在 closed，並未回到原點）。判準因此改為
+    # 一正一反兩條：**禁**「對三態都成立」、**要求**「只有 reopen 成功才回到原點」。
+    #
+    # 以 `ast.get_docstring` 取（不是 `__doc__`）：前者讀的是**原始碼**的 docstring
+    # 節點，不受 `-OO`／快取影響，且與 manager 的複驗指令同一取法。
+    # 去空白後比對：docstring 會因折行而在字串中間插入換行與縮排，
+    # 「只有 reopen 成功才回到原點」在原文裡跨行（`**只有 reopen 成功才回到原點**`
+    # 被 `——` 斷開），不去空白的 `in` 會漏判。
+    def _doc_norm(src: str, fname: str = "_alive") -> str:
+        fn = [n for n in ast.parse(src).body
+              if isinstance(n, ast.FunctionDef) and n.name == fname][0]
+        return re.sub(r"\s+", "", ast.get_docstring(fn) or "")
+
+    def _doc_ok(d: str) -> bool:
+        """BLOCK 1 的判準本體——唯一的判定函式，正反兩個 fixture 共用。"""
+        return "對三態都成立" not in d and "只有reopen成功" in d
+
+    cur = _doc_norm((SCRIPTS / "devflow_topic.py").read_text())
+    check("#304 AC-1／BLOCK 1 docstring 不含錯誤通則「對三態都成立」"
+          "（它與還原失敗那支矛盾）", "對三態都成立" not in cur, cur[:300])
+    check("#304 AC-1／BLOCK 1 docstring 逐字含「只有 reopen 成功才回到原點」"
+          "（收窄的前提，非通則）", "只有reopen成功" in cur, cur[:300])
+    check("#304 AC-1／BLOCK 1 現行 docstring 過判準（與 manager 複驗指令同一取法）",
+          _doc_ok(cur), cur[:300])
+
+    # 鑑別力：同一個判準對三份構造的 docstring 須給出 T 預跑的答案。
+    # ① 第 1 輪被 BLOCK 的那份原文（通則版）→ 必須 FAIL
+    # ② 只刪通則、沒補收窄句 → 仍 FAIL（禁止項不是唯一條件）
+    # ③ base 的原句（`stale`）→ FAIL（它連三態都沒寫）
+    P304_DOC_GENERAL = ('''"""探活。
+
+        現在「狀態回到原點」對三態都成立，代價是多一個分支。
+        """''')
+    P304_DOC_SILENT = ('''"""探活。
+
+        依 closeForumTopic 的回傳分三態，只在本呼叫改到狀態時還原。
+        """''')
+    P304_DOC_BASE = ('''"""探活。
+
+        一關一開後狀態回到原點，且不碰名稱。
+        """''')
+    for fixture, want, label in (
+            (P304_DOC_GENERAL, False,
+             "第 1 輪被 BLOCK 的通則版（含「對三態都成立」）→ FAIL"),
+            (P304_DOC_SILENT, False,
+             "只刪通則、未補「只有 reopen 成功才回到原點」→ FAIL"),
+            (P304_DOC_BASE, False, "base 的原句（無條件保證）→ FAIL")):
+        got = _doc_ok(_doc_norm(f"def _alive(t):\n    {fixture}\n"))
+        check(f"#304 AC-1／BLOCK 1 鑑別力：{label}", got is want,
+              f"實得 {got}（期望 {want}）")
+
+    # 反向鑑別力：修正稿的那段話單獨餵進同一判準須 PASS
+    # ——證明上面三個 FAIL 不是因為判準恆假。
+    P304_DOC_FIXED = ('''"""探活。
+
+        `ok: true` 那支是唯一會改到狀態的路徑，而**只有 reopen 成功才回到原點**
+        ——reopen 失敗時狀態**停在 closed**，只回報、不重試。
+        """''')
+    check("#304 AC-1／BLOCK 1 鑑別力：修正稿的收窄句 → PASS（判準非恆假）",
+          _doc_ok(_doc_norm(f"def _alive(t):\n    {P304_DOC_FIXED}\n")) is True)
+
+    # 與 reopen 失敗那支的一致性：docstring 既然宣稱「失敗時停在 closed」，
+    # 實作就必須真的在那支不重試（上面 `_p304_alive_states` 的 ④ 已驗呼叫序列）。
+    # 這一條把文件宣稱與該實測綁在一起——文件改了而實作沒改會被這裡攔下。
+    _got, _calls, _err = _p304_alive({"closeForumTopic": P304_OK,
+                                      "reopenForumTopic": P304_REOPEN_FAIL})
+    check("#304 AC-1／BLOCK 1 docstring 宣稱的例外與實作一致："
+          "reopen 失敗時狀態停在 closed（不重試）且有回報",
+          _calls == ["closeForumTopic", "reopenForumTopic"]
+          and "未還原" in _err and "closed" in _err,
+          f"序列 {_calls!r} | stderr {_err!r}")
 
 
 def _p304_run_cmd_scan(per_tid, cache_obj, *, archives=None):
@@ -3230,13 +3306,63 @@ def _p304_telegram_md():
                       ("`probe`", "實作位置二"),
                       ("devflow_topic.py", "實作位置一的檔"),
                       ("devflow_archive.py", "實作位置二的檔"),
-                      ("administrator", "`R10` 受測環境"),
-                      ("`#304` `AC-6`", "證據欄指向協調位的 AC-6 留言")):
+                      ("administrator", "`R10` 受測環境")):
         check(f"#304 AC-7 分區探活格載「{frag}」（{why}）", frag in pr,
               pr[:200])
     check("#304 AC-7 分區探活格的狀態欄為 📝（R9 子類「驗證未達 ✅」）",
           "| 📝 " in pr and "| ✅ " not in pr and "| ⬜ " not in pr,
           pr[-300:])
+
+    # ── `R1` 第 1 輪 BLOCK 2：本格不得宣稱 AC-6 已完成或引用尚未存在的留言 ────
+    # 第 1 輪的這格把 `AC-6` 寫成已完成（「由協調位以自建誘餌分區實跑」「證據：見
+    # `#304` `AC-6` 留言」＋ 填上「首次驗證＝最近確認 2026-10-08」），而 forge 實查
+    # 該留言**不存在**（`gh issue view 304 --comments` 只有轉播器自己留的第二棒
+    # 紀錄行，沒有任何 `AC-6` 的實測紀錄）——`R9`／`R10`
+    # 的證據記載因此不是當前事實。第 1 輪的斷言反而**要求**那個指向不存在留言的字面，
+    # 即斷言本身在為錯誤記載背書，故連同改掉。
+    #
+    # ⚠ 本段刻意不寫那個第二棒標記的英文字面：`test_relay.py` 的 `#300 AC-2` 斷言
+    # **本檔不得含該字面**（它是 `#300` 的射程證明——grammar 沒有上移到共用模組、
+    # 本檔零改動）。寫進來會讓那條假 FAIL，那是另一張單的判準，不在本單射程。
+    #
+    # 判準是一正一反：**禁**完成式的兩個字面、**要求**「收尾前」。
+    # 與 manager 的複驗指令同一組字面（PR #305 處置表）。
+    P304_MD_FORBIDDEN = ("見 `#304` `AC-6` 留言", "由協調位以自建誘餌分區實跑")
+    for frag in P304_MD_FORBIDDEN:
+        check(f"#304 AC-7／BLOCK 2 分區探活格**不含**完成式字面「{frag}」"
+              "（該留言在本格合併時尚不存在）", frag not in pr, pr[-600:])
+    check("#304 AC-7／BLOCK 2 分區探活格明示 AC-6 由協調位「收尾前」執行（未來式）",
+          "收尾前" in pr, pr[-600:])
+    check("#304 AC-7／BLOCK 2 分區探活格明說該留言尚未出現（不引用不存在的紀錄）",
+          "尚未出現" in pr, pr[-600:])
+    check("#304 AC-7／BLOCK 2 真 API 層的受測環境標為待 AC-6 留言後依 R9／R10 重定",
+          "重定" in pr and "待" in pr, pr[-600:])
+    # `R10` 的受測環境須載**現時唯一實跑**（程式層樁測試）的環境，不是真 API 的
+    for frag, why in (("3.14.7", "程式層的 python 版本"),
+                      ("Linux 7.0.0", "程式層的 OS"),
+                      ("tests/channels/test_marker.py", "程式層的實跑對象"),
+                      ("不打任何 API", "程式層不需權限")):
+        check(f"#304 AC-7／BLOCK 2 受測環境載程式層的「{frag}」（{why}）",
+              frag in pr, pr[-900:])
+    # 證據欄改引**存在**的東西：PR #305 與 issue body 根因段的誘餌 thread 4863
+    check("#304 AC-7／BLOCK 2 證據欄引 PR #305 與 issue body 根因段的誘餌 thread 4863"
+          "（兩者皆現存可讀回）",
+          "PR #305" in pr and "4863" in pr and "issue body" in pr, pr[-600:])
+    # 鑑別力：第 1 輪的那份原文餵進同一判準須 FAIL
+    P304_MD_R1_ROW = ("| 分區探活 | x | y | 📝 已宣稱（真 API 層：`#304` `AC-6` "
+                      "由協調位以自建誘餌分區實跑，腳本全文附在該單留言使第三者可重跑。"
+                      "受測環境（`R10`）：首次驗證＝最近確認 2026-10-08；"
+                      "證據：見 `#304` `AC-6` 留言） |")
+
+    def _md_ok(row: str) -> bool:
+        """BLOCK 2 的判準本體——正反兩份 row 共用。"""
+        return (all(f not in row for f in P304_MD_FORBIDDEN)
+                and "收尾前" in row and "尚未出現" in row)
+
+    check("#304 AC-7／BLOCK 2 鑑別力：第 1 輪被 BLOCK 的那份原文 → FAIL",
+          _md_ok(P304_MD_R1_ROW) is False, P304_MD_R1_ROW[:200])
+    check("#304 AC-7／BLOCK 2 鑑別力：現行這格 → PASS（判準非恆假）",
+          _md_ok(pr) is True, pr[-600:])
 
     # `AC-8`：兩種宣稱、兩個集合、實測值、差集判準、狀態 ✅、牆鐘不作門檻
     for frag, why in (("標記 ∪ cache ∪ archives", "預設的探活集合"),
