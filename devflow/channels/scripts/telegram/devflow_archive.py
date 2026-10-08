@@ -683,10 +683,24 @@ def cmd_scan(args) -> int:
     """
     from concurrent.futures import ThreadPoolExecutor
 
+    # 還原失敗的 thread id → API 的 `description` 字面。
+    # `probe` 的三分支**本體不動**（`#304` `AC-1`：它已是正確實作，本單只補回報）；
+    # 這裡補的是 `#296` 那次發作的缺口 —— `--full` 那輪 `reopenForumTopic` 在 ~31 秒
+    # 尾延遲下 timeout 而**回傳未被檢查**，把活著的 thread 4591 留在 closed，由人手動
+    # 救回。回報**不重試**（裁決位 2026-10-08）：重試會讓一個唯讀查詢變成帶重試的寫入。
+    unrestored: dict[int, str] = {}
+
     def probe(tid: int):
         res = api("closeForumTopic", chat_id=CHAT, message_thread_id=tid)
         if res.get("ok"):
-            api("reopenForumTopic", chat_id=CHAT, message_thread_id=tid)
+            back = api("reopenForumTopic", chat_id=CHAT, message_thread_id=tid)
+            if not back.get("ok"):
+                # stderr 一行可定位的警示（含 thread id 與 `description` 字面），
+                # 且下方結果那一行亦標記——stderr 在轉播／oneshot 下可能沒有讀者。
+                desc = str(back.get("description"))
+                unrestored[tid] = desc
+                print(f"  ⚠ thread {tid} 狀態未還原（探活關閉後 reopenForumTopic "
+                      f"失敗，仍為 closed）：{desc}", file=sys.stderr)
             return ("open", tid)
         if "TOPIC_NOT_MODIFIED" in res.get("description", ""):
             return ("closed", tid)
@@ -763,6 +777,10 @@ def cmd_scan(args) -> int:
     for state, tid in sorted(found, key=lambda x: x[1]):
         num, title, _ = issue_meta(str(tid))
         tag = f"#{num} {title[:40]}" if num else ("📦 archives" if tid == ARCHIVES_THREAD else "")
+        # 未還原的狀態印進**該 thread 的結果那一行**（`#304` `AC-3`(b)）：呼叫端讀
+        # stdout 就能知道「這個分區被探活留在 closed 了」，不必去翻 stderr。
+        if tid in unrestored:
+            tag = (f"{tag} ⚠ 狀態未還原（仍為 closed）：{unrestored[tid]}".strip())
         print(f"  thread {tid:>4}  {state:<6}  {tag}")
 
     # cache 過期項的語意不動（`#296` 射程外）：cache 指向的 thread 探不到就是死條目。

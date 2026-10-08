@@ -93,22 +93,62 @@ def _to_forge(issue, thread_id):
 
 
 def _alive(thread_id):
-    """thread 是否還存在。
+    """thread 是否還存在。**只對原本 open 的分區還原狀態。**
 
-    ⚠ 兩個雷，都實測過：
+    ⚠ 三個雷，都實測過：
+
     1. ``editForumTopic`` 不帶任何可改欄位時形同 no-op，對**已刪除的 thread 也回
        ok=True**，探活完全失效。必須帶一個可改欄位。
     2. 帶 ``name`` 會**真的改掉 topic 名稱**。若探活時傳的值與原名不同（例如 cache
        缺 title 而用了 fallback），每次探活都在重命名 topic。
+    3. ``closeForumTopic`` 對**已關閉**的 topic 回 ``ok: false`` ＋
+       ``TOPIC_NOT_MODIFIED``、對**開啟中**的回 ``ok: true``。原實作只排除
+       ``TOPIC_ID_INVALID``、其餘一律 ``reopenForumTopic``，於是**把刻意關閉的分區
+       打開了**（`#304` 誘餌分區 thread 4863 實測：關閉 → 探活 → 狀態變回 open）。
 
-    解法：用 ``closeForumTopic`` + ``reopenForumTopic`` 探活——它會改狀態（故能驗證
-    thread 存在），但一關一開後狀態回到原點，且不碰名稱。已關閉的 topic 對
-    ``closeForumTopic`` 回 ok，不影響判定。
+    解法：依 ``closeForumTopic`` 的回傳分三態，只在「本呼叫真的改到狀態」時還原：
+
+    ====================  ========  ==========  ======
+    closeForumTopic 回傳  原狀態    動作        回傳
+    ====================  ========  ==========  ======
+    TOPIC_ID_INVALID      不存在    不動        False
+    TOPIC_NOT_MODIFIED    closed    **不動**    True
+    ok: true              open      reopen 還原 True
+    ====================  ========  ==========  ======
+
+    ⚠ **前提修正**：原 docstring 把「狀態回到原點」寫成了**無條件**的保證（原文是
+    「一關一開後」那一句，可在 base 的版本讀到）——**那只在分區原本是 open 時成立**。
+    寫註解的人只測了 open 的情況，把特例寫成了通則，而該註解此後一直在為缺陷背書
+    （讀者想確認這函式是否唯讀，會讀到一句明確的保證）。
+
+    **修正後的前提仍是收窄的、不是通則**：`TOPIC_ID_INVALID` 與
+    `TOPIC_NOT_MODIFIED` 兩支根本不動狀態，故無所謂還原；`ok: true` 那支是本函式
+    唯一會改到狀態的路徑，而**只有 reopen 成功才回到原點**——reopen 失敗時狀態
+    **停在 closed**，本函式只回報、不重試（見下段）。換言之「狀態回到原點」有一個
+    明確的例外，不得再寫成對所有分支都成立。
+
+    還原失敗**只回報、不重試**（`#304` 裁決位 2026-10-08）：重試會讓一個唯讀查詢
+    變成帶重試的寫入操作，問題更大。回報走 stderr，含 thread id 與 API 的
+    ``description`` 字面（`#304` `AC-3`）。
+
+    第四種回傳（既非 INVALID 亦非 NOT_MODIFIED 的失敗，如權限／限流／網路）**維持
+    原行為回 True**：那不是「分區不存在」的證據，回 False 會讓 ``ensure`` 誤判為死
+    thread 而重建分區——`#304` 不改這一支的語意（`probe` 在此支回 ``None``，兩者的
+    差異是既有事實，本單不動 ``probe`` 的分支）。
     """
     r = api("closeForumTopic", chat_id=CHAT, message_thread_id=thread_id)
-    if not r.get("ok") and "TOPIC_ID_INVALID" in r.get("description", ""):
+    if r.get("ok"):
+        # 本呼叫剛把一個 open 的分區關了 —— 只有這一支需要還原。
+        back = api("reopenForumTopic", chat_id=CHAT, message_thread_id=thread_id)
+        if not back.get("ok"):
+            print(f"# ⚠ thread {thread_id} 狀態未還原（探活關閉後 reopenForumTopic "
+                  f"失敗，仍為 closed）：{back.get('description')}", file=sys.stderr)
+        return True
+    desc = r.get("description", "")
+    if "TOPIC_ID_INVALID" in desc:
         return False
-    api("reopenForumTopic", chat_id=CHAT, message_thread_id=thread_id)
+    if "TOPIC_NOT_MODIFIED" in desc:
+        return True            # 原本就是 closed，本呼叫沒改到它 → 不動
     return True
 
 
