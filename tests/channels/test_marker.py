@@ -3448,12 +3448,444 @@ def _p304_telegram_md():
           "⊇" in sr and "差集" in sr and "反向差集" in sr, sr[:400])
 
 
-@case("#304 AC-10 devflow/VERSION ＝ 0.16.1.0（V2 的 c 位：修正既有能力的缺陷）")
+@case("#304 AC-10 devflow/VERSION 嚴格大於 0.16.0.0（#304 進 c 位至 0.16.1.0 之後的下界）")
 def _p304_version():
     raw = (REPO / "devflow" / "VERSION").read_text().strip()
-    check("#304 AC-10 VERSION == 0.16.1.0", raw == "0.16.1.0", repr(raw))
+    # `#306` 改法：原斷言寫死 `== "0.16.1.0"`，而 `#304` 合併後的**每一次**進位都會讓它
+    # 假 FAIL 一次（本單進 b 位至 `0.17.0.0` 即第一次）。這與 `:1593` 的 `#287` `AC-8`
+    # 治本、`:2911` 的 `#296` `AC-9` 治本同形（「程式持有的假設在狀態變動後失效」），
+    # 故照同一個模式改成「合四碼形狀 ＋ **嚴格大於下界**」、不刪整條。
+    # 下界取 `0.16.0.0`——它是 `#304` 的 base（`#296` 當時的值），故 `#304` 的宣稱
+    # （VERSION 已超過 base）仍被守住，只是不再禁止後續單進位。
+    # 本單自己的等值斷言在 `_p306_version`。
+    check("#304 AC-10 形狀合 V1 的四碼", bool(VERSION_SHAPE.fullmatch(raw)), repr(raw))
     ok, why = _version_gt(raw, "0.16.0.0")
     check("#304 AC-10 嚴格大於 base（#296）的 0.16.0.0", ok, f"{raw!r}：{why}")
+    check("#304 AC-10 已達 #304 的 0.16.1.0（≥，本單之後由 #306 定等值）",
+          tuple(int(x) for x in raw.split(".")) >= (0, 16, 1, 0), repr(raw))
+
+
+# ── #306 人格檔範本（channels/templates/）的靜態斷言 ────────────────────────
+# 本族**只讀 repo 內的檔**：範本、`WORKFLOW.md`、`telegram.md`、`channels/README.md`。
+# 不讀協調平台的 profile 目錄（那在 repo 外、在 AC 視野外，見 `templates/README.md`
+# 的「(c) 的已知上限」），也不讀任何快照目錄——測試的輸入必須與受版控的內容同步。
+#
+# ⚠ 本族的字面常數為何寫死而不從別處讀：
+#   - persona 前言（`P306_PERSONA`）寫死，因為它的來源在 repo 外；從檔案讀會讓測試
+#     依賴一個不受版控的輸入。
+#   - 共用句（`P306_SHARED`）寫死，因為 `AC-8` 要驗的正是「四份逐字相同且等於這一句」；
+#     從範本讀會讓該斷言退化成恆真。
+P306_TPL = REPO / "devflow" / "channels" / "templates"
+P306_SEATS = ("coordinator", "manager", "reviewer", "implementer")
+P306_FILES = P306_SEATS + ("README",)
+
+# `AC-2` 的規則行定義：`^- \`ID\` ` 開頭者，去掉該前綴、空白折疊為單一空格。
+P306_RULE_RE = re.compile(r"^- `([A-Z]+[0-9]+)` (.*)$")
+P306_WIN = 20                           # 滑動視窗長度（Python len，中英同計）
+
+# `AC-5`：persona 前言的開頭（四份人格檔的第 1 行逐字相同，default profile 亦有）。
+P306_PERSONA = (
+    "You are Hermes Agent, built by Nous Research. Be direct: match the length "
+    "of your reply to the weight of the ask — a one-line question gets a "
+    "one-line answer"
+)
+
+# `AC-8`：那一行逐字重複四次的共用句。
+P306_SHARED = ("**本檔只能收窄或細化 `devflow/seats/**` 與 "
+               "`devflow/WORKFLOW.md`，不得牴觸。**")
+
+# `AC-4`：禁字面（本機具名 instance）。掃描**整檔**，含程式碼區塊內外。
+P306_BANNED_LOCAL = ("augustushsu", "AugustusHsu", "1003546152597",
+                     "/home/", "~/.hermes/scripts/")
+# `AC-7` 反向：不得宣稱 profile 漂移已被處置。
+P306_BANNED_CLAIM = ("已解決", "解決了", "不再")
+# `AC-6` 例外的允許集合（不是「跳過 README」）：來源單與抽出門檻的理由單。
+P306_README_ISSUES = {"#306", "#285"}
+
+
+def _p306_flat(s: str) -> str:
+    """空白折疊為單一空格（`AC-2`／`AC-5` 兩側共用同一個正規化）。"""
+    return re.sub(r"\s+", " ", s)
+
+
+def _p306_tpl_text(name: str) -> str:
+    return (P306_TPL / f"{name}.md").read_text()
+
+
+def _p306_rule_bodies() -> dict[str, str]:
+    """`WORKFLOW.md` 的規則行集合：ID → 去前綴且折疊空白後的本文。"""
+    out: dict[str, str] = {}
+    for ln in (REPO / "devflow" / "WORKFLOW.md").read_text().splitlines():
+        m = P306_RULE_RE.match(ln)
+        if m:
+            out[m.group(1)] = _p306_flat(m.group(2))
+    return out
+
+
+def _p306_windows(text: str, n: int = P306_WIN) -> list[str]:
+    return [text[i:i + n] for i in range(max(0, len(text) - n + 1))]
+
+
+def _p306_copy_hits(body: str, rules: dict[str, str]) -> list[tuple[str, str]]:
+    """`AC-2` 反向判準本體：回傳 (視窗, 來源 ID) 清單，空 ＝ 過關。"""
+    flat = _p306_flat(body)
+    hits = []
+    for rid, rbody in rules.items():
+        for win in _p306_windows(rbody):
+            if win in flat:
+                hits.append((win, rid))
+    return hits
+
+
+@case("#306 AC-2 反向：WORKFLOW.md 規則行的 20 字視窗零命中於五檔範本")
+def _p306_ac2_reverse():
+    rules = _p306_rule_bodies()
+    check("#306 AC-2 規則行集合非空（否則本條空轉）", len(rules) >= 80,
+          f"{len(rules)} 條")
+    for name in P306_FILES:
+        hits = _p306_copy_hits(_p306_tpl_text(name), rules)
+        check(f"#306 AC-2 {name}.md 零命中規則原文的 20 字視窗",
+              not hits,
+              "命中 " + "；".join(f"{w!r}←{r}" for w, r in hits[:8]))
+
+
+@case("#306 AC-2 鑑別力：把任一規則行的 20 字貼進範本（記憶體內）→ 判準須 FAIL")
+def _p306_ac2_mutation():
+    # 不寫檔：取現行範本的內容，在記憶體中接上一段真的條文原文再跑同一個判準函式。
+    # 少了這條，`AC-2` 可能只是「範本剛好沒抄」而判準本身零鑑別力（`R6`）。
+    rules = _p306_rule_bodies()
+    victim = sorted(rules)[0]
+    snippet = rules[victim][:P306_WIN]
+    check("#306 AC-2 鑑別力：取到的片段恰 20 字", len(snippet) == P306_WIN,
+          repr(snippet))
+    for name in P306_FILES:
+        base = _p306_tpl_text(name)
+        check(f"#306 AC-2 鑑別力：{name}.md 現狀 → 零命中（判準非恆假）",
+              not _p306_copy_hits(base, rules))
+        for label, mutant in (
+            ("散文行", base + f"\n照抄一段：{snippet}\n"),
+            ("程式碼區塊內", base + f"\n```\n{snippet}\n```\n"),
+        ):
+            got = _p306_copy_hits(mutant, rules)
+            check(f"#306 AC-2 鑑別力：{name}.md 插入條文原文於{label} → 判準 FAIL",
+                  any(r == victim for _, r in got),
+                  f"命中 {got[:3]!r}（期望含 {victim}）")
+
+
+@case("#306 AC-2 正向：範本內每個 `ID` 形式的引用都存在於 WORKFLOW.md 的規則行")
+def _p306_ac2_forward():
+    rules = _p306_rule_bodies()
+    total = 0
+    for name in P306_FILES:
+        ids = re.findall(r"`([A-Z]+[0-9]+)`", _p306_tpl_text(name))
+        total += len(ids)
+        dangling = sorted({i for i in ids if i not in rules})
+        check(f"#306 AC-2 {name}.md 的 ID 引用零懸空（{len(ids)} 處）",
+              not dangling, f"懸空 {dangling!r}")
+    check("#306 AC-2 五檔合計的 ID 引用數非 0（否則懸空檢查空轉）", total >= 20,
+          f"{total} 處")
+    # 鑑別力：捏一個不存在的 ID，同一個判準須判懸空。
+    fake = "ZZ99"
+    check("#306 AC-2 鑑別力：不存在的 ID 會被判懸空",
+          fake not in rules and bool(re.findall(r"`([A-Z]+[0-9]+)`", f"`{fake}`")),
+          f"{fake} in rules={fake in rules}")
+
+
+def _p306_cell_names() -> set[str]:
+    """`telegram.md` 表格「面向」欄的格名集合。"""
+    out = set()
+    for ln in (REPO / "devflow" / "channels" / "telegram.md").read_text().splitlines():
+        if ln.startswith("| ") and not ln.startswith("|---"):
+            first = ln.split(" | ")[0][2:].strip()
+            if first and first != "面向":
+                out.add(first)
+    return out
+
+
+def _p306_readme_headings() -> set[str]:
+    """`channels/README.md` 的 `^##+ ` 標題集合。"""
+    return {ln.lstrip("#").strip()
+            for ln in CHANNELS_README.read_text().splitlines()
+            if re.match(r"^##+ ", ln)}
+
+
+@case("#306 AC-3 範本引用的 telegram.md 格名與 channels/README.md 節名零懸空")
+def _p306_ac3():
+    cells, heads = _p306_cell_names(), _p306_readme_headings()
+    check("#306 AC-3 telegram.md 的格名集合非空", len(cells) >= 8, f"{len(cells)} 格")
+    check("#306 AC-3 channels/README.md 的節名集合非空", len(heads) >= 5,
+          f"{len(heads)} 節")
+    # 固定寫法：`telegram.md「<格名>」` 與 `channels/README.md「<節名>」`（全形引號）。
+    cell_re = re.compile(r"telegram\.md「([^」]+)」")
+    head_re = re.compile(r"channels/README\.md「([^」]+)」")
+    for name in P306_FILES:
+        t = _p306_tpl_text(name)
+        got_cells, got_heads = cell_re.findall(t), head_re.findall(t)
+        n = len(got_cells) + len(got_heads)
+        # **每份至少一處**——否則零懸空只是因為一處引用都沒有（斷言空轉）。
+        check(f"#306 AC-3 {name}.md 至少一處對照表引用（實得 {n} 處）", n >= 1,
+              f"格名 {got_cells!r} 節名 {got_heads!r}")
+        bad = ([c for c in got_cells if c not in cells]
+               + [h for h in got_heads if h not in heads])
+        check(f"#306 AC-3 {name}.md 的對照表引用零懸空", not bad, f"懸空 {bad!r}")
+    # 鑑別力：捏一個不存在的格名，同一組判準須判懸空。
+    fake = "telegram.md「這格不存在」"
+    check("#306 AC-3 鑑別力：不存在的格名會被判懸空",
+          cell_re.findall(fake) == ["這格不存在"] and "這格不存在" not in cells)
+
+
+@case("#306 AC-3 反向：範本不得含「沒有條文依據」字面（該缺口已由 CH3／C5 補上）")
+def _p306_ac3_reverse():
+    for name in P306_FILES:
+        t = _p306_tpl_text(name)
+        check(f"#306 AC-3 {name}.md 不含「沒有條文依據」", "沒有條文依據" not in t)
+    # 正向對偶：封存那一節須實際引用條文 ID（不是只把那句話刪掉）。
+    coord = _p306_tpl_text("coordinator")
+    check("#306 AC-3 coordinator.md 的封存節引用 `C5` 與 `CH3`",
+          "`C5`" in coord and "`CH3`" in coord)
+
+
+def _p306_local_hits(text: str) -> list[str]:
+    """`AC-4` 判準本體：掃描**整檔**（含程式碼區塊內外）。"""
+    return [b for b in P306_BANNED_LOCAL if b in text]
+
+
+@case("#306 AC-4 範本不含本機具名 instance（整檔掃描，含程式碼區塊內）")
+def _p306_ac4():
+    for name in P306_FILES:
+        t = _p306_tpl_text(name)
+        hits = _p306_local_hits(t)
+        check(f"#306 AC-4 {name}.md 不含禁字面 {P306_BANNED_LOCAL}", not hits,
+              f"命中 {hits!r}")
+    # 以占位符表達——正向對偶，否則「不含具名值」可由「什麼都不寫」滿足。
+    for name, need in (("coordinator", "<scripts-dir>"),
+                       ("manager", "<repo>"),
+                       ("implementer", "<worktree>"),
+                       ("reviewer", "<本次日期>"),
+                       ("README", "<scripts-dir>")):
+        check(f"#306 AC-4 {name}.md 以占位符表達（含 `{need}`）",
+              need in _p306_tpl_text(name))
+
+
+@case("#306 AC-4 鑑別力：禁字面插入散文行與程式碼區塊內各一次 → 兩者皆 FAIL")
+def _p306_ac4_mutation():
+    # 不寫檔：在記憶體中變異。兩種位置各跑一次，證明判準不是只掃散文。
+    for name in P306_FILES:
+        base = _p306_tpl_text(name)
+        check(f"#306 AC-4 鑑別力：{name}.md 現狀 → 零命中（判準非恆假）",
+              not _p306_local_hits(base))
+        for banned in P306_BANNED_LOCAL:
+            prose = base + f"\n工作目錄在 {banned} 底下。\n"
+            fenced = base + f"\n```\ncd {banned}\n```\n"
+            check(f"#306 AC-4 鑑別力：{name}.md 散文行含 `{banned}` → FAIL",
+                  _p306_local_hits(prose) == [banned],
+                  f"命中 {_p306_local_hits(prose)!r}")
+            check(f"#306 AC-4 鑑別力：{name}.md 程式碼區塊內含 `{banned}` → FAIL",
+                  _p306_local_hits(fenced) == [banned],
+                  f"命中 {_p306_local_hits(fenced)!r}")
+
+
+@case("#306 AC-5 persona 前言的 20 字視窗零命中於五檔範本")
+def _p306_ac5():
+    # 常數寫死（見本族檔頭）：前言的來源在 repo 外，從檔案讀會讓測試依賴不受版控的輸入。
+    wins = _p306_windows(P306_PERSONA)
+    check("#306 AC-5 前言的視窗數非 0（否則本條空轉）", len(wins) >= 50,
+          f"{len(wins)} 個")
+    for name in P306_FILES:
+        flat = _p306_flat(_p306_tpl_text(name))
+        hits = [w for w in wins if w in flat]
+        check(f"#306 AC-5 {name}.md 零命中前言的 20 字視窗", not hits,
+              f"命中 {hits[:5]!r}")
+    # 鑑別力：把前言貼進任一範本（記憶體內）→ 須命中。
+    for name in P306_FILES:
+        mutant = _p306_flat(_p306_tpl_text(name) + "\n" + P306_PERSONA + "\n")
+        check(f"#306 AC-5 鑑別力：{name}.md 插入前言 → 判準 FAIL",
+              any(w in mutant for w in wins))
+
+
+@case("#306 AC-5 templates/README.md 寫明這是機械事實而非偏好")
+def _p306_ac5_readme():
+    t = _p306_tpl_text("README")
+    for frag, why in (("機械事實", "裁示逐字要求的性質判定"),
+                      ("runtime 注入", "前言的真正來源"),
+                      ("第 1 行", "四份人格檔的位置"),
+                      ("default profile", "與 devflow 無關的 profile 亦有")):
+        check(f"#306 AC-5 README 載「{frag}」（{why}）", frag in t)
+
+
+@case("#306 AC-6 四份範本不含本 repo 的經驗史（`#NNN` 與「實測」）")
+def _p306_ac6():
+    iss_re = re.compile(r"#[0-9]{3}")
+    for name in P306_SEATS:
+        t = _p306_tpl_text(name)
+        check(f"#306 AC-6 {name}.md 零 issue 引用（`#` ＋三位數）",
+              not iss_re.findall(t), f"命中 {sorted(set(iss_re.findall(t)))!r}")
+        check(f"#306 AC-6 {name}.md 不含「實測」", "實測" not in t)
+    # README 的例外是一個**明確的允許集合**，不是跳過該檔。
+    rt = _p306_tpl_text("README")
+    got = set(iss_re.findall(rt))
+    check(f"#306 AC-6 README 的 issue 引用落在允許集合 {sorted(P306_README_ISSUES)}",
+          got <= P306_README_ISSUES, f"實得 {sorted(got)!r}")
+    check("#306 AC-6 README 確實引用了來源單 #306（允許集合非空轉）",
+          "#306" in got, f"實得 {sorted(got)!r}")
+    check("#306 AC-6 README 亦禁「實測」（例外只放寬 issue 引用）",
+          "實測" not in rt)
+    # 鑑別力：允許集合外的編號須被判出。
+    check("#306 AC-6 鑑別力：允許集合不含 #287",
+          "#287" not in P306_README_ISSUES
+          and not ({"#306", "#287"} <= P306_README_ISSUES))
+
+
+@case("#306 AC-7 templates/README.md 載「(c) 的已知上限」三句與範本層定義")
+def _p306_ac7():
+    t = _p306_tpl_text("README")
+    check("#306 AC-7 有「(c) 的已知上限」這一節",
+          bool(re.search(r"^##+ .*\(c\) 的已知上限", t, re.M)),
+          repr([ln for ln in t.splitlines() if ln.startswith("#")]))
+    # T 的三句，逐字。
+    for frag, why in (
+        ("**範本引用條文只保證「範本不漂移」，不保證「使用者照範本做」。**",
+         "上限第一句"),
+        ("仍在 AC 視野外", "上限第二句：profile 的位置"),
+        ("該缺口留給 K6", "上限第三句：缺口的歸屬"),
+    ):
+        check(f"#306 AC-7 README 逐字載「{frag}」（{why}）", frag in t, "")
+    # 範本是什麼、怎麼用、不由安裝產生且為刻意。
+    for frag, why in (("## 怎麼用", "用法節"),
+                      ("複製", "用法：自行複製到人格檔位置"),
+                      ("占位符", "用法：再填占位符"),
+                      ("不由安裝產生", "刻意不由安裝產生"),
+                      ("刻意，不是遺漏", "寫明這是刻意的"),
+                      ("`I6`", "理由：由 kit 寫協調平台的設定與 I6 相反")):
+        check(f"#306 AC-7 README 載「{frag}」（{why}）", frag in t, "")
+
+
+@case("#306 AC-7 反向：五檔範本不得宣稱 profile 漂移已被處置")
+def _p306_ac7_reverse():
+    for name in P306_FILES:
+        t = _p306_tpl_text(name)
+        hits = [b for b in P306_BANNED_CLAIM if b in t]
+        check(f"#306 AC-7 {name}.md 不含 {P306_BANNED_CLAIM}", not hits,
+              f"命中 {hits!r}")
+    # 鑑別力：插入任一宣稱字面 → 同一判準須 FAIL。
+    base = _p306_tpl_text("README")
+    for banned in P306_BANNED_CLAIM:
+        mutant = base + f"\n本單{banned} profile 漂移。\n"
+        check(f"#306 AC-7 鑑別力：插入「{banned}」→ 判準 FAIL",
+              [b for b in P306_BANNED_CLAIM if b in mutant] != [])
+
+
+def _p306_shared_lines() -> list[set[str]]:
+    """四份範本各自的「去空白行、排除 `---` 與 ``` 」行集合。"""
+    out = []
+    for name in P306_SEATS:
+        out.append({ln for ln in _p306_tpl_text(name).splitlines()
+                    if ln.strip() and ln.strip() not in ("---", "```")})
+    return out
+
+
+@case("#306 AC-8 抽出門檻句存在，且四份逐字交集恰為那一行共用句")
+def _p306_ac8():
+    t = _p306_tpl_text("README")
+    threshold = "若將來四份範本的逐字共同行增至 3 行以上，重新評估抽出共用檔"
+    check(f"#306 AC-8 README 載門檻句（含數字 3）「{threshold}」",
+          threshold in t and "3" in threshold, "")
+    for frag, why in (("逐字相同", "判準是逐字"),
+                      ("意思相近", "明寫不是意思相近"),
+                      ("#285", "該限定的理由單")):
+        check(f"#306 AC-8 README 載「{frag}」（{why}）", frag in t, "")
+    # 實算核：四份逐字交集恰 1 行且等於共用句。
+    sets = _p306_shared_lines()
+    check("#306 AC-8 四份各自的行集合皆非空", all(len(s) > 20 for s in sets),
+          f"{[len(s) for s in sets]!r}")
+    inter = set.intersection(*sets)
+    check("#306 AC-8 逐字交集恰 1 行", len(inter) == 1,
+          f"{len(inter)} 行：{sorted(inter)!r}")
+    check("#306 AC-8 該行即共用句（逐字）", inter == {P306_SHARED},
+          f"實得 {sorted(inter)!r}\n期望 {[P306_SHARED]!r}")
+    # 共用句確實在四份各出現一次（交集為 1 不保證它就是那一句——上條已驗相等，
+    # 這條另驗「每份都真的有它」，兩者合起來排除「四份都少了它而交集剛好是別的行」）。
+    for name in P306_SEATS:
+        check(f"#306 AC-8 {name}.md 含共用句",
+              P306_SHARED in _p306_tpl_text(name))
+
+
+@case("#306 AC-8 鑑別力：任一份的共用句改掉一個字 → 交集斷言 FAIL")
+def _p306_ac8_mutation():
+    # 不寫檔：在記憶體中對每一份各變異一次，確認交集不再等於那一句。
+    for i, name in enumerate(P306_SEATS):
+        sets = _p306_shared_lines()
+        mutated = P306_SHARED.replace("不得牴觸", "不得牴觸。")
+        check(f"#306 AC-8 鑑別力：變異字面與原句不同（{name}）",
+              mutated != P306_SHARED)
+        sets[i] = {mutated if ln == P306_SHARED else ln for ln in sets[i]}
+        inter = set.intersection(*sets)
+        check(f"#306 AC-8 鑑別力：{name}.md 的共用句被改 → 交集不再等於共用句",
+              inter != {P306_SHARED}, f"實得 {sorted(inter)!r}")
+        check(f"#306 AC-8 鑑別力：{name}.md 被改後交集為空（該行是唯一共同行）",
+              inter == set(), f"實得 {sorted(inter)!r}")
+
+
+@case("#306 AC-1 templates/ 恰 5 個 .md（反向：不新增 seat-common.md）")
+def _p306_ac1():
+    mds = sorted(p.name for p in P306_TPL.glob("*.md"))
+    check("#306 AC-1 templates/ 下恰 5 個 .md", len(mds) == 5, f"{mds!r}")
+    check("#306 AC-1 五檔即四份 seat 範本 ＋ README",
+          mds == sorted(f"{n}.md" for n in P306_FILES), f"{mds!r}")
+    check("#306 AC-1 無 seat-common.md（裁示 A：共用句逐字重複四次）",
+          not (P306_TPL / "seat-common.md").exists())
+    # 每檔首段點明對應的職位檔（`AC-1`：各自完整、可獨立閱讀）。
+    for name in P306_SEATS:
+        head = "\n".join(_p306_tpl_text(name).splitlines()[:10])
+        check(f"#306 AC-1 {name}.md 首段點明對應 seats/{name}.md",
+              "devflow/seats/" in head and f"`{name}.md`" in head, head)
+        check(f"#306 AC-1 {name}.md 首段聲明職位本體不複製（引用 `I5`）",
+              "`I5`" in head, head)
+
+
+@case("#306 AC-13 devflow/VERSION ＝ 0.17.0.0（V2 的 b 位：新增一層範本）")
+def _p306_version():
+    raw = (REPO / "devflow" / "VERSION").read_text().strip()
+    check("#306 AC-13 形狀合 V1 的四碼", bool(VERSION_SHAPE.fullmatch(raw)),
+          repr(raw))
+    check("#306 AC-13 VERSION == 0.17.0.0", raw == "0.17.0.0", repr(raw))
+    ok, why = _version_gt(raw, "0.16.1.0")
+    check("#306 AC-13 嚴格大於 base（#304）的 0.16.1.0", ok, f"{raw!r}：{why}")
+
+
+@case("#306 AC-9／AC-10 channels/README.md 與 seats/README.md 的記載")
+def _p306_indexes():
+    ch = CHANNELS_README.read_text()
+    # `AC-9`：新增一節指向 templates/，說明承載什麼、與 seats/ 的分工，引用不複製。
+    check("#306 AC-9 channels/README.md 有指向 templates/ 的一節",
+          bool(re.search(r"^##+ .*`templates/`", ch, re.M)),
+          repr([ln for ln in ch.splitlines() if ln.startswith("#")]))
+    for frag, why in (("職位本體", "與 seats/ 的分工：那一側是什麼"),
+                      ("人格檔範本", "與 seats/ 的分工：這一側是什麼"),
+                      ("`templates/README.md`", "引用而不複製的落點"),
+                      ("`I5`", "引用不複製的條文依據")):
+        check(f"#306 AC-9 channels/README.md 的該節載「{frag}」（{why}）",
+              frag in ch, "")
+    # 反向：本節不得重複 (c) 已知上限那三句（`I5`：一個事實只住一處）。
+    for frag in ("不保證「使用者照範本做」", "仍在 AC 視野外", "該缺口留給 K6"):
+        check(f"#306 AC-9 channels/README.md 不重複上限句「{frag}」",
+              frag not in ch, "")
+    # 末節的過期陳述已改：「人格檔範本」不得仍掛在 K4d 的未納管清單裡。
+    tail = ch.split("## 本層不管的事", 1)
+    check("#306 AC-9 channels/README.md 仍有「本層不管的事」節", len(tail) == 2)
+    if len(tail) == 2:
+        last = tail[1]
+        check("#306 AC-9 末節不再把人格檔範本列為 K4d（過期陳述已改）",
+              "人格檔範本：K4d" not in last
+              and "環境結帳、人格檔範本" not in last, last)
+        check("#306 AC-9 末節明寫人格檔範本已納入本層",
+              "人格檔範本已納入本層" in last, last)
+    # `AC-10`：seats/README.md 補一行分工。
+    se = (REPO / "devflow" / "seats" / "README.md").read_text()
+    for frag, why in (("職位本體、不綁工具", "seats/ 這一側"),
+                      ("`devflow/channels/templates/`", "範本那一側的位置"),
+                      ("通道側操作規範", "範本那一側的內容")):
+        check(f"#306 AC-10 seats/README.md 載「{frag}」（{why}）", frag in se, "")
 
 
 # ── 收尾 ────────────────────────────────────────────────────────────────────
