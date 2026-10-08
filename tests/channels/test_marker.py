@@ -3482,13 +3482,44 @@ P306_FILES = P306_SEATS + ("README",)
 # `AC-2` 的規則行定義：`^- \`ID\` ` 開頭者，去掉該前綴、空白折疊為單一空格。
 P306_RULE_RE = re.compile(r"^- `([A-Z]+[0-9]+)` (.*)$")
 P306_WIN = 20                           # 滑動視窗長度（Python len，中英同計）
+# `AC-2` 正向：範本內的 ID 引用只認 `` `ID` `` 反引號形式（裸 ID 不算引用）。
+P306_ID_RE = re.compile(r"`([A-Z]+[0-9]+)`")
 
-# `AC-5`：persona 前言的開頭（四份人格檔的第 1 行逐字相同，default profile 亦有）。
+# `AC-2` 正向的必含 ID：每份範本「述及條文可套之處」至少要以 ID 引用到的那些條。
+# 來源：依各範本現況逐節核對——該節在講哪條規則的後果，就把那條列進來；零懸空擋不住
+# 「該引而未引」，這個集合才擋得住（見 `_p306_ac2_forward_mutation`）。
+P306_REQUIRED_IDS: dict[str, set[str]] = {
+    # `I5` 與 `CH1` 四份皆須：前者是「職位本體不複製」的依據（首段就靠它），後者是
+    # 「通道不是權威」——這兩條在每份範本都有適用處，缺任一就是在無依據地述規則。
+    # 分區界線與通道權威、收尾封存、派單前的材料齊備、合併前提
+    "coordinator": {"I5", "CH1", "CH2", "CH3", "C5", "L1", "M1", "R1"},
+    # 派工材料、唯讀執行的雙方註明、阻擋項處置、綁定候選不得自行新增
+    "manager": {"I5", "CH1", "L2", "R11", "R12", "I7", "I1", "I2"},
+    # 每輪全新 context、唯讀執行、證據住 forge、受測環境記載
+    "reviewer": {"I5", "CH1", "R1", "R12", "R5", "R10"},
+    # 一單一分支一 worktree、不在主 checkout、未決事項的停續判準、累積與全新的對偶
+    "implementer": {"I5", "CH1", "I1", "I2", "L3", "R1"},
+    # 一個事實只住一處、不由安裝產生的理由、操作層不得新增綁定候選
+    "README": {"I5", "I6", "I7"},
+}
+
+# `AC-5`：persona 前言（四份人格檔的第 1 行逐字相同，default profile 亦有）。
+# **完整存全句**：只存開頭會讓後段（例如 “finished work gets a short report”）的 20 字
+# 視窗落在判準之外——那正是 `R1` 第 1 輪指出的假陰性。
 P306_PERSONA = (
     "You are Hermes Agent, built by Nous Research. Be direct: match the length "
     "of your reply to the weight of the ask — a one-line question gets a "
-    "one-line answer"
+    "one-line answer, and finished work gets a short report of what changed, "
+    "what's verified, and what's left, never a replay of the process. No "
+    "filler (\"Great question,\" \"I'd be happy to\"), no restating the request "
+    "back, no re-summarizing what you already said, no narrating tool calls "
+    "the user can see. Plain claims over adjectives; when unsure, say so "
+    "plainly. Agree because it's right, not because the user said it. Depth "
+    "is earned — give it when the user asks for detail, teaches, or the stakes "
+    "demand it, not by default."
 )
+# 後段的一個 20 字視窗，另作「常數確實涵蓋整句」的錨點（`R1` 第 1 輪的候選字面）。
+P306_PERSONA_TAIL = "finished work gets a short report"
 
 # `AC-8`：那一行逐字重複四次的共用句。
 P306_SHARED = ("**本檔只能收窄或細化 `devflow/seats/**` 與 "
@@ -3510,6 +3541,11 @@ def _p306_flat(s: str) -> str:
 
 def _p306_tpl_text(name: str) -> str:
     return (P306_TPL / f"{name}.md").read_text()
+
+
+def _p306_tpl_ids(name: str) -> list[str]:
+    """範本內以 `` `ID` `` 形式出現的條文 ID（裸 ID 不計）。"""
+    return P306_ID_RE.findall(_p306_tpl_text(name))
 
 
 def _p306_rule_bodies() -> dict[str, str]:
@@ -3577,18 +3613,43 @@ def _p306_ac2_forward():
     rules = _p306_rule_bodies()
     total = 0
     for name in P306_FILES:
-        ids = re.findall(r"`([A-Z]+[0-9]+)`", _p306_tpl_text(name))
+        ids = set(_p306_tpl_ids(name))
         total += len(ids)
-        dangling = sorted({i for i in ids if i not in rules})
-        check(f"#306 AC-2 {name}.md 的 ID 引用零懸空（{len(ids)} 處）",
+        dangling = sorted(ids - rules.keys())
+        check(f"#306 AC-2 {name}.md 的 ID 引用零懸空（{len(ids)} 個相異 ID）",
               not dangling, f"懸空 {dangling!r}")
-    check("#306 AC-2 五檔合計的 ID 引用數非 0（否則懸空檢查空轉）", total >= 20,
-          f"{total} 處")
+        # 零懸空只擋「引用了不存在的 ID」，擋不住「該引而未引」——後者才是 (c) 會漂的
+        # 方向：述及條文可套之處若不以 ID 引用，就是在複述規則而非引用它。故另驗必含集合。
+        missing = sorted(P306_REQUIRED_IDS[name] - ids)
+        check(f"#306 AC-2 {name}.md 述及條文可套之處皆以 ID 引用"
+              f"（必含 {sorted(P306_REQUIRED_IDS[name])}）",
+              not missing, f"缺 {missing!r}；實得 {sorted(ids)!r}")
+    check("#306 AC-2 五檔合計的相異 ID 引用數非 0（否則懸空檢查空轉）", total >= 20,
+          f"{total} 個")
     # 鑑別力：捏一個不存在的 ID，同一個判準須判懸空。
     fake = "ZZ99"
     check("#306 AC-2 鑑別力：不存在的 ID 會被判懸空",
-          fake not in rules and bool(re.findall(r"`([A-Z]+[0-9]+)`", f"`{fake}`")),
+          fake not in rules and P306_ID_RE.findall(f"`{fake}`") == [fake],
           f"{fake} in rules={fake in rules}")
+
+
+@case("#306 AC-2 鑑別力：移除任一必含 ID 的反引號引用 → 正向判準 FAIL")
+def _p306_ac2_forward_mutation():
+    """記憶體內反測（不寫檔）：逐檔逐 ID 把 `` `ID` `` 的反引號拆掉。
+
+    拆掉反引號模擬的正是「述及該條文但不以 ID 引用」——文字還在、引用沒了。
+    """
+    for name in P306_FILES:
+        base_ids = set(_p306_tpl_ids(name))
+        check(f"#306 AC-2 鑑別力：{name}.md 現狀含齊必含 ID（判準非恆假）",
+              P306_REQUIRED_IDS[name] <= base_ids,
+              f"缺 {sorted(P306_REQUIRED_IDS[name] - base_ids)!r}")
+        for rid in sorted(P306_REQUIRED_IDS[name]):
+            mutant = _p306_tpl_text(name).replace(f"`{rid}`", rid)
+            got = set(P306_ID_RE.findall(mutant))
+            check(f"#306 AC-2 鑑別力：{name}.md 移除 `{rid}` 的引用 → 判準 FAIL",
+                  not (P306_REQUIRED_IDS[name] <= got),
+                  f"變異後仍含齊：{sorted(got)!r}")
 
 
 def _p306_cell_names() -> set[str]:
@@ -3691,6 +3752,12 @@ def _p306_ac5():
     wins = _p306_windows(P306_PERSONA)
     check("#306 AC-5 前言的視窗數非 0（否則本條空轉）", len(wins) >= 50,
           f"{len(wins)} 個")
+    # 常數須涵蓋**完整**前言，不只開頭：後段若落在判準外，貼後段就逃得掉。
+    check("#306 AC-5 常數涵蓋前言後段（視窗判準及於整句）",
+          P306_PERSONA_TAIL in P306_PERSONA
+          and len(P306_PERSONA) >= 600, f"{len(P306_PERSONA)} 字")
+    check(f"#306 AC-5 後段錨點「{P306_PERSONA_TAIL}」本身長於視窗（可被切出視窗）",
+          len(P306_PERSONA_TAIL) > P306_WIN, f"{len(P306_PERSONA_TAIL)} 字")
     for name in P306_FILES:
         flat = _p306_flat(_p306_tpl_text(name))
         hits = [w for w in wins if w in flat]
@@ -3701,6 +3768,26 @@ def _p306_ac5():
         mutant = _p306_flat(_p306_tpl_text(name) + "\n" + P306_PERSONA + "\n")
         check(f"#306 AC-5 鑑別力：{name}.md 插入前言 → 判準 FAIL",
               any(w in mutant for w in wins))
+
+
+@case("#306 AC-5 鑑別力：只插入前言後段（非開頭）→ 判準仍 FAIL")
+def _p306_ac5_mutation():
+    """記憶體內反測（不寫檔）：`R1` 第 1 輪的候選——貼後段而不貼開頭。
+
+    常數只存開頭時，後段的視窗不在 `wins` 裡，這個變異會被放過。
+    """
+    wins = _p306_windows(P306_PERSONA)
+    tail_wins = [w for w in _p306_windows(P306_PERSONA_TAIL) if w in wins]
+    check(f"#306 AC-5 鑑別力：後段可切出 {len(tail_wins)} 個視窗且皆在判準內",
+          len(tail_wins) >= 10, f"{len(tail_wins)} 個")
+    for name in P306_FILES:
+        base = _p306_flat(_p306_tpl_text(name))
+        check(f"#306 AC-5 鑑別力：{name}.md 現狀零命中（判準非恆真）",
+              not [w for w in wins if w in base])
+        mutant = _p306_flat(_p306_tpl_text(name) + "\n" + P306_PERSONA_TAIL + "\n")
+        got = [w for w in wins if w in mutant]
+        check(f"#306 AC-5 鑑別力：{name}.md 插入後段「{P306_PERSONA_TAIL}」→ 判準 FAIL",
+              got != [], f"命中 {got[:3]!r}")
 
 
 @case("#306 AC-5 templates/README.md 寫明這是機械事實而非偏好")
@@ -3736,20 +3823,48 @@ def _p306_ac6():
           and not ({"#306", "#287"} <= P306_README_ISSUES))
 
 
+def _p306_section(text: str, head_re: str) -> str:
+    """切出 `^##+ <head_re>` 到下一個同級或更高級標題之間的節文（不含標題行）。
+
+    `AC-7` 要的是「三句在那一節內」——全檔搜尋會讓三句搬到別節、該節留空仍 PASS。
+    """
+    lines = text.splitlines()
+    start = None
+    level = 0
+    for i, ln in enumerate(lines):
+        if re.match(rf"^##+ .*{head_re}", ln):
+            start = i
+            level = len(ln) - len(ln.lstrip("#"))
+            break
+    if start is None:
+        return ""
+    body = []
+    for ln in lines[start + 1:]:
+        m = re.match(r"^(#+) ", ln)
+        if m and len(m.group(1)) <= level:
+            break
+        body.append(ln)
+    return "\n".join(body)
+
+
 @case("#306 AC-7 templates/README.md 載「(c) 的已知上限」三句與範本層定義")
 def _p306_ac7():
     t = _p306_tpl_text("README")
     check("#306 AC-7 有「(c) 的已知上限」這一節",
           bool(re.search(r"^##+ .*\(c\) 的已知上限", t, re.M)),
           repr([ln for ln in t.splitlines() if ln.startswith("#")]))
-    # T 的三句，逐字。
+    # T 的三句，逐字，且**只在該節內**找（搬到別節不算）。
+    sect = _p306_section(t, r"\(c\) 的已知上限")
+    check("#306 AC-7 該節的節文非空（否則節內檢查空轉）", len(sect.strip()) >= 100,
+          f"{len(sect.strip())} 字")
     for frag, why in (
         ("**範本引用條文只保證「範本不漂移」，不保證「使用者照範本做」。**",
          "上限第一句"),
         ("仍在 AC 視野外", "上限第二句：profile 的位置"),
         ("該缺口留給 K6", "上限第三句：缺口的歸屬"),
     ):
-        check(f"#306 AC-7 README 逐字載「{frag}」（{why}）", frag in t, "")
+        check(f"#306 AC-7 「(c) 的已知上限」節內逐字載「{frag}」（{why}）",
+              frag in sect, "")
     # 範本是什麼、怎麼用、不由安裝產生且為刻意。
     for frag, why in (("## 怎麼用", "用法節"),
                       ("複製", "用法：自行複製到人格檔位置"),
@@ -3758,6 +3873,31 @@ def _p306_ac7():
                       ("刻意，不是遺漏", "寫明這是刻意的"),
                       ("`I6`", "理由：由 kit 寫協調平台的設定與 I6 相反")):
         check(f"#306 AC-7 README 載「{frag}」（{why}）", frag in t, "")
+
+
+@case("#306 AC-7 鑑別力：三句搬出「(c) 的已知上限」節、節留空 → 判準 FAIL")
+def _p306_ac7_mutation():
+    """記憶體內反測（不寫檔）：`R1` 第 1 輪的候選——三句還在檔內、但不在那一節。
+
+    全檔搜尋時三句仍命中，故此變異會被放過；節內搜尋才擋得住。
+    """
+    t = _p306_tpl_text("README")
+    head = "## ⚠️ (c) 的已知上限"
+    check("#306 AC-7 鑑別力：README 含該節標題（變異可施作）", head in t, "")
+    sect = _p306_section(t, r"\(c\) 的已知上限")
+    three = ("**範本引用條文只保證「範本不漂移」，不保證「使用者照範本做」。**",
+             "仍在 AC 視野外", "該缺口留給 K6")
+    check("#306 AC-7 鑑別力：現狀三句皆在節內（判準非恆假）",
+          all(f in sect for f in three), "")
+    # 變異：把整節節文搬到檔首（另一節之內），原節只留一行無關文字。
+    mutant = t.replace(head + "\n" + sect, head + "\n\n（本節留空）\n")
+    mutant = sect + "\n" + mutant
+    mut_sect = _p306_section(mutant, r"\(c\) 的已知上限")
+    for f in three:
+        check(f"#306 AC-7 鑑別力：變異後「{f[:12]}…」仍在檔內（全檔搜尋放過）",
+              f in mutant, "")
+        check(f"#306 AC-7 鑑別力：變異後「{f[:12]}…」已不在節內 → 判準 FAIL",
+              f not in mut_sect, f"節文 {mut_sect[:80]!r}")
 
 
 @case("#306 AC-7 反向：五檔範本不得宣稱 profile 漂移已被處置")
@@ -3775,13 +3915,28 @@ def _p306_ac7_reverse():
               [b for b in P306_BANNED_CLAIM if b in mutant] != [])
 
 
-def _p306_shared_lines() -> list[set[str]]:
-    """四份範本各自的「去空白行、排除 `---` 與 ``` 」行集合。"""
+def _p306_shared_lines() -> list[list[str]]:
+    """四份範本各自的「去空白行、排除 `---` 與 ``` 」行**序列**（保留重複）。
+
+    用 list 而非 set：`AC-8` 的門檻以「逐字共同行的行數」為判準，set 會把同一份內
+    重複一次的共用句壓成一個，使「`[2,1,1,1]` 次」這種未達候選被放過。
+    """
     out = []
     for name in P306_SEATS:
-        out.append({ln for ln in _p306_tpl_text(name).splitlines()
-                    if ln.strip() and ln.strip() not in ("---", "```")})
+        out.append([ln for ln in _p306_tpl_text(name).splitlines()
+                    if ln.strip() and ln.strip() not in ("---", "```")])
     return out
+
+
+def _p306_common_lines(seqs: list[list[str]]) -> set[str]:
+    """四份皆出現、且每份**恰出現一次**的行（共同行的定義）。
+
+    「恰一次」是 `AC-8` 的一部分：共用句在某一份重複，那一份就不只是「照抄一行」，
+    門檻句數不再對應四份的實際共同結構。
+    """
+    sets = [set(s) for s in seqs]
+    return {ln for ln in set.intersection(*sets)
+            if all(s.count(ln) == 1 for s in seqs)}
 
 
 @case("#306 AC-8 抽出門檻句存在，且四份逐字交集恰為那一行共用句")
@@ -3794,36 +3949,61 @@ def _p306_ac8():
                       ("意思相近", "明寫不是意思相近"),
                       ("#285", "該限定的理由單")):
         check(f"#306 AC-8 README 載「{frag}」（{why}）", frag in t, "")
-    # 實算核：四份逐字交集恰 1 行且等於共用句。
-    sets = _p306_shared_lines()
-    check("#306 AC-8 四份各自的行集合皆非空", all(len(s) > 20 for s in sets),
-          f"{[len(s) for s in sets]!r}")
-    inter = set.intersection(*sets)
-    check("#306 AC-8 逐字交集恰 1 行", len(inter) == 1,
+    # 實算核：四份的共同行恰 1 行且等於共用句。
+    seqs = _p306_shared_lines()
+    check("#306 AC-8 四份各自的行序列皆非空", all(len(s) > 20 for s in seqs),
+          f"{[len(s) for s in seqs]!r}")
+    inter = _p306_common_lines(seqs)
+    check("#306 AC-8 逐字共同行恰 1 行", len(inter) == 1,
           f"{len(inter)} 行：{sorted(inter)!r}")
     check("#306 AC-8 該行即共用句（逐字）", inter == {P306_SHARED},
           f"實得 {sorted(inter)!r}\n期望 {[P306_SHARED]!r}")
-    # 共用句確實在四份各出現一次（交集為 1 不保證它就是那一句——上條已驗相等，
-    # 這條另驗「每份都真的有它」，兩者合起來排除「四份都少了它而交集剛好是別的行」）。
-    for name in P306_SEATS:
-        check(f"#306 AC-8 {name}.md 含共用句",
-              P306_SHARED in _p306_tpl_text(name))
+    # 次數：四份**各恰 1 次**、合計恰 4。多一次即非「逐字重複四次」那個結構。
+    counts = [s.count(P306_SHARED) for s in seqs]
+    check("#306 AC-8 共用句在四份各恰 1 次（合計恰 4）",
+          counts == [1, 1, 1, 1] and sum(counts) == 4, f"實得 {counts!r}")
+    for name, n in zip(P306_SEATS, counts):
+        check(f"#306 AC-8 {name}.md 含共用句恰 1 次", n == 1, f"{n} 次")
 
 
 @case("#306 AC-8 鑑別力：任一份的共用句改掉一個字 → 交集斷言 FAIL")
 def _p306_ac8_mutation():
     # 不寫檔：在記憶體中對每一份各變異一次，確認交集不再等於那一句。
     for i, name in enumerate(P306_SEATS):
-        sets = _p306_shared_lines()
+        seqs = _p306_shared_lines()
         mutated = P306_SHARED.replace("不得牴觸", "不得牴觸。")
         check(f"#306 AC-8 鑑別力：變異字面與原句不同（{name}）",
               mutated != P306_SHARED)
-        sets[i] = {mutated if ln == P306_SHARED else ln for ln in sets[i]}
-        inter = set.intersection(*sets)
+        seqs[i] = [mutated if ln == P306_SHARED else ln for ln in seqs[i]]
+        inter = _p306_common_lines(seqs)
         check(f"#306 AC-8 鑑別力：{name}.md 的共用句被改 → 交集不再等於共用句",
               inter != {P306_SHARED}, f"實得 {sorted(inter)!r}")
         check(f"#306 AC-8 鑑別力：{name}.md 被改後交集為空（該行是唯一共同行）",
               inter == set(), f"實得 {sorted(inter)!r}")
+
+
+@case("#306 AC-8 鑑別力：共用句在某一份重複一次（`[2,1,1,1]`）→ 判準 FAIL")
+def _p306_ac8_dup_mutation():
+    """記憶體內反測（不寫檔）：`R1` 第 1 輪的候選。
+
+    set 交集在次數 `[2,1,1,1]` 下仍為 `{共用句}`，故舊判準放過；`count` 判準擋得住。
+    """
+    for i, name in enumerate(P306_SEATS):
+        seqs = _p306_shared_lines()
+        base_counts = [s.count(P306_SHARED) for s in seqs]
+        check(f"#306 AC-8 鑑別力：現狀四份各 1 次（判準非恆假，{name} 回合）",
+              base_counts == [1, 1, 1, 1], f"實得 {base_counts!r}")
+        seqs[i] = seqs[i] + [P306_SHARED]      # 該份重複一次
+        counts = [s.count(P306_SHARED) for s in seqs]
+        check(f"#306 AC-8 鑑別力：{name}.md 重複共用句 → 次數判準 FAIL",
+              counts != [1, 1, 1, 1] and sum(counts) == 5, f"實得 {counts!r}")
+        # 同時證明舊的 set 交集放過了這個候選——這就是假陰性的機械證據。
+        set_inter = set.intersection(*[set(s) for s in seqs])
+        check(f"#306 AC-8 鑑別力：{name}.md 重複時舊 set 交集仍為共用句（假陰性）",
+              set_inter == {P306_SHARED}, f"實得 {sorted(set_inter)!r}")
+        check(f"#306 AC-8 鑑別力：{name}.md 重複時新共同行判準已排除該行",
+              _p306_common_lines(seqs) == set(),
+              f"實得 {sorted(_p306_common_lines(seqs))!r}")
 
 
 @case("#306 AC-1 templates/ 恰 5 個 .md（反向：不新增 seat-common.md）")
