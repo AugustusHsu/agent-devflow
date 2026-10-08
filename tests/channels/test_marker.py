@@ -3313,56 +3313,118 @@ def _p304_telegram_md():
           "| 📝 " in pr and "| ✅ " not in pr and "| ⬜ " not in pr,
           pr[-300:])
 
-    # ── `R1` 第 1 輪 BLOCK 2：本格不得宣稱 AC-6 已完成或引用尚未存在的留言 ────
-    # 第 1 輪的這格把 `AC-6` 寫成已完成（「由協調位以自建誘餌分區實跑」「證據：見
-    # `#304` `AC-6` 留言」＋ 填上「首次驗證＝最近確認 2026-10-08」），而 forge 實查
-    # 該留言**不存在**（`gh issue view 304 --comments` 只有轉播器自己留的第二棒
-    # 紀錄行，沒有任何 `AC-6` 的實測紀錄）——`R9`／`R10`
-    # 的證據記載因此不是當前事實。第 1 輪的斷言反而**要求**那個指向不存在留言的字面，
-    # 即斷言本身在為錯誤記載背書，故連同改掉。
+    # ── `R1` 第 1 輪 BLOCK 2 ＋ 裁決位第二次升人裁示 A：狀態欄的判準須時間無關 ──
+    # 兩輪的病是**同一型**，第二輪才看清：受版控的文字（以及**要求該文字存在的斷言**）
+    # 不得宣稱一個會自行變動的狀態——真值取決於何時讀，與 `#303` `AC-3` 同族。
+    #
+    #   第 1 輪：格子寫「由協調位以自建誘餌分區實跑」「證據：見 `#304` `AC-6` 留言」，
+    #            而那則留言當時**不存在** → 記載不是當前事實。
+    #   第 2 輪：改成「`AC-6` 由協調位於收尾前執行／該留言尚未出現／待 `AC-6` 留言」，
+    #            仍是時間依賴——`AC-6` 跑完之後這些句子就變成假陳述，而**本檔原有四條
+    #            斷言正向要求它們存在**，等於把同一型缺陷留在測試裡（實跑 539/543）。
+    #            裁示 A：射程擴為 `telegram.md` ＋ 本檔 2 檔，判準改時間無關。
+    #            https://github.com/AugustusHsu/agent-devflow/issues/304#issuecomment-6053215354
+    #            https://github.com/AugustusHsu/agent-devflow/issues/304#issuecomment-6058727866
+    #
+    # 判準因此是一禁一要求，兩者都與「何時讀」無關：
+    #   (a) **禁用詞**（下列 `P304_MD_BANNED_TIME`，裁示逐字）不得出現於**狀態欄**
+    #   (b) **要求穩定的證據把手字面**（`P304_MD_HANDLES`）：留言 id 與兩個誘餌
+    #       thread id。它們指向**已發生且可讀回**的紀錄，不隨時間改變真值。
+    #
+    # ⚠ 判準的作用域是**狀態欄**（` | ` 分欄後的最後一欄），不是整列：值欄描述的是
+    # 機制本身（三態判準、處置、實作位置），那裡出現「不重試」這類詞與時間無關，
+    # 不在本判準射程。裁示明文如此界定。
     #
     # ⚠ 本段刻意不寫那個第二棒標記的英文字面：`test_relay.py` 的 `#300 AC-2` 斷言
     # **本檔不得含該字面**（它是 `#300` 的射程證明——grammar 沒有上移到共用模組、
     # 本檔零改動）。寫進來會讓那條假 FAIL，那是另一張單的判準，不在本單射程。
-    #
-    # 判準是一正一反：**禁**完成式的兩個字面、**要求**「收尾前」。
-    # 與 manager 的複驗指令同一組字面（PR #305 處置表）。
-    P304_MD_FORBIDDEN = ("見 `#304` `AC-6` 留言", "由協調位以自建誘餌分區實跑")
-    for frag in P304_MD_FORBIDDEN:
-        check(f"#304 AC-7／BLOCK 2 分區探活格**不含**完成式字面「{frag}」"
-              "（該留言在本格合併時尚不存在）", frag not in pr, pr[-600:])
-    check("#304 AC-7／BLOCK 2 分區探活格明示 AC-6 由協調位「收尾前」執行（未來式）",
-          "收尾前" in pr, pr[-600:])
-    check("#304 AC-7／BLOCK 2 分區探活格明說該留言尚未出現（不引用不存在的紀錄）",
-          "尚未出現" in pr, pr[-600:])
-    check("#304 AC-7／BLOCK 2 真 API 層的受測環境標為待 AC-6 留言後依 R9／R10 重定",
-          "重定" in pr and "待" in pr, pr[-600:])
-    # `R10` 的受測環境須載**現時唯一實跑**（程式層樁測試）的環境，不是真 API 的
+    # 下面兩份 fixture 取自 git，已逐一核對不含它。
+    P304_MD_BANNED_TIME = ("待", "尚未", "屆時", "合併時", "收尾前")
+    # 第一組的前身：第 1 輪那兩個完成式字面。它們同樣是時間依賴（宣稱一件當時還沒
+    # 發生的事已完成），故留在禁用清單裡，但主判準是上面那五個詞。
+    P304_MD_BANNED_CLAIM = ("見 `#304` `AC-6` 留言", "由協調位以自建誘餌分區實跑")
+    P304_MD_HANDLES = ("issuecomment-6052326088", "5034", "5039")
+
+    def _status_col(row: str) -> str:
+        """狀態欄 ＝ 該列以 ` | ` 分欄後的最後一欄（裁示的定義）。"""
+        return row.split(" | ")[-1]
+
+    def _md_ok(row: str) -> bool:
+        """BLOCK 2 的判準本體——現行這格與兩份反例 fixture 共用。
+
+        時間無關：只問「狀態欄有沒有自行變動的宣稱」與「有沒有指向既有紀錄的把手」，
+        不問任何「現在是什麼時候」。
+        """
+        st = _status_col(row)
+        return (not any(w in st for w in P304_MD_BANNED_TIME)
+                and not any(w in st for w in P304_MD_BANNED_CLAIM)
+                and all(h in st for h in P304_MD_HANDLES))
+
+    st_cur = _status_col(pr)
+    hit_time = [w for w in P304_MD_BANNED_TIME if w in st_cur]
+    check("#304 AC-7／裁示 A(1) 狀態欄不含時間依賴的禁用詞"
+          f"（{'／'.join(P304_MD_BANNED_TIME)}）",
+          not hit_time, f"命中 {hit_time!r}\n--- 狀態欄 ---\n{st_cur[-600:]}")
+    hit_claim = [w for w in P304_MD_BANNED_CLAIM if w in st_cur]
+    check("#304 AC-7／裁示 A(1) 狀態欄不含第 1 輪的完成式字面"
+          "（宣稱當時尚未發生的事已完成）",
+          not hit_claim, f"命中 {hit_claim!r}\n--- 狀態欄 ---\n{st_cur[-600:]}")
+    for frag, why in (("issuecomment-6052326088", "AC-6 實測的留言 id"),
+                      ("5034", "head 側誘餌 thread（第 4 步 closed）"),
+                      ("5039", "base 側誘餌 thread（第 4 步 open，對照組）")):
+        check(f"#304 AC-7／裁示 A(2) 狀態欄載穩定的證據把手「{frag}」（{why}）",
+              frag in st_cur, st_cur[-600:])
+    # `R10` 的受測環境須載程式層那一輪的環境（它與真 API 層是兩套，`R7`）
     for frag, why in (("3.14.7", "程式層的 python 版本"),
                       ("Linux 7.0.0", "程式層的 OS"),
                       ("tests/channels/test_marker.py", "程式層的實跑對象"),
                       ("不打任何 API", "程式層不需權限")):
-        check(f"#304 AC-7／BLOCK 2 受測環境載程式層的「{frag}」（{why}）",
-              frag in pr, pr[-900:])
-    # 證據欄改引**存在**的東西：PR #305 與 issue body 根因段的誘餌 thread 4863
-    check("#304 AC-7／BLOCK 2 證據欄引 PR #305 與 issue body 根因段的誘餌 thread 4863"
+        check(f"#304 AC-7 受測環境載程式層的「{frag}」（{why}）",
+              frag in st_cur, st_cur[-900:])
+    # 證據欄引的全是**已發生**的東西：PR #305、issue body 根因段的誘餌 thread 4863
+    check("#304 AC-7 證據欄引 PR #305 與 issue body 根因段的誘餌 thread 4863"
           "（兩者皆現存可讀回）",
-          "PR #305" in pr and "4863" in pr and "issue body" in pr, pr[-600:])
-    # 鑑別力：第 1 輪的那份原文餵進同一判準須 FAIL
-    P304_MD_R1_ROW = ("| 分區探活 | x | y | 📝 已宣稱（真 API 層：`#304` `AC-6` "
-                      "由協調位以自建誘餌分區實跑，腳本全文附在該單留言使第三者可重跑。"
-                      "受測環境（`R10`）：首次驗證＝最近確認 2026-10-08；"
-                      "證據：見 `#304` `AC-6` 留言） |")
+          "PR #305" in st_cur and "4863" in st_cur and "issue body" in st_cur,
+          st_cur[-600:])
+    check("#304 AC-7／裁示 A(3) 現行這格過判準", _md_ok(pr), st_cur[-600:])
 
-    def _md_ok(row: str) -> bool:
-        """BLOCK 2 的判準本體——正反兩份 row 共用。"""
-        return (all(f not in row for f in P304_MD_FORBIDDEN)
-                and "收尾前" in row and "尚未出現" in row)
-
-    check("#304 AC-7／BLOCK 2 鑑別力：第 1 輪被 BLOCK 的那份原文 → FAIL",
-          _md_ok(P304_MD_R1_ROW) is False, P304_MD_R1_ROW[:200])
-    check("#304 AC-7／BLOCK 2 鑑別力：現行這格 → PASS（判準非恆假）",
-          _md_ok(pr) is True, pr[-600:])
+    # ── 裁示 A(4)：鑑別力——兩個被判不合格的前版原文在新判準下必須 FAIL ─────────
+    # 裁示明文「第 4 項是最關鍵的一項」：少了它，新判準可能**恆真**，那只是把一個
+    # 有時間依賴的斷言換成一個沒有鑑別力的斷言，不是改善（`R6`）。
+    # 兩份 fixture 取 git 的原文而非手抄——手抄會漂移，而「fixture 與受測對象不同步」
+    # 正是本族缺陷的另一個形態。各自命中判準的**不同**一支，故兩份都要留：
+    #   `0754549` → 五個時間詞全中（第 2 輪的病）
+    #   `42fc42d` → 兩個完成式字面全中（第 1 輪的病）
+    # 兩者皆缺三個把手。pin 住 sha 的代價與本檔既有的 AST 射程斷言相同（`11e5c13`／
+    # `1f4368d`）：該 commit 必須仍可達；取不到時下面第一條 check 會 FAIL 並指出原因。
+    P304_MD_PRIOR = (
+        ("0754549", P304_MD_BANNED_TIME, "第 2 輪：五個時間依賴的禁用詞"),
+        ("42fc42d", P304_MD_BANNED_CLAIM, "第 1 輪：完成式字面"),
+    )
+    for sha, expect_hit, why in P304_MD_PRIOR:
+        old_md = subprocess.run(
+            ["git", "show", f"{sha}:devflow/channels/telegram.md"],
+            capture_output=True, text=True, cwd=REPO).stdout
+        old_rows = [ln for ln in old_md.splitlines()
+                    if ln.startswith("| 分區探活 |")]
+        if not check(f"#304 AC-7／裁示 A(4) 取得 {sha} 的「分區探活」那一列原文",
+                     len(old_rows) == 1,
+                     f"命中 {len(old_rows)} 行（git show 無輸出表示該 commit 不可達）"):
+            continue
+        old_row = old_rows[0]
+        old_st = _status_col(old_row)
+        hit = [w for w in expect_hit if w in old_st]
+        check(f"#304 AC-7／裁示 A(4) {sha} 的狀態欄確實命中{why}"
+              "（反例有效，不是空跑）",
+              hit == list(expect_hit), f"命中 {hit!r} 期望 {list(expect_hit)!r}")
+        check(f"#304 AC-7／裁示 A(4) 鑑別力：{sha} 的原文在新判準下 FAIL",
+              _md_ok(old_row) is False, old_st[-400:])
+        check(f"#304 AC-7／裁示 A(4) {sha} 的狀態欄缺全部三個證據把手"
+              "（故正向那一組亦有鑑別力）",
+              not any(h in old_st for h in P304_MD_HANDLES), old_st[-400:])
+    # 反向鑑別力：現行這格 PASS ——證明上面那些 FAIL 不是因為判準恆假。
+    check("#304 AC-7／裁示 A(4) 鑑別力：現行這格 → PASS（判準非恆假）",
+          _md_ok(pr) is True, st_cur[-600:])
 
     # `AC-8`：兩種宣稱、兩個集合、實測值、差集判準、狀態 ✅、牆鐘不作門檻
     for frag, why in (("標記 ∪ cache ∪ archives", "預設的探活集合"),
