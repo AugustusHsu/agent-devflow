@@ -3798,50 +3798,124 @@ def _p306_ac3_mutation():
                       sum(got.values()) >= 1, f"實得 {sum(got.values())} 處")
 
 
-@case("#306 AC-3 常數缺漏的那一鍵：以位置型斷言補上下界（不寫出禁字面）")
+LOC = re.compile(r"telegram\.md「(第二棒的 [A-Za-z]+ 行)」")
+
+
+def _p306_locator_in_op_paragraph(text: str) -> list[str]:
+    """存在層：回傳「所在段落剝掉 locator 後仍談第二棒」的 locator 清單。
+
+    段落以空行切分（結構判準）。錨「第二棒」必須在 `LOC.sub("", para)` 上找——
+    locator 自己的格名就含「第二棒」，若在原段落上找，把 locator 搬到任何段落都會
+    滿足錨，等於沒有判準。
+    """
+    out = []
+    for para in re.split(r"\n[ \t]*\n", text):
+        locs = LOC.findall(para)
+        if locs and "第二棒" in LOC.sub("", para):
+            out += locs
+    return out
+
+
+@case("#306 AC-3 常數缺漏的那一鍵：以結構型斷言補上下界（不寫出禁字面）")
 def _p306_ac3_omitted_locator():
     """`coordinator.md` 引用 `telegram.md` 的「第二棒的 ⟨英文詞⟩ 行」那一格。
 
     該格名含 `#300` `AC-2` 禁在本檔出現的英文詞，故 `P306_REQUIRED_LOCATORS` 不收該鍵
-    （鍵是字串字面，寫進去就會觸發那條斷言）。這裡改以**位置型**判準釘住下界：格名用
-    字元類別捕獲、不寫出字面，並連同它後面那段敘述一起錨定——拔掉 locator、只留敘述
-    就會 FAIL。
+    （鍵是字串字面，寫進去就會觸發那條斷言）。本 case 替那一鍵釘住下界。
+
+    `AC-3` 的射程邊界（裁決位 2026-10-08 裁示 A，逐字）：
+
+        驗：  locator 存在且非懸空
+        不驗：locator 周邊敘述的字面
+
+    故本 case 分兩層，各自只驗射程內的事：
+
+    - 存在層：locator 存在，**且與操作敘述落在同一段落**（段落以空行切分，結構判準）。
+      錨「第二棒」在**剝掉 locator 之後**的段落文字上找——locator 的格名自己就含
+      「第二棒」，若在原文上找，把它搬到任何段落都會 PASS。
+    - 懸空層：捕獲的格名存在於 `telegram.md` 的「面向」欄。
+
+    敘述用了哪些字、怎麼排，**都不驗**：同義改寫（「記載」→「載明」、「轉播器」→
+    其他指稱、「那格」→其他指稱）一律須 PASS。前一版把 locator 之後的 12 個字釘成
+    字面，那是驗了射程外的東西。
     """
-    # 該格名含 `#300` `AC-2` 禁在本檔出現的英文詞，故以字元類別捕獲、不寫出字面。
-    pat = re.compile(r"telegram\.md「(第二棒的 [A-Za-z]+ 行)」那格記載轉播器發出第二棒")
     t = _p306_tpl_text("coordinator")
-    got = pat.findall(t)
-    check("#306 AC-3 coordinator.md 命中該 locator 恰 1 次（位置型，含後續敘述）",
-          len(got) == 1, f"實得 {len(got)} 次：{got!r}")
     cells = _p306_cell_names()
-    check("#306 AC-3 telegram.md 的格名集合非空（否則下方核對空轉）",
+    got = _p306_locator_in_op_paragraph(t)
+
+    # (1) 現況 → PASS。
+    check("#306 AC-3 (1) coordinator.md 的該 locator 與操作敘述同段，恰 1 個",
+          len(got) == 1, f"實得 {len(got)} 個：{got!r}")
+    check("#306 AC-3 telegram.md 的格名集合非空（否則懸空層空轉）",
           len(cells) >= 8, f"{len(cells)} 格")
+    # 懸空層。
     check("#306 AC-3 捕獲的格名存在於 telegram.md 的「面向」欄（零懸空）",
           bool(got) and got[0] in cells, f"捕獲 {got!r}")
-    # 反測 1（記憶體內，不寫檔）：拔掉 locator、保留敘述 → 位置型主斷言 FAIL。
-    bare = t.replace(f"telegram.md「{got[0]}」", "那格", 1) if got else t
-    check("#306 AC-3 鑑別力：該 locator 換成「那格」（敘述留著）→ 主斷言 FAIL",
-          len(pat.findall(bare)) == 0, f"變異後仍命中 {pat.findall(bare)!r}")
-    check("#306 AC-3 鑑別力：變異後敘述仍在（證明只拔掉定位、不是整段消失）",
-          "那格記載轉播器發出第二棒" in bare, "")
-    # 反測 2（記憶體內）：格名改成不存在的格名 → 面向欄核對 FAIL。
-    # 變異落在中段那個英文詞（`[A-Za-z]+` 捕獲得到，故位置型仍命中）；若改尾字
-    # 「行」→「列」，位置型自己就不命中了，那驗到的是另一件事。
+
+    loc_literal = f"telegram.md「{got[0]}」" if got else ""
+
+    # (2) locator 換成「那格」、敘述留著 → 存在層 FAIL。
+    m2 = t.replace(loc_literal, "那格", 1)
+    check("#306 AC-3 (2) locator 換「那格」（敘述留著）→ 存在層 FAIL",
+          _p306_locator_in_op_paragraph(m2) == [],
+          f"變異後仍命中 {_p306_locator_in_op_paragraph(m2)!r}")
+    check("#306 AC-3 (2) 對偶：變異後敘述仍在（只拔掉定位，不是整段消失）",
+          "那格記載" in m2 or "該格記載" in m2, "")
+
+    # (3) locator 原樣，指稱詞改寫（「那格記載」→「該格記載」）→ 仍 PASS。
+    m3 = t.replace("」那格記載", "」該格記載", 1)
+    check("#306 AC-3 (3) 指稱詞改寫（那格→該格）→ 仍 PASS（不驗敘述字面）",
+          _p306_locator_in_op_paragraph(m3) == got,
+          f"實得 {_p306_locator_in_op_paragraph(m3)!r}")
+
+    # (4) locator 從操作段落拔掉、搬到檔尾獨立一段 → 存在層 FAIL。
+    m4 = t.replace(loc_literal, "那格", 1) + f"\n\n{loc_literal}。\n"
+    check("#306 AC-3 (4) locator 搬到檔尾獨立一段 → 存在層 FAIL",
+          _p306_locator_in_op_paragraph(m4) == [],
+          f"變異後仍命中 {_p306_locator_in_op_paragraph(m4)!r}")
+    check("#306 AC-3 (4) 對偶：該 locator 字面仍在檔內（純字面搜尋會放過）",
+          bool(LOC.findall(m4)), f"實得 {LOC.findall(m4)!r}")
+
+    # (4b) 同上，但搬到「確認節點」節下一段 → 存在層 FAIL。
+    anchor = "## 確認節點\n"
+    check("#306 AC-3 (4b) 前提：coordinator.md 有「確認節點」節（變異可施作）",
+          anchor in t, "")
+    m4b = t.replace(loc_literal, "那格", 1).replace(
+        anchor, f"{anchor}\n{loc_literal}。\n", 1)
+    check("#306 AC-3 (4b) locator 搬到「確認節點」節下一段 → 存在層 FAIL",
+          _p306_locator_in_op_paragraph(m4b) == [],
+          f"變異後仍命中 {_p306_locator_in_op_paragraph(m4b)!r}")
+
+    # (5a)(5b)(5c) 同義改寫一律 PASS——敘述字面不在射程內。
+    m5a = t.replace("」那格記載", "」那格載明", 1)
+    check("#306 AC-3 (5a) 同義改寫（記載→載明）→ 仍 PASS",
+          _p306_locator_in_op_paragraph(m5a) == got,
+          f"實得 {_p306_locator_in_op_paragraph(m5a)!r}")
+    m5b = m5a.replace("那格載明轉播器", "那格載明 relay", 1)
+    check("#306 AC-3 (5b) 同義改寫（轉播器→relay）→ 仍 PASS",
+          _p306_locator_in_op_paragraph(m5b) == got,
+          f"實得 {_p306_locator_in_op_paragraph(m5b)!r}")
+    m5c = t.replace("」那格記載轉播器", "」該格載明 relay", 1)
+    check("#306 AC-3 (5c) 三者同時改寫（那格＋記載＋轉播器）→ 仍 PASS",
+          _p306_locator_in_op_paragraph(m5c) == got,
+          f"實得 {_p306_locator_in_op_paragraph(m5c)!r}")
+
+    # (5d) 格名中段英文詞改 `zzz` → 存在層仍命中、懸空層 FAIL。
     if got:
         fake = got[0].replace(got[0].split(" ")[1], "zzz")
-        check("#306 AC-3 鑑別力：變異格名與原格名不同", fake != got[0], f"{fake!r}")
-        mutant = t.replace(f"telegram.md「{got[0]}」",
-                           f"telegram.md「{fake}」", 1)
-        mut_got = pat.findall(mutant)
-        check("#306 AC-3 鑑別力：改格名後位置型仍命中（變異落在格名、不在位置）",
-              mut_got == [fake], f"實得 {mut_got!r}")
-        check("#306 AC-3 鑑別力：改過的格名不在「面向」欄 → 零懸空核對 FAIL",
+        check("#306 AC-3 (5d) 前提：變異格名與原格名不同", fake != got[0], f"{fake!r}")
+        m5d = t.replace(loc_literal, f"telegram.md「{fake}」", 1)
+        d_got = _p306_locator_in_op_paragraph(m5d)
+        check("#306 AC-3 (5d) 改格名後存在層仍命中（變異落在格名，不在位置）",
+              d_got == [fake], f"實得 {d_got!r}")
+        check("#306 AC-3 (5d) 改過的格名不在「面向」欄 → 懸空層 FAIL",
               fake not in cells, f"{fake!r} 竟存在於面向欄")
-        # 另一種變異：改尾字「行」→「列」，位置型判準自己就擋下（兩層各有效）。
-        tail = t.replace(f"telegram.md「{got[0]}」",
-                         f"telegram.md「{got[0][:-1]}列」", 1)
-        check("#306 AC-3 鑑別力：格名尾字改「列」→ 位置型主斷言 FAIL",
-              pat.findall(tail) == [], f"變異後仍命中 {pat.findall(tail)!r}")
+        # 格名尾字改「列」同屬懸空層（格名不存在），不是存在層的事：
+        # 前一版把它寫成「位置型主斷言 FAIL」，那是把格名尾字當字面釘，與射程邊界
+        # 同族的問題。這裡只留懸空層的判定。
+        tail = got[0][:-1] + "列"
+        check("#306 AC-3 (5d) 對偶：格名尾字改「列」亦屬懸空層 FAIL",
+              tail not in cells, f"{tail!r} 竟存在於面向欄")
 
 
 @case("#306 AC-3 反向：範本不得含「沒有條文依據」字面（該缺口已由 CH3／C5 補上）")
