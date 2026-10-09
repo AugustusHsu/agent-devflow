@@ -941,16 +941,27 @@ check("#300 AC-2 註解載明本單沒有重複可消（一個寫者、零程式
 # 這裡不跑 `git diff`：本檔的既有判準禁止任何真子程序（見上方 `AC-6` 兩條），
 # 而「零改動」的 git 事實由 T 的驗證指令在 shell 側取（`git diff --name-only`
 # ／`--numstat`，見該單的驗證輸出）。**內容面**的斷言比 diff 更直接命中本 AC 要防的事：
-# grammar 字面與 handoff 這個概念都不得出現在那兩檔裡。
+# grammar 字面與 handoff 這個概念都不得出現在 `_marker.py` 裡。
 MARKER_SRC = (SCRIPTS / "_marker.py").read_text()
-TEST_MARKER_SRC = (HERE / "test_marker.py").read_text()
 check("#300 AC-2 `_marker.py` 不含 `handoff` 字面（grammar 沒有上移）",
       "handoff" not in MARKER_SRC.lower(), "")
 check("#300 AC-2 `_marker.py` 仍只有兩個 grammar 常數（未多出第三種標記）",
       len(re.findall(r"^[A-Z_]+_RE\s*=", MARKER_SRC, re.M)) == 2,
       f"命中={re.findall(r'^[A-Z_]+_RE.*$', MARKER_SRC, re.M)}")
-check("#300 AC-2 `test_marker.py` 不含 `handoff` 字面（該檔零改動）",
-      "handoff" not in TEST_MARKER_SRC.lower(), "")
+# ── 此處原有第三條：`test_marker.py` 不含 `handoff` 字面（該檔零改動）。已刪除。
+#
+# 1. 來源：該斷言源自 `#300` 的**單次射程限制**（「本單不得改此檔」）。那是一張單的
+#    write scope 宣告，其 AC 的斷言形式是 `git diff --name-only origin/main...HEAD`
+#    ——問「這一次有沒有改到它」。
+# 2. 兩層語意不一致：它卻被**實作成永久內容約束**（「這個檔永遠不得出現該字面」），
+#    射程自一張單的 diff 擴張成跨單的內容禁令。`#306` 因此被迫以字元類別繞寫同一個
+#    格名五輪，而該格名本身是 `telegram.md` 的合法格名。
+# 3. 處置：`#306` 依裁決位裁示刪除（2026-10-09，第三次升人 `R13` `E2` 的裁示 (a)），見
+#    https://github.com/AugustusHsu/agent-devflow/issues/300#issuecomment-6075821601
+#
+# ⚠️ 刪除而非改寫成「只核 `_marker.py`」：上方 `_marker.py` 那兩條本來就獨立存在且
+# 正確，刪掉這一條不影響它們；改寫只會留下一條語意已變的斷言。
+# `#306` `AC-14` 禁止把它加回來（判準：本檔不得出現讀取 `test_marker.py` 原始碼的字面）。
 
 
 # ── #300 AC-5：寫 forge 失敗只警告不中斷，但警告必須進 topic ────────────────
