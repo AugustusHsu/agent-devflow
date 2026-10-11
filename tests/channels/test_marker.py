@@ -13,6 +13,61 @@
 純字串 fixture，零 Telegram API：`AC-3` 的腳本層驗證用假的 `gh`（PATH 前置）＋ 假 `HOME`，
 且以哨兵檔反證 `gh issue edit` **沒有**被呼叫。
 """
+# ════════════════════════════════════════════════════════════════════════════
+# 「同形斷言」判準（`#308` `AC-1`；裁決位 2026-10-09 裁示一、二）
+# ════════════════════════════════════════════════════════════════════════════
+# 這是 `tests/channels/` 兩檔**共用的測試寫法規範**，全 repo 只此一處（`I5`）——
+# `tests/channels/test_relay.py` 的檔頂以一行指向這裡。
+# **不進** `devflow/WORKFLOW.md`（裁示一）：它是測試的寫法規範，不是開發流程的規則，
+# 進條文會讓每個讀條文的人都要讀它，而它只對寫測試的人有意義。
+# 守門的自檢斷言在本檔下方 `#308 AC-2` 一節（掃本檔與 `test_relay.py` 的**當下內容**）。
+#
+# ── 要防的事 ────────────────────────────────────────────────────────────────
+# 一張單的 **write scope 限制**（「本單不得改檔案 X」／「本單未新增 Y」）被實作成
+# **永久內容斷言**（「X **永遠**不得含字面 Y」）。合進 main 後**兩層語意不一致**：
+# 射程自一張單的 diff 擴張成跨單的內容禁令，而沒有任何人宣告過那道禁令。
+# 已實證的後果：`#300` `AC-2` 的射程限制被實作成「本檔不含 `handoff` 字面」，
+# `#306` 要在本檔寫該字面（`telegram.md` 的合法格名）即 FAIL，於同一條斷言上震盪
+# 五輪、兩次落 `R13`、三次升人。關鍵：兩個人各自在**本檔**grep 都得 0，
+# 皆誤判「禁令不存在」——禁止者在**另一個檔**。
+#
+# ── (a) 同形的三項判準（**三項同時成立**即越界）────────────────────────────
+#   1. 斷言是**負向**的：`not in`／`== 0`／`is None`／`not (A - B)`／
+#      「不含」「未新增」「一個都沒」「零改動」。
+#   2. 其語言標記指向**某張單自己的射程**：「**本單**不…／未…／沒…」、
+#      「該檔**零改動**」、「相對 base 恰…」、「與 base 逐項比對…一字未增」。
+#      （「**不新增**／**未新增**」本身即預設了一個 base，是 diff 陳述，故同屬此類。）
+#   3. 標的檔**不在該單的 write scope 內**，或約束的是「**未來不得出現**」而非
+#      「**這個檔案現在該長什麼樣**」。
+# **三項缺一即不是同形**——判準不是「讀了別的檔案」。本檔以別的檔案內容為標的的
+# `check` 有 50 條，其中**絕大多數正當**（對照表格存在性、docstring 必載內容、
+# AST 比對、`VERSION` 形狀）。
+#
+# ── (b) 正當對照（**不得誤刪**）──────────────────────────────────────────
+#   • **架構約束**（可測性前提）：`test_relay.py` 的「縫只有一處」、
+#     「relay 不自己開 `http`／`socket`／`os.system`」。拆掉它，測試就不再是零真 API。
+#   • **永久設計決定**：`test_relay.py:946` 的「`_marker.py` 不含 `handoff` 字面
+#     （grammar 沒有上移）」——那是 `#300` 寫在 `telegram.md` 格裡的設計決定，
+#     不是單次射程限制。它命中 1 與 3，**不命中 2**，故不同形（見該處的註解）。
+#   • **AST 射程證據**：標的是「該檔該長什麼樣」——`changed == ["cmd_scan"]`、
+#     `o[name] == n[name]`（與 base 逐一相同）。它們釘住**當下形狀**，不禁止未來。
+#
+# ── (c) 刪或改寫的判準（裁示二，**比個案選擇有用**）────────────────────────
+#
+#       斷言的意圖若仍成立就**改寫**，意圖本身已失效才**刪**。
+#
+#   • `#300` 那條（`#306` 已刪，註解見 `test_relay.py:951`）：意圖是「禁止一個
+#     **合法**字面」——整條都錯，**刪**。
+#   • `#296` `AC-7`（本檔 `#296 AC-7` 一節）：意圖是「釘住 `#296` 宣告的三個新增
+#     函式確實被加入」＝該單的射程證據，**意圖正確、只是形式過寬**（等號使任何
+#     未來新增都 FAIL）→ **改寫**為下界，不刪。
+#
+# ⚠️ 本判準對寫判準的這一單自己亦適用：`AC-2` 的自檢若寫成「本單未新增同形斷言」
+# 或「相對 base 同形斷言數未增」，即**自己**命中三項判準。自檢因此斷言的是
+# **這兩個檔當下該長什麼樣**（掃當下內容、對命中者報 FAIL），不是相對任何 base 的
+# 增量——前者對未來任何人都成立，後者只是一張單的 diff 限制。
+# 出處：https://github.com/AugustusHsu/agent-devflow/issues/308
+# ════════════════════════════════════════════════════════════════════════════
 from __future__ import annotations
 
 import argparse
@@ -2339,21 +2394,27 @@ def _p287_ac9():
     for val in ("esc_html(head)", "esc_html(title)", "esc_html(args.thread)",
                 "esc_html(state)"):
         check(f"#287 AC-9 cmd_publish 的 {val} 仍在", val in pub, pub)
-    check("#287 AC-9 本單未新增送訊息路徑（sendDocument 的字面數與 7f7b2bb 相同）",
-          ARCHIVE_SRC.count("sendDocument") == 2
-          and ARCHIVE_SRC.count("sendMessage") == 0,
-          f"sendDocument={ARCHIVE_SRC.count('sendDocument')}（期望 2："
-          f"`send_document` 的 URL 一處 ＋ 其 docstring 的 `#293` 紀錄一處）"
-          f" sendMessage={ARCHIVE_SRC.count('sendMessage')}")
-    base = subprocess.run(
-        ["git", "show", "7f7b2bb:devflow/channels/scripts/telegram/devflow_archive.py"],
-        capture_output=True, text=True, cwd=REPO).stdout
-    check("#287 AC-9 與 base（7f7b2bb）逐項比對：送訊息字面數一字未增",
-          bool(base) and base.count("sendDocument") == ARCHIVE_SRC.count("sendDocument")
-          and base.count("sendMessage") == ARCHIVE_SRC.count("sendMessage")
-          and base.count("api(\"send") == ARCHIVE_SRC.count("api(\"send"),
-          f"base sendDocument={base.count('sendDocument')} "
-          f"本單={ARCHIVE_SRC.count('sendDocument')}")
+    # ── 此處原有兩條（`#308` `AC-3` ❷❸，已刪除）────────────────────────────
+    #    ❷「`#287` `AC-9` 本單未新增送訊息路徑（`sendDocument` 的字面數與
+    #      `7f7b2bb` 相同）」
+    #    ❸「`#287` `AC-9` 與 base（`7f7b2bb`）逐項比對：送訊息字面數一字未增」
+    #
+    # 1. **來源**：兩條都源自 `#287` 的**單次射程限制**。該單 `AC-9` 要問的是
+    #    「**這一次**有沒有偷偷多開一條送訊息路徑」，斷言形式是對 base `7f7b2bb`
+    #    的 diff 比對（❸ 直接 `git show` base 原檔逐項比計數）——一張單的 write
+    #    scope 宣告，不是任何人宣告過的永久契約。
+    # 2. **為何過寬**（兩層語意不一致）：它們被實作成**永久內容約束**——
+    #    `devflow_archive.py` 的 `sendDocument` 字面數**永遠**只能是 2、
+    #    `sendMessage` **永遠**為 0。射程自一張單的 diff 擴張成跨單的內容禁令：
+    #    任何後續單想在 archive 側新增一條**合法**的送訊息呼叫，都會先在這裡假
+    #    FAIL，而該檔從來不在「只能有兩處 `sendDocument`」這種契約之下。
+    #    實測（`#308` 探針 B，archive 加一次 `sendDocument` 字面）：兩條同時命中。
+    # 3. **處置與出處**：本單依裁決位 2026-10-09 裁示**刪除**，
+    #    https://github.com/AugustusHsu/agent-devflow/issues/308
+    # 4. **為何刪而非改寫**（檔頂 `AC-1`(c)）：**意圖本身已失效**——
+    #    「本單未新增送訊息路徑」這件事在 `#287` 合併後**已成歷史**，無法也不需由
+    #    測試持續守護。真正該被守住的「`parse_mode` 恰一處 ＋ `cmd_publish` 的四個
+    #    外部值全過 `esc_html`」在上方，獨立存在、未被動到。
 
 
 # ── #296 AC-1～AC-5／AC-7 scan 的探活集合改由「管理過的 thread id」決定 ──────
@@ -2896,8 +2957,26 @@ def _p296_ac7():
     added = sorted(n.keys() - o.keys())
     check("#296 AC-7 scan_candidates 在新增集合內（故不落在 o.keys() & n.keys()）",
           "scan_candidates" in added, f"新增: {added!r}")
-    check("#296 AC-7 新增的頂層函式恰為本單宣告的三個",
-          added == ["_scan_read_cache", "scan_candidates", "scan_sources"],
+    # ── `#308` `AC-4`：原為等號
+    #    `added == ["_scan_read_cache", "scan_candidates", "scan_sources"]`，
+    #    改為**下界**（三者皆在 `added` 內），不再要求等號。
+    #
+    # **改寫而非刪除**，依檔頂 `AC-1`(c)：**意圖仍成立**——這條要釘住的是
+    # 「`#296` 宣告的三個新增函式**確實被加入**」，那是該單的射程證據，標的是
+    # **該檔該長什麼樣**，對未來任何人都仍為真。過寬的只是**形式**：等號使任何後續
+    # 單在 `devflow_archive.py` 新增第四個頂層函式都在這裡假 FAIL。
+    #
+    # ⚠️ **疊加禁令**（`#308` 盤點最關鍵的發現）：此條的等號與 `#304` `AC-5` 的
+    # 「本單不新增任何頂層函式」（見下方 `#304 AC-5` 一節的刪除註解）**疊加**後，
+    # 效果是「`devflow_archive.py` **永久**不得新增任何頂層函式」——
+    # **單獨看兩條都有理由，合起來是一道沒人宣告過的禁令**。
+    # 本單一邊改下界、一邊刪那條，兩邊同時處置。
+    #
+    # 下界**仍有鑑別力**（不是恆真）：三個函式任一缺失或被改名即 FAIL。`#308` 以
+    # 暫時把 `scan_sources` 改名的探針實測過，輸出見該單的實作回報。
+    # 出處：https://github.com/AugustusHsu/agent-devflow/issues/308
+    check("#296 AC-7 新增的頂層函式含 #296 宣告的三個（下界形式，非等號）",
+          {"_scan_read_cache", "scan_candidates", "scan_sources"} <= set(added),
           f"新增: {added!r}")
     # 上界的兩個常數亦不動（來源不只是函式）
     check("#296 AC-7 SCAN_HI_FLOOR／SCAN_HI_MARGIN 的字面與 base 相同",
@@ -3244,8 +3323,25 @@ def _p304_scope_archive():
     # `cmd_scan` 自 `#287` 起已在 `:1577` 那條的期望集合內，本單不必動它。
     check("#304 AC-5 相對 base 改變的函式恰為 cmd_scan（write scope 之內，不含 main）",
           changed == ["cmd_scan"], f"改變的函式: {changed!r}")
-    check("#304 AC-5 本單不新增任何頂層函式（不抽共用 helper、不新開 _probe.py）",
-          not (n.keys() - o.keys()), f"新增: {sorted(n.keys() - o.keys())!r}")
+    # ── 此處原有一條（`#308` `AC-3` ❹，已刪除）──────────────────────────────
+    #    「`#304` `AC-5` 本單不新增任何頂層函式（不抽共用 helper、不新開
+    #      `_probe.py`）」，斷言形式 `not (n.keys() - o.keys())`。
+    #
+    # 1. **來源**：`#304` 的**單次射程限制**——該單自己宣告「只改 `cmd_scan`，
+    #    不抽共用 helper、不新開 `_probe.py`」，問的是「**這一次**的 diff 有沒有
+    #    多出頂層函式」。
+    # 2. **為何過寬**（兩層語意不一致）：它被實作成「`devflow_archive.py` **永遠**
+    #    不得新增任何頂層函式」，射程自一張單的 diff 擴張成跨單的內容禁令。
+    #    ⚠️ 且它與上方 `#296` `AC-7` 的等號斷言**疊加**後，構成一道**沒人宣告過**
+    #    的永久禁令（該檔頂層函式集合被永久凍結）——單獨看兩條都有理由，合起來
+    #    不是。本單同時處置兩邊：此條刪，該條改下界（見該處註解）。
+    #    實測（`#308` 探針 C，archive 加一個頂層函式）：此條與該條同時命中。
+    # 3. **處置與出處**：本單依裁決位 2026-10-09 裁示**刪除**，
+    #    https://github.com/AugustusHsu/agent-devflow/issues/308
+    # 4. **為何刪而非改寫**（檔頂 `AC-1`(c)）：**意圖本身已失效**——
+    #    「本單不新增頂層函式」在 `#304` 合併後**已成歷史**。該單的射程證據不因此
+    #    條消失而失守：上方「既有函式一個都沒被移除」與「改變的函式恰為 `cmd_scan`」
+    #    仍在，且四個函式的 AST 與 base 逐一比對也仍在。
 
 
 @case("#304 AC-5 射程：devflow_topic.py 除 _alive 外的頂層函式 AST 與 base 相同")
@@ -3275,8 +3371,19 @@ def _p304_scope_topic():
               f"base 有={name in o} 本單有={name in n}")
     check("#304 AC-5 devflow_topic.py 既有函式一個都沒被移除",
           not (o.keys() - n.keys()), f"{sorted(o.keys() - n.keys())!r}")
-    check("#304 AC-5 devflow_topic.py 不新增頂層函式（不抽共用 helper）",
-          not (n.keys() - o.keys()), f"新增: {sorted(n.keys() - o.keys())!r}")
+    # ── 此處原有一條（`#308` `AC-3`，與 ❹ 同一條 AC 的**第二個實例**，已刪除）──
+    #    「`#304` `AC-5` `devflow_topic.py` 不新增頂層函式（不抽共用 helper）」。
+    #
+    # 四項理由與上方 ❹ 處的刪除註解**逐項相同**，只有標的檔不同（`devflow_topic.py`
+    # 而非 `devflow_archive.py`）：來源是 `#304` 的單次射程限制；它被實作成
+    # 「該檔**永遠**不得新增頂層函式」，射程自一張單的 diff 擴張成跨單的內容禁令；
+    # 本單依裁決位 2026-10-09 裁示**刪除**，
+    # https://github.com/AugustusHsu/agent-devflow/issues/308 ；
+    # **刪而非改寫**因為「本單不新增頂層函式」在 `#304` 合併後已成歷史，意圖本身
+    # 已失效（檔頂 `AC-1`(c)）。
+    # 實測（`#308` 探針 C′，`devflow_topic.py` 加一個頂層函式）：原本只命中此條。
+    # `#304` 的射程證據未失守：上方「改變的函式恰為 `_alive`」、九個函式的 AST 與
+    # base 逐一比對、「既有函式一個都沒被移除」都仍在。
     # `ensure` 未動，故「呼叫端不依賴 reopen 副作用」在機械層亦可見：
     # 它只讀 `_alive` 的布林回傳（`if tid and _alive(tid)`）。
     check("#304 AC-10 ensure 仍只用 _alive 的布林回傳（不依賴狀態被改變的副作用）",
@@ -4120,9 +4227,25 @@ def _p306_ac1():
 @case("#306 AC-13 devflow/VERSION ＝ 0.17.0.0（V2 的 b 位：新增一層範本）")
 def _p306_version():
     raw = (REPO / "devflow" / "VERSION").read_text().strip()
+    # `#308` 改法（與上方 `:3555` 的 `#304 AC-10`、`:2911` 的 `#296 AC-9`、
+    # `:1593` 的 `#287 AC-8` **同一個模式**，本 repo 第四次）：原斷言寫死
+    # `== "0.17.0.0"`，而 `#306` 合併後的**每一次**進位都會讓它假 FAIL 一次
+    # （`#308` 進 c 位至 `0.17.1.0` 即第一次）。它與本單在治的病**同族**——
+    # 一張單的期望值被寫成永久等號——故照既有模式改成
+    # 「合四碼形狀 ＋ **嚴格大於下界** ＋ **已達本單期望值**（`≥`）」，不刪整條。
+    # `#306` 的宣稱（VERSION 已達 `0.17.0.0`、且嚴格大於 `#304` 的 `0.16.1.0`）
+    # 仍被逐項守住，只是不再禁止後續單進位。
+    #
+    # ⚠️ 本項**不在 `#308` 的 AC 清單內**，是 `AC-9`（VERSION → `0.17.1.0`）與
+    # `AC-6`（全綠）的**機械後果**：不改這條，兩個 AC 無法同時成立。
+    # 依 `L3` 屬工程判斷（標的檔已在 write scope 內、未改動任何 AC 要驗的事），
+    # 已於 issue 留言登錄。`#308` **不**在此新增自己的等值斷言：那會立刻再製造
+    # 一條同族的寫死等號，正是本單要掃的形態。
     check("#306 AC-13 形狀合 V1 的四碼", bool(VERSION_SHAPE.fullmatch(raw)),
           repr(raw))
-    check("#306 AC-13 VERSION == 0.17.0.0", raw == "0.17.0.0", repr(raw))
+    check("#306 AC-13 已達 #306 的 0.17.0.0（≥，原為等號，#308 改為下界）",
+          bool(VERSION_SHAPE.fullmatch(raw))
+          and tuple(int(x) for x in raw.split(".")) >= (0, 17, 0, 0), repr(raw))
     ok, why = _version_gt(raw, "0.16.1.0")
     check("#306 AC-13 嚴格大於 base（#304）的 0.16.1.0", ok, f"{raw!r}：{why}")
 
@@ -4160,6 +4283,168 @@ def _p306_indexes():
                       ("`devflow/channels/templates/`", "範本那一側的位置"),
                       ("通道側操作規範", "範本那一側的內容")):
         check(f"#306 AC-10 seats/README.md 載「{frag}」（{why}）", frag in se, "")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# `#308` `AC-2`：同形斷言的自檢（判準本體見**本檔檔頂**的判準註解）
+# ════════════════════════════════════════════════════════════════════════════
+# 本節把檔頂 (a) 的三項判準實作成一條守門斷言，標的是 `tests/channels/` 兩檔的
+# **當下內容**：任一 `check` 的（標題 ＋ 斷言式）若**同時**命中三項判準即報 FAIL。
+#
+# ⚠️ **自檢自身不得是同形斷言**（`#308` issue 留言「實作交接補強」列為硬要求）。
+# 故本節**不**問「相對 base（`f4a6ad5`）有沒有多出同形斷言」，也**不**寫
+# 「本單未新增同形斷言」——那兩種寫法正是把一張單的 diff 限制寫成永久禁令，
+# 自己命中三項判準。本節問的是「**這兩個檔現在該長什麼樣**」：掃當下內容、
+# 對命中者報 FAIL。判準因此對未來任何人、任何單都同樣成立，與任何 base 無關，
+# 標的兩檔也都在本單的 write scope 內。
+#
+# 三項判準的機械化（對應檔頂 (a)）：
+#   (a)1 **負向** ← 斷言式的語法（`not in`／`not X`／`is None`／`== 0`／
+#        `not any(...)`／`not (A - B)`），或標題含負向字面（`P308_NEG_WORDS`）
+#   (a)2 **單次射程的語言標記** ← 標題（`P308_SCOPE_RE`）：「本單不／未／沒…」、
+#        「零改動」「一字未增」「一條未增」「相對 base」「與 base」，以及
+#        「不新增／未新增」——「新增」本身預設了一個 base，是 diff 陳述。
+#        （`#308` 名單裡 `devflow_topic.py` 那條就只有這一種標記，故必須收。）
+#   (a)3 **未來不得出現**（而非該檔現在該長什麼樣）← 斷言式同時滿足兩件事：
+#        禁止某字面／某計數／某差集出現（`not in`／`.count(...) == N`／
+#        `not (A - B)`／`== 0`），**且不**釘住任何正向的期望形狀
+#        （`in`／`== ["…"]`／`o[name] == n[name]`／`set(...) <= set(...)`）。
+#        後者正是檔頂 (b) 的「AST 射程證據」與「標的是該檔該長什麼樣」。
+#
+# 以 **AST** 取 `check` 呼叫，故**註解與字串 fixture 都不會被誤收**——只有真的
+# 呼叫算（`AC-3` 的刪除註解因此可以原文引述被刪的標題而不被誤判）。
+# 標題只取字面部分（f-string 的變數不展開），因為語言標記寫在字面裡。
+P308_TEST_FILES = ("test_marker.py", "test_relay.py")
+P308_NEG_WORDS = ("不含", "未含", "不新增", "未新增", "不得新增", "一個都沒",
+                  "一字未增", "一條未增", "零改動", "不得出現", "不多出", "沒有")
+P308_SCOPE_RE = re.compile(
+    r"本單(不|未|沒)|不新增|未新增|不得新增|零改動|一字未增|一條未增"
+    r"|相對 base|與 base")
+
+
+def _p308_checks(src: str) -> list:
+    """取出 src 裡每個 `check(...)` 呼叫的 (行號, 標題字面, 斷言式 AST)。"""
+    import ast
+    out = []
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "check" and len(node.args) >= 2):
+            continue
+        head = node.args[0]
+        if isinstance(head, ast.Constant) and isinstance(head.value, str):
+            title = head.value
+        elif isinstance(head, ast.JoinedStr):
+            title = "".join(v.value for v in head.values
+                            if isinstance(v, ast.Constant)
+                            and isinstance(v.value, str))
+        else:
+            continue
+        out.append((node.lineno, title, node.args[1]))
+    return out
+
+
+def _p308_verdict(title: str, expr) -> tuple:
+    """回傳 (命中 (a)1, 命中 (a)2, 命中 (a)3)——三項全中即越界。"""
+    import ast
+    neg = forbid = pin = False
+    for node in ast.walk(expr):
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            neg = True
+            inner = list(ast.walk(node.operand))
+            if any(isinstance(m, ast.BinOp) and isinstance(m.op, ast.Sub)
+                   for m in inner):
+                forbid = True                  # `not (A - B)`：禁止差集出現
+            if any(isinstance(m, ast.Call) and isinstance(m.func, ast.Name)
+                   and m.func.id == "any" for m in inner):
+                forbid = True                  # `not any(w in X for w in 禁用詞)`
+        if not isinstance(node, ast.Compare):
+            continue
+        for op, right in zip(node.ops, node.comparators):
+            sides = (node.left, right)
+            if isinstance(op, ast.NotIn):
+                neg = forbid = True            # `"字面" not in 別的檔`
+            elif isinstance(op, ast.In):
+                pin = True                     # 正向存在＝該檔現在該長什麼樣
+            elif (isinstance(op, ast.Is) and isinstance(right, ast.Constant)
+                    and right.value is None):
+                neg = forbid = True            # `re.search(...) is None`
+            else:
+                if any(isinstance(s, ast.Constant) and s.value == 0
+                       for s in sides):
+                    neg = forbid = True        # `== 0`：一個都沒
+                if any(isinstance(s, ast.Call)
+                       and isinstance(s.func, ast.Attribute)
+                       and s.func.attr == "count" for s in sides):
+                    forbid = True              # 字面計數被釘死
+                if any(isinstance(s, (ast.List, ast.Set, ast.Tuple, ast.Dict))
+                       for s in sides):
+                    pin = True                 # `== ["cmd_scan"]`：期望形狀
+                if any(isinstance(s, ast.Call) and isinstance(s.func, ast.Name)
+                       and s.func.id in ("set", "sorted", "frozenset")
+                       for s in sides):
+                    pin = True                 # `set(...) <= set(added)`：下界
+                if all(isinstance(s, ast.Subscript) for s in sides):
+                    pin = True                 # `o[name] == n[name]`：AST 比對
+    return (neg or any(w in title for w in P308_NEG_WORDS),
+            bool(P308_SCOPE_RE.search(title)),
+            forbid and not pin)
+
+
+def _p308_over(rows: list) -> list:
+    """守門判定：回傳越界清單。現況與 fixture 走**同一支**判定，故兩者可比。"""
+    return [f"{f}:{ln} {t}" for f, ln, t, v in rows if all(v)]
+
+
+@case("#308 AC-2 同形斷言自檢（掃 tests/channels/ 兩檔的當下內容）")
+def _p308_ac2():
+    live = []
+    for name in P308_TEST_FILES:
+        live += [(name, ln, t, _p308_verdict(t, e))
+                 for ln, t, e in _p308_checks((HERE / name).read_text())]
+    # 非空掃的下界：兩檔現有數百條 `check`，取 600 當量級門檻——判準若因為受掃
+    # 集合是空的而「恆真」，這條會先 FAIL。
+    check("#308 AC-2 受掃集合含兩檔、條數在合理量級（自檢不是空掃）",
+          len(live) > 600 and {r[0] for r in live} == set(P308_TEST_FILES),
+          f"受掃 check 呼叫={len(live)} 檔={sorted({r[0] for r in live})!r}")
+    over = _p308_over(live)
+    check("#308 AC-2 兩檔當下沒有一條 check 同時命中同形三判準",
+          over == [],
+          "越界（三判準同時成立，依檔頂 (c) 判斷刪或改寫）：\n        "
+          + "\n        ".join(over))
+
+    # ── 鑑別力反例（裁示一明文要求：不得只驗「現況 PASS」，那會恆真）──────────
+    # fixture 是**字串**，不是真的插進檔裡：受掃集合以 AST 取真呼叫，字串裡的
+    # `check(...)` 不會被收進去，兩者互不干擾（也因此不必「插入後復原」）。
+    # 兩份 fixture 的**斷言式完全相同**，標題只差「單次射程的語言標記」一項，
+    # 故它們證明的是 (a)2 真的有判別作用——不是整組判準恆真或恆假。
+    bad = ('check("#308 fixture（故意違規）：本單不新增任何頂層函式",\n'
+           '      not (n.keys() - o.keys()), "")\n')
+    ctrl = ('check("#308 fixture（對照）：頂層函式一個都沒多出宣告的三個",\n'
+            '      not (n.keys() - o.keys()), "")\n')
+    bad_rows = [("fixture", ln, t, _p308_verdict(t, e))
+                for ln, t, e in _p308_checks(bad)]
+    ctrl_rows = [("fixture", ln, t, _p308_verdict(t, e))
+                 for ln, t, e in _p308_checks(ctrl)]
+    bad_over = _p308_over(bad_rows)
+    check("#308 AC-2 鑑別力：故意違規的那條 → 自檢判它越界（同一支判定回報它）",
+          len(bad_over) == 1
+          and [v for *_, v in bad_rows] == [(True, True, True)],
+          f"越界={bad_over!r} 判準={[v for *_, v in bad_rows]!r}")
+    check("#308 AC-2 鑑別力對照：同一條斷言只去掉射程語言標記 → 自檢放過",
+          len(_p308_over(ctrl_rows)) == 0
+          and [v for *_, v in ctrl_rows] == [(True, False, True)],
+          f"越界={_p308_over(ctrl_rows)!r} 判準={[v for *_, v in ctrl_rows]!r}")
+
+    # ── 不誤殺（`AC-5`）：`test_relay.py` 的「`_marker.py` 不含 `handoff` 字面」──
+    # 它是 `#300` 的**永久設計決定**（grammar 不上移），外觀與被刪的四條相同、
+    # 差別只在意圖：命中 (a)1 與 (a)3，但語言標記不指向任何一張單的射程。
+    # 判準若誤殺它，本條會 FAIL——這是自檢「有鑑別力**且**不誤殺」的另一半。
+    ac5_title = "#300 AC-2 `_marker.py` 不含 `handoff` 字面（grammar 沒有上移）"
+    ac5 = [(ln, v) for f, ln, t, v in live
+           if f == "test_relay.py" and t == ac5_title]
+    check("#308 AC-5 自檢放過 _marker.py 那條（命中 (a)1、(a)3，不命中 (a)2）",
+          len(ac5) == 1 and [v for _, v in ac5] == [(True, False, True)],
+          f"命中情形={ac5!r}（空清單表示該條標題已變動，判準失去這個對照）")
 
 
 # ── 收尾 ────────────────────────────────────────────────────────────────────

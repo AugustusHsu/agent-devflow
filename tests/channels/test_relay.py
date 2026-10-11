@@ -26,6 +26,9 @@ relay 有 `from devflow_archive import tool_summary`，而 `devflow_archive.py` 
 同理 `#300` 只驗「relay 發出了那則留言的指令」，**不**驗 forge 上真的多了一則留言——
 本檔不打真 `gh`，forge 側零實跑（`channels/telegram.md` 該格的狀態欄因此是 `⬜`）。
 """
+# 「同形斷言」判準（`#308` `AC-1`）全 repo 只一處（`I5`）：見
+# `tests/channels/test_marker.py` **檔頂**的判準註解——寫新斷言前先讀那三項判準；
+# 守門的自檢在該檔 `#308 AC-2` 一節（它掃該檔與**本檔**的當下內容）。
 from __future__ import annotations
 
 import importlib.util
@@ -943,6 +946,21 @@ check("#300 AC-2 註解載明本單沒有重複可消（一個寫者、零程式
 # ／`--numstat`，見該單的驗證輸出）。**內容面**的斷言比 diff 更直接命中本 AC 要防的事：
 # grammar 字面與 handoff 這個概念都不得出現在 `_marker.py` 裡。
 MARKER_SRC = (SCRIPTS / "_marker.py").read_text()
+# ── ⚠️ **本條不在掃單（`#308`）的刪除名單內，理由如下。**（`#308` `AC-5`）────────
+# 1. 它斷言的是「**grammar 沒有上移**」，那是 `#300` 的**永久設計決定**——寫在
+#    `devflow/channels/telegram.md` 的格裡（出現第二個寫者或第一個程式讀者時才上移），
+#    **不是**單次射程限制。`#308` 刪掉的四條都是「本單不得改 X」被實作成
+#    「X 永遠不得含 Y」；本條從一開始就是永久的內容規範，標的是
+#    「`_marker.py` **現在該長什麼樣**」，對未來任何人、任何單都同樣成立。
+# 2. 套 `test_marker.py` 檔頂 `AC-1`(a) 的三項判準：命中 1（負向，`not in`）、
+#    命中 3（內容禁令），但**不命中 2**——語言標記不指向任何一張單的射程
+#    （沒有「本單」「零改動」「相對 base」）。**三項缺一即不同形**，故不刪。
+#    `test_marker.py` 的 `#308 AC-2` 自檢因此**必須放過本條**；該節有一條專驗這件事
+#    （判準實作若誤殺本條，那條會 FAIL）。
+# 3. 為何非寫這段不可：本條與被刪的四條**外觀相同**（皆為「X 不含 Y 字面」），
+#    差別**只在意圖**。下一個掃描者若只看外觀，會誤判為同形並把它刪掉——
+#    `#308` 把理由寫在這裡，就是為了阻止那件事。
+#    出處：https://github.com/AugustusHsu/agent-devflow/issues/308
 check("#300 AC-2 `_marker.py` 不含 `handoff` 字面（grammar 沒有上移）",
       "handoff" not in MARKER_SRC.lower(), "")
 check("#300 AC-2 `_marker.py` 仍只有兩個 grammar 常數（未多出第三種標記）",
@@ -1161,10 +1179,24 @@ check("#300 AC-3 第二棒的子程序 prompt 不要求它自報結果（否決�
       "handoff" not in prompt_of(h1.spawned[1]).lower()
       and "回報" not in prompt_of(h1.spawned[1]),
       f"prompt={prompt_of(h1.spawned[1])[:300]!r}")
-# 本單不新增 seat 自律：`manager.md` 不得出現 handoff 行的義務。
-# 「該檔零改動」的 git 事實由 T 的驗證指令在 shell 側取（`git diff --name-only` 恰 6 檔）。
-check("#300 AC-3 本單不新增 seat 自律：manager.md 不含 handoff 字面",
-      "handoff" not in MGR.lower(), "")
+# ── 此處原有一條（`#308` `AC-3` ❶，已刪除）──────────────────────────────────
+#    「`#300` `AC-3` 本單不新增 seat 自律：`manager.md` 不含 `handoff` 字面」，
+#    斷言形式 `"handoff" not in MGR.lower()`。
+#
+# 1. **來源**：`#300` 的**單次射程限制**。該單宣告「不新增 seat 自律」，其 AC 的
+#    斷言形式是 `git diff --name-only`（恰 6 檔，`manager.md` 不在內）——
+#    問的是「**這一次**有沒有改到它」。
+# 2. **為何過寬**（兩層語意不一致）：它被實作成「`devflow/seats/manager.md`
+#    **永遠**不得出現 `handoff` 字面」。射程自一張單的 diff 擴張成跨單的內容禁令：
+#    `handoff` 行是 manager 真的要處置的事，後續任何單想在 manager 的職位檔寫
+#    一句關於它的**合法**說明，都會先在這裡假 FAIL——而沒有人宣告過那道禁令。
+#    實測（`#308` 探針 A，`manager.md` 加 `handoff` 字面）：原本只命中此條。
+# 3. **處置與出處**：本單依裁決位 2026-10-09 裁示**刪除**，
+#    https://github.com/AugustusHsu/agent-devflow/issues/308
+# 4. **為何刪而非改寫**（`test_marker.py` 檔頂 `AC-1`(c)）：**意圖本身已失效**——
+#    「本單不新增 seat 自律」在 `#300` 合併後**已成歷史**，無法也不需由測試持續
+#    守護。`#300` 真正的設計決定（第二棒不自報結果）由上方那條 prompt 斷言守著，
+#    它標的是 relay **當下**發出的 prompt，不受此條刪除影響。
 check("#300 AC-3 判準表的最後一列只宣稱「relay 沒接手」，不把成因說成分得開",
       "relay 沒接手" in TG300 and "不宣稱它分得開" in TG300, "")
 
