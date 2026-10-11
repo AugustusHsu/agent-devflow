@@ -4305,11 +4305,16 @@ def _p306_indexes():
 #        「零改動」「一字未增」「一條未增」「相對 base」「與 base」，以及
 #        「不新增／未新增」——「新增」本身預設了一個 base，是 diff 陳述。
 #        （`#308` 名單裡 `devflow_topic.py` 那條就只有這一種標記，故必須收。）
-#   (a)3 **未來不得出現**（而非該檔現在該長什麼樣）← 斷言式同時滿足兩件事：
+#   (a)3 **未來不得出現**（而非該檔現在該長什麼樣）← **逐一原子主張**判斷：
+#        把斷言式按 `and`／`or` 攤開，任一主張是**純禁令**即成立。純禁令＝該主張
 #        禁止某字面／某計數／某差集出現（`not in`／`.count(...) == N`／
-#        `not (A - B)`／`== 0`），**且不**釘住任何正向的期望形狀
-#        （`in`／`== ["…"]`／`o[name] == n[name]`／`set(...) <= set(...)`）。
-#        後者正是檔頂 (b) 的「AST 射程證據」與「標的是該檔該長什麼樣」。
+#        `not (A - B)`／`== 0`／`not any(正向條件)`），**且該主張自己**沒有把它
+#        抵銷的正向形狀（`in`／`== ["…"]`／`o[name] == n[name]`／
+#        `set(...) <= set(...)`／雙重否定的 `not any(x not in S)`）。
+#        ⚠️ 抵銷**只在同一條主張內**算：`"foo" not in SRC and "bar" in SRC` 裡的
+#        `not in` 是獨立禁令，不因旁邊有個無關的正向 `in` 而正當化
+#        （PR `#309` `BLOCK 1`，第 1 輪讓整個運算式共用一個 `pin` 而漏判）。
+#        正向那一側正是檔頂 (b) 的「AST 射程證據」與「標的是該檔該長什麼樣」。
 #
 # 以 **AST** 取 `check` 呼叫，故**註解與字串 fixture 都不會被誤收**——只有真的
 # 呼叫算（`AC-3` 的刪除註解因此可以原文引述被刪的標題而不被誤判）。
@@ -4343,51 +4348,125 @@ def _p308_checks(src: str) -> list:
     return out
 
 
-def _p308_verdict(title: str, expr) -> tuple:
-    """回傳 (命中 (a)1, 命中 (a)2, 命中 (a)3)——三項全中即越界。"""
+def _p308_claims(expr) -> list:
+    """把斷言式攤成**原子主張**：`and`／`or` 的運算元逐一展開。
+
+    (a)3 必須**逐一主張**判斷。第 1 輪（`1daf3cb`）以整個運算式共用一個 `pin`
+    布林，兩個方向都錯（PR `#309` `BLOCK 1`）：
+      • 漏判 `"foo" not in SRC and "bar" in SRC`——那個 `not in` 是**獨立**的永久
+        禁令，不因旁邊有個**無關**的正向 `in` 而正當化。
+      • 誤殺 `not any(name not in funcs for name in required)`——它是當下下界。
+    故改成：先攤成原子主張，再問**每一條主張自己**是不是純禁令。
+    """
     import ast
-    neg = forbid = pin = False
-    for node in ast.walk(expr):
-        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
-            neg = True
-            inner = list(ast.walk(node.operand))
-            if any(isinstance(m, ast.BinOp) and isinstance(m.op, ast.Sub)
-                   for m in inner):
-                forbid = True                  # `not (A - B)`：禁止差集出現
-            if any(isinstance(m, ast.Call) and isinstance(m.func, ast.Name)
-                   and m.func.id == "any" for m in inner):
-                forbid = True                  # `not any(w in X for w in 禁用詞)`
-        if not isinstance(node, ast.Compare):
-            continue
+    if isinstance(expr, ast.BoolOp):
+        out = []
+        for value in expr.values:
+            out += _p308_claims(value)
+        return out
+    return [expr]
+
+
+def _p308_kinds(node, neg: bool = False) -> set:
+    """單一主張裡出現的形態：`ban`（未來不得出現）／`pin`（釘住當下形狀）。
+
+    `neg` 記錄目前位於**奇數個** `not` 之下。極性要跟著翻，否則雙重否定會被讀成
+    禁令：`not any(name not in funcs …)` 攤開是「必要項**皆在**」的當下下界
+    （`pin`），而 `not any(w in st …)` 才是「禁用詞一個都不准出現」（`ban`）。
+    """
+    import ast
+    out = set()
+    if isinstance(node, ast.BoolOp):
+        for value in node.values:
+            out |= _p308_kinds(value, neg)
+        return out
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        inner = node.operand
+        # `not any(...)`／`not all(...)`：極性翻轉後看**產生器的條件**
+        if (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name)
+                and inner.func.id in ("any", "all") and inner.args
+                and isinstance(inner.args[0], (ast.GeneratorExp, ast.ListComp,
+                                               ast.SetComp))):
+            return _p308_kinds(inner.args[0].elt, not neg)
+        if isinstance(inner, ast.BinOp) and isinstance(inner.op, ast.Sub):
+            out.add("pin" if neg else "ban")   # `not (A - B)`：差集須空
+            return out
+        if isinstance(inner, (ast.Name, ast.Call, ast.Attribute,
+                              ast.Subscript)):
+            out.add("pin" if neg else "ban")   # `not hit_time`：那個清單須空
+            return out
+        return _p308_kinds(inner, not neg)
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in ("any", "all") and node.args
+            and isinstance(node.args[0], (ast.GeneratorExp, ast.ListComp,
+                                          ast.SetComp))):
+        return _p308_kinds(node.args[0].elt, neg)
+    if isinstance(node, ast.Compare):
         for op, right in zip(node.ops, node.comparators):
             sides = (node.left, right)
             if isinstance(op, ast.NotIn):
-                neg = forbid = True            # `"字面" not in 別的檔`
+                out.add("pin" if neg else "ban")   # `"字面" not in 別的檔`
             elif isinstance(op, ast.In):
-                pin = True                     # 正向存在＝該檔現在該長什麼樣
+                out.add("ban" if neg else "pin")   # 正向存在＝該檔現在該長什麼樣
             elif (isinstance(op, ast.Is) and isinstance(right, ast.Constant)
                     and right.value is None):
-                neg = forbid = True            # `re.search(...) is None`
-            else:
-                if any(isinstance(s, ast.Constant) and s.value == 0
-                       for s in sides):
-                    neg = forbid = True        # `== 0`：一個都沒
-                if any(isinstance(s, ast.Call)
-                       and isinstance(s.func, ast.Attribute)
-                       and s.func.attr == "count" for s in sides):
-                    forbid = True              # 字面計數被釘死
+                out.add("pin" if neg else "ban")   # `re.search(...) is None`
+            elif isinstance(op, (ast.Eq, ast.NotEq, ast.LtE, ast.GtE,
+                                 ast.Lt, ast.Gt)):
                 if any(isinstance(s, (ast.List, ast.Set, ast.Tuple, ast.Dict))
                        for s in sides):
-                    pin = True                 # `== ["cmd_scan"]`：期望形狀
-                if any(isinstance(s, ast.Call) and isinstance(s.func, ast.Name)
-                       and s.func.id in ("set", "sorted", "frozenset")
-                       for s in sides):
-                    pin = True                 # `set(...) <= set(added)`：下界
-                if all(isinstance(s, ast.Subscript) for s in sides):
-                    pin = True                 # `o[name] == n[name]`：AST 比對
+                    out.add("pin")                 # `== ["cmd_scan"]`：期望形狀
+                elif any(isinstance(s, ast.Call)
+                         and isinstance(s.func, ast.Name)
+                         and s.func.id in ("set", "sorted", "frozenset")
+                         for s in sides):
+                    out.add("pin")                 # `set(…) <= set(added)`：下界
+                elif all(isinstance(s, ast.Subscript) for s in sides):
+                    out.add("pin")                 # `o[name] == n[name]`
+                elif isinstance(op, (ast.Eq, ast.NotEq)) and any(
+                        isinstance(s, ast.Constant)
+                        and not isinstance(s.value, bool) and s.value == 0
+                        for s in sides):
+                    out.add("pin" if neg else "ban")   # `== 0`：一個都沒
+                elif isinstance(op, (ast.Eq, ast.NotEq)) and any(
+                        isinstance(s, ast.Call)
+                        and isinstance(s.func, ast.Attribute)
+                        and s.func.attr == "count" for s in sides):
+                    out.add("pin" if neg else "ban")   # 字面計數被釘死
+        return out
+    for child in ast.iter_child_nodes(node):
+        out |= _p308_kinds(child, neg)             # 禁令可能包在呼叫裡
+    return out
+
+
+def _p308_verdict(title: str, expr) -> tuple:
+    """回傳 (命中 (a)1, 命中 (a)2, 命中 (a)3)——三項全中即越界。"""
+    import ast
+    neg = False
+    for node in ast.walk(expr):
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            neg = True
+        elif isinstance(node, ast.Compare):
+            for op, right in zip(node.ops, node.comparators):
+                if isinstance(op, ast.NotIn):
+                    neg = True                     # `not in`
+                elif (isinstance(op, ast.Is)
+                        and isinstance(right, ast.Constant)
+                        and right.value is None):
+                    neg = True                     # `is None`
+                elif (isinstance(op, (ast.Eq, ast.NotEq))
+                        and any(isinstance(s, ast.Constant)
+                                and not isinstance(s.value, bool)
+                                and s.value == 0
+                                for s in (node.left, right))):
+                    neg = True                     # `== 0`
+    # (a)3：**任一原子主張**是純禁令（有 `ban`、且該主張內沒有把它抵銷的 `pin`）
+    # 即成立。抵銷只在**同一條主張內**算，不跨主張——這正是 `BLOCK 1` 的修正。
+    ban = any("ban" in kinds and "pin" not in kinds
+              for kinds in (_p308_kinds(claim) for claim in _p308_claims(expr)))
     return (neg or any(w in title for w in P308_NEG_WORDS),
             bool(P308_SCOPE_RE.search(title)),
-            forbid and not pin)
+            ban)
 
 
 def _p308_over(rows: list) -> list:
@@ -4431,9 +4510,37 @@ def _p308_ac2():
           and [v for *_, v in bad_rows] == [(True, True, True)],
           f"越界={bad_over!r} 判準={[v for *_, v in bad_rows]!r}")
     check("#308 AC-2 鑑別力對照：同一條斷言只去掉射程語言標記 → 自檢放過",
-          len(_p308_over(ctrl_rows)) == 0
+          _p308_over(ctrl_rows) == []
           and [v for *_, v in ctrl_rows] == [(True, False, True)],
           f"越界={_p308_over(ctrl_rows)!r} 判準={[v for *_, v in ctrl_rows]!r}")
+
+    # ── PR `#309` `BLOCK 1` 的兩個反例（持久 fixture）────────────────────────
+    # 第 1 輪（`1daf3cb`）的 (a)3 以**整個運算式共用**一個 `pin` 布林實作，
+    # 兩個方向都錯。這兩條把 reviewer 的反例釘成常駐斷言，防止同一個病復發：
+    #   • 混合式：`"foo" not in SRC and "bar" in SRC`——`not in` 是**獨立**的永久
+    #     禁令，旁邊那個**無關**的正向 `in` 不使它正當化。修前判 (a)3 不成立
+    #     （漏判，`over` 為空），現在必須進 `over`。
+    #   • 當下下界：`not any(name not in funcs for name in required)`——雙重否定
+    #     攤開是「必要項皆在」，標的是**該檔現在該長什麼樣**，(a)3 不成立。
+    #     修前被判越界（誤殺），現在必須放過。
+    # 兩者的（標題、語言標記）都刻意與被刪的四條同形，故**只有 (a)3 的判法**能把
+    # 它們分開——這是 `BLOCK 1` 要守住的那一刀。
+    mixed = ('check("#999 本單不新增 foo",\n'
+             '      "foo" not in SRC and "bar" in SRC, "")\n')
+    bound = ('check("#999 本單未漏必要函式",\n'
+             '      not any(name not in funcs for name in required), "")\n')
+    mixed_rows = [("fixture", ln, t, _p308_verdict(t, e))
+                  for ln, t, e in _p308_checks(mixed)]
+    bound_rows = [("fixture", ln, t, _p308_verdict(t, e))
+                  for ln, t, e in _p308_checks(bound)]
+    check("#308 AC-2 BLOCK 1 漏判：獨立禁令 ＋ 無關正向 in 的混合式 → 仍判越界",
+          _p308_over(mixed_rows) == ["fixture:1 #999 本單不新增 foo"]
+          and [v for *_, v in mixed_rows] == [(True, True, True)],
+          f"越界={_p308_over(mixed_rows)!r} 判準={[v for *_, v in mixed_rows]!r}")
+    check("#308 AC-2 BLOCK 1 誤殺：not any(x not in S) 的當下下界 → 自檢放過",
+          _p308_over(bound_rows) == []
+          and [v for *_, v in bound_rows] == [(True, True, False)],
+          f"越界={_p308_over(bound_rows)!r} 判準={[v for *_, v in bound_rows]!r}")
 
     # ── 不誤殺（`AC-5`）：`test_relay.py` 的「`_marker.py` 不含 `handoff` 字面」──
     # 它是 `#300` 的**永久設計決定**（grammar 不上移），外觀與被刪的四條相同、
