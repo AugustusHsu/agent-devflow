@@ -4306,14 +4306,44 @@ def _p306_indexes():
 #        「不新增／未新增」——「新增」本身預設了一個 base，是 diff 陳述。
 #        （`#308` 名單裡 `devflow_topic.py` 那條就只有這一種標記，故必須收。）
 #   (a)3 **未來不得出現**（而非該檔現在該長什麼樣）← **逐一原子主張**判斷：
-#        把斷言式按 `and`／`or` 攤開，任一主張是**純禁令**即成立。純禁令＝該主張
-#        禁止某字面／某計數／某差集出現（`not in`／`.count(...) == N`／
-#        `not (A - B)`／`== 0`／`not any(正向條件)`），**且該主張自己**沒有把它
-#        抵銷的正向形狀（`in`／`== ["…"]`／`o[name] == n[name]`／
-#        `set(...) <= set(...)`／雙重否定的 `not any(x not in S)`）。
+#        把斷言式按 `and`／`or` 攤開（`_p308_claims`），任一主張是**純禁令**即成立
+#        （有 `ban`、且**該主張自己**沒有抵銷它的 `pin`）。
 #        ⚠️ 抵銷**只在同一條主張內**算：`"foo" not in SRC and "bar" in SRC` 裡的
 #        `not in` 是獨立禁令，不因旁邊有個無關的正向 `in` 而正當化
-#        （PR `#309` `BLOCK 1`，第 1 輪讓整個運算式共用一個 `pin` 而漏判）。
+#        （PR `#309` 第 1 輪 `BLOCK 1`：整個運算式共用一個 `pin` 而漏判）。
+#
+#        樣態辨識收斂成**封閉資料表**（`P308_*_ROWS`，`#308` 第 3 輪；PR `#309`
+#        第 2 輪 `BLOCK 1` 連兩輪被新語法樣態擋下，故把邊界變成可枚舉的）。
+#        ⚠️⚠️ **表外樣態一律不分類**——既不算 `ban` 也不算 `pin`，(a)3 對它不成立，
+#        **須人工看**。這是刻意的：判定器只認表上列出的寫法，要擴充就**加一列**，
+#        不是在程式裡加一條 `elif`。表外樣態的代價是漏判（不是誤殺），
+#        而守門的最後一道是人——檔頂 (a) 的三項判準才是規範本體。
+#
+#        對照表（哪些 ban、哪些 pin、是否受 `not` 翻轉）：
+#
+#          樣態                                      極性   受 not 翻轉
+#          ─────────────────────────────────────────────────────────────
+#          `X in Y`                                  pin    是
+#          `X not in Y`                              ban    是
+#          `E is None`                               ban    是
+#          `E is not None`                           pin    是
+#          `E is False`／`== False`／`is not True`    （翻極性後遞迴左側）
+#          `E is True`／`== True`／`is not False`     （不翻極性，遞迴左側）
+#          `== 0`／`<= 0`／`< 1`                      ban    是
+#          `!= 0`／`> 0`／`>= 1`                      pin    是   ← 非空下界
+#          `.count(…) == N`／`!= N`（N≠0 或兩側皆計數）ban    是
+#          容器字面或 `set`／`sorted`／`frozenset` 比較 pin    否
+#          `o[name] == n[name]`（兩側皆 Subscript）   pin    否
+#          `not (A - B)`                             ban    是
+#          `not <名稱／呼叫>`（那個清單須空）          ban    是
+#          `any(…)`／`all(…)`／`not any(…)`／`not all(…)`（極性傳遞進產生器條件）
+#          ─────────────────────────────────────────────────────────────
+#          以上皆無命中 → **不分類**（表外）
+#
+#        極性翻轉即「雙重否定」：`not any(x not in S)` 的內層 `not in` 被外層
+#        `not any` 翻成**正向下界**（必要項皆在），故 (a)3 不成立；而
+#        `not any(w in S)` 才是「一個都不准出現」的禁令。
+#        `!= 0`／`> 0` 同理是「目前非空」的下界，與 `== 0` 極性相反。
 #        正向那一側正是檔頂 (b) 的「AST 射程證據」與「標的是該檔該長什麼樣」。
 #
 # 以 **AST** 取 `check` 呼叫，故**註解與字串 fixture 都不會被誤收**——只有真的
@@ -4325,6 +4355,44 @@ P308_NEG_WORDS = ("不含", "未含", "不新增", "未新增", "不得新增", 
 P308_SCOPE_RE = re.compile(
     r"本單(不|未|沒)|不新增|未新增|不得新增|零改動|一字未增|一條未增"
     r"|相對 base|與 base")
+
+# ── (a)3 的**封閉樣態表**（見上方對照表）──────────────────────────────────────
+# 運算子以 AST 類別**名**（字串）寫，表才是純資料：擴充就加一列，不動程式。
+# 比對**依序**進行（`_p308_kinds`）：真假值 → None → 成員 → 空／非空 → 形狀 →
+# 計數。順序有意義——`.count(…) != 0` 要先被「非空下界」收走（`pin`），
+# 不能掉進計數那一列被判 `ban`。
+P308_BAN = "ban"
+P308_PIN = "pin"
+# 一、真假值比對：**不自己分類**，翻（或不翻）極性後遞迴左側。
+#     (運算子, 右值, 是否翻轉極性)
+P308_TRUTH_ROWS = (
+    ("Is", False, True), ("Eq", False, True),           # `E is False`／`== False`
+    ("IsNot", True, True), ("NotEq", True, True),       # `E is not True`／`!= True`
+    ("Is", True, False), ("Eq", True, False),           # `E is True`／`== True`
+    ("IsNot", False, False), ("NotEq", False, False),   # `E is not False`
+)
+# 二、與 `None` 比對。(運算子, 極性)
+P308_NONE_ROWS = (("Is", P308_BAN), ("IsNot", P308_PIN))
+# 三、成員關係。(運算子, 極性)
+P308_MEMBER_ROWS = (("In", P308_PIN), ("NotIn", P308_BAN))
+# 四、空／非空（整數常數正規化到右側後比對）。(運算子, 常數, 極性)
+P308_ZERO_ROWS = (
+    ("Eq", 0, P308_BAN), ("LtE", 0, P308_BAN), ("Lt", 1, P308_BAN),
+    ("NotEq", 0, P308_PIN), ("Gt", 0, P308_PIN), ("GtE", 1, P308_PIN),
+)
+# 常數在左側時運算子左右對調（`0 < len(x)` ＝ `len(x) > 0`）
+P308_MIRROR = {"Lt": "Gt", "Gt": "Lt", "LtE": "GtE", "GtE": "LtE",
+               "Eq": "Eq", "NotEq": "NotEq"}
+# 五、形狀類：**不受 `not` 翻轉**（釘住當下形狀不因否定變成內容禁令）。
+#     (形狀 tag, 極性, 是否兩側都要命中)
+P308_SHAPE_ROWS = (("container", P308_PIN, False),
+                   ("subscript", P308_PIN, True))
+# 六、計數：`.count(…)` 參與 `==`／`!=` 且未被第四表收走。
+P308_COUNT_ROWS = (("Eq", P308_BAN), ("NotEq", P308_BAN))
+# 七、`not` 直接包住的結構。(形狀 tag, 極性)
+P308_NOT_ROWS = (("difference", P308_BAN), ("truthy", P308_BAN))
+# 八、極性傳遞的呼叫：條件帶進產生器，`not` 在外層時翻極性。
+P308_POLARITY_CALLS = ("any", "all")
 
 
 def _p308_checks(src: str) -> list:
@@ -4367,75 +4435,124 @@ def _p308_claims(expr) -> list:
     return [expr]
 
 
-def _p308_kinds(node, neg: bool = False) -> set:
-    """單一主張裡出現的形態：`ban`（未來不得出現）／`pin`（釘住當下形狀）。
+def _p308_shape(node, tag: str) -> bool:
+    """形狀述詞——`P308_SHAPE_ROWS`／`P308_NOT_ROWS` 的 tag → 判定。"""
+    import ast
+    if tag == "container":
+        return (isinstance(node, (ast.List, ast.Set, ast.Tuple, ast.Dict))
+                or (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id in ("set", "sorted", "frozenset")))
+    if tag == "subscript":
+        return isinstance(node, ast.Subscript)
+    if tag == "count":
+        return (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "count")
+    if tag == "difference":
+        return isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub)
+    if tag == "truthy":
+        return isinstance(node, (ast.Name, ast.Call, ast.Attribute,
+                                 ast.Subscript))
+    return False
 
-    `neg` 記錄目前位於**奇數個** `not` 之下。極性要跟著翻，否則雙重否定會被讀成
-    禁令：`not any(name not in funcs …)` 攤開是「必要項**皆在**」的當下下界
-    （`pin`），而 `not any(w in st …)` 才是「禁用詞一個都不准出現」（`ban`）。
+
+def _p308_int_side(op_name: str, left, right):
+    """把整數常數正規化到右側 → (運算子名, 常數)；兩側都不是整數常數回 None。"""
+    import ast
+
+    def num(node):
+        return (isinstance(node, ast.Constant)
+                and not isinstance(node.value, bool)
+                and isinstance(node.value, int))
+
+    if num(right):
+        return op_name, right.value
+    if num(left) and op_name in P308_MIRROR:
+        return P308_MIRROR[op_name], left.value
+    return None
+
+
+def _p308_generator(node):
+    """`any(…)`／`all(…)` 的產生器條件（極性傳遞的入口）；不是就回 None。"""
+    import ast
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in P308_POLARITY_CALLS and node.args
+            and isinstance(node.args[0], (ast.GeneratorExp, ast.ListComp,
+                                          ast.SetComp))):
+        return node.args[0].elt
+    return None
+
+
+def _p308_kinds(node, neg: bool = False) -> set:
+    """單一主張的形態集合（`ban`／`pin`）——**只認封閉樣態表**。
+
+    `neg` 記錄目前位於**奇數個** `not` 之下；極性要跟著翻，否則雙重否定會被讀成
+    禁令（`not any(name not in funcs …)` 攤開是「必要項皆在」的當下下界）。
+    ⚠️ **表外樣態回空集合**（不分類）——要認新寫法請在 `P308_*_ROWS` **加一列**，
+    不要在這裡加 `elif`。表外的代價是漏判，由人工覆核補（見上方 (a)3 的註解）。
     """
     import ast
-    out = set()
-    if isinstance(node, ast.BoolOp):
+
+    def pol(polarity, flips=True):
+        if not (neg and flips):
+            return polarity
+        return P308_PIN if polarity == P308_BAN else P308_BAN
+
+    if isinstance(node, ast.BoolOp):                      # `and`／`or`：取聯集
+        out = set()
         for value in node.values:
             out |= _p308_kinds(value, neg)
         return out
+
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
         inner = node.operand
-        # `not any(...)`／`not all(...)`：極性翻轉後看**產生器的條件**
-        if (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name)
-                and inner.func.id in ("any", "all") and inner.args
-                and isinstance(inner.args[0], (ast.GeneratorExp, ast.ListComp,
-                                               ast.SetComp))):
-            return _p308_kinds(inner.args[0].elt, not neg)
-        if isinstance(inner, ast.BinOp) and isinstance(inner.op, ast.Sub):
-            out.add("pin" if neg else "ban")   # `not (A - B)`：差集須空
-            return out
-        if isinstance(inner, (ast.Name, ast.Call, ast.Attribute,
-                              ast.Subscript)):
-            out.add("pin" if neg else "ban")   # `not hit_time`：那個清單須空
-            return out
+        cond = _p308_generator(inner)                     # 八：`not any/all(…)`
+        if cond is not None:
+            return _p308_kinds(cond, not neg)
+        for tag, polarity in P308_NOT_ROWS:               # 七：`not` 包住的結構
+            if _p308_shape(inner, tag):
+                return {pol(polarity)}
         return _p308_kinds(inner, not neg)
-    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-            and node.func.id in ("any", "all") and node.args
-            and isinstance(node.args[0], (ast.GeneratorExp, ast.ListComp,
-                                          ast.SetComp))):
-        return _p308_kinds(node.args[0].elt, neg)
+
+    cond = _p308_generator(node)                          # 八：`any/all(…)`
+    if cond is not None:
+        return _p308_kinds(cond, neg)
+
     if isinstance(node, ast.Compare):
-        for op, right in zip(node.ops, node.comparators):
-            sides = (node.left, right)
-            if isinstance(op, ast.NotIn):
-                out.add("pin" if neg else "ban")   # `"字面" not in 別的檔`
-            elif isinstance(op, ast.In):
-                out.add("ban" if neg else "pin")   # 正向存在＝該檔現在該長什麼樣
-            elif (isinstance(op, ast.Is) and isinstance(right, ast.Constant)
-                    and right.value is None):
-                out.add("pin" if neg else "ban")   # `re.search(...) is None`
-            elif isinstance(op, (ast.Eq, ast.NotEq, ast.LtE, ast.GtE,
-                                 ast.Lt, ast.Gt)):
-                if any(isinstance(s, (ast.List, ast.Set, ast.Tuple, ast.Dict))
-                       for s in sides):
-                    out.add("pin")                 # `== ["cmd_scan"]`：期望形狀
-                elif any(isinstance(s, ast.Call)
-                         and isinstance(s.func, ast.Name)
-                         and s.func.id in ("set", "sorted", "frozenset")
-                         for s in sides):
-                    out.add("pin")                 # `set(…) <= set(added)`：下界
-                elif all(isinstance(s, ast.Subscript) for s in sides):
-                    out.add("pin")                 # `o[name] == n[name]`
-                elif isinstance(op, (ast.Eq, ast.NotEq)) and any(
-                        isinstance(s, ast.Constant)
-                        and not isinstance(s.value, bool) and s.value == 0
-                        for s in sides):
-                    out.add("pin" if neg else "ban")   # `== 0`：一個都沒
-                elif isinstance(op, (ast.Eq, ast.NotEq)) and any(
-                        isinstance(s, ast.Call)
-                        and isinstance(s.func, ast.Attribute)
-                        and s.func.attr == "count" for s in sides):
-                    out.add("pin" if neg else "ban")   # 字面計數被釘死
-        return out
+        if len(node.ops) != 1:
+            return set()                                  # 鏈式比較：表外
+        op_name = type(node.ops[0]).__name__
+        left, right = node.left, node.comparators[0]
+        consts = (right.value,) if isinstance(right, ast.Constant) else ()
+        for row_op, row_val, flips in P308_TRUTH_ROWS:    # 一：真假值比對
+            if op_name == row_op and any(c is row_val for c in consts):
+                return _p308_kinds(left, (not neg) if flips else neg)
+        for row_op, polarity in P308_NONE_ROWS:           # 二：與 None 比對
+            if op_name == row_op and any(c is None for c in consts):
+                return {pol(polarity)}
+        for row_op, polarity in P308_MEMBER_ROWS:         # 三：成員關係
+            if op_name == row_op:
+                return {pol(polarity)}
+        norm = _p308_int_side(op_name, left, right)       # 四：空／非空
+        if norm is not None:
+            for row_op, row_const, polarity in P308_ZERO_ROWS:
+                if norm == (row_op, row_const):
+                    return {pol(polarity)}
+        for tag, polarity, both in P308_SHAPE_ROWS:       # 五：形狀類（不翻轉）
+            sides = (left, right)
+            hit = (all if both else any)(_p308_shape(s, tag) for s in sides)
+            if hit:
+                return {pol(polarity, flips=False)}
+        for row_op, polarity in P308_COUNT_ROWS:          # 六：計數
+            if op_name == row_op and any(_p308_shape(s, "count")
+                                         for s in (left, right)):
+                return {pol(polarity)}
+        return set()                                      # 表外：不分類
+
+    out = set()
     for child in ast.iter_child_nodes(node):
-        out |= _p308_kinds(child, neg)             # 禁令可能包在呼叫裡
+        out |= _p308_kinds(child, neg)                    # 穿過未分類的包裝節點
     return out
 
 
@@ -4448,18 +4565,22 @@ def _p308_verdict(title: str, expr) -> tuple:
             neg = True
         elif isinstance(node, ast.Compare):
             for op, right in zip(node.ops, node.comparators):
-                if isinstance(op, ast.NotIn):
+                op_name = type(op).__name__
+                consts = ((right.value,) if isinstance(right, ast.Constant)
+                          else ())
+                if op_name == "NotIn":
                     neg = True                     # `not in`
-                elif (isinstance(op, ast.Is)
-                        and isinstance(right, ast.Constant)
-                        and right.value is None):
+                elif op_name == "Is" and any(c is None for c in consts):
                     neg = True                     # `is None`
-                elif (isinstance(op, (ast.Eq, ast.NotEq))
+                elif any(op_name == r_op and any(c is r_val for c in consts)
+                         for r_op, r_val, flips in P308_TRUTH_ROWS if flips):
+                    neg = True                     # `is False`／`is not True`
+                elif (op_name in ("Eq", "NotEq")
                         and any(isinstance(s, ast.Constant)
                                 and not isinstance(s.value, bool)
                                 and s.value == 0
                                 for s in (node.left, right))):
-                    neg = True                     # `== 0`
+                    neg = True                     # `== 0`／`!= 0`
     # (a)3：**任一原子主張**是純禁令（有 `ban`、且該主張內沒有把它抵銷的 `pin`）
     # 即成立。抵銷只在**同一條主張內**算，不跨主張——這正是 `BLOCK 1` 的修正。
     ban = any("ban" in kinds and "pin" not in kinds
@@ -4541,6 +4662,45 @@ def _p308_ac2():
           _p308_over(bound_rows) == []
           and [v for *_, v in bound_rows] == [(True, True, False)],
           f"越界={_p308_over(bound_rows)!r} 判準={[v for *_, v in bound_rows]!r}")
+
+    # ── PR `#309` **第 2 輪** `BLOCK 1` 的兩個反例（持久 fixture）──────────────
+    # 同一判定器連兩輪被**新語法樣態**擋下，故第 3 輪把樣態辨識收斂成封閉資料表
+    # （`P308_*_ROWS`），並把這兩個樣態也釘成常駐斷言：
+    #   • `(… in SRC) is False`：`is False` 是**否定運算子**，把內層 `in` 翻成
+    #     「該字面不得出現」——與 `not in` 等價的永久禁令。修前只認 `is None`，
+    #     整條落到表外而漏判（`over` 為空），現在必須進 `over`。
+    #   • `len(required) != 0`：`!= 0` 與 `== 0` **極性相反**——它是「目前非空」的
+    #     正向下界，標的是該檔現在該長什麼樣。修前與 `== 0` 同判 `ban` 而誤殺，
+    #     現在必須放過。
+    # 兩條的標題與語言標記同樣刻意與被刪的四條同形，故只有 (a)3 的**極性**判得開。
+    isfalse = ('check("#999 本單不新增 foo",\n'
+               '      ("foo" in SRC) is False, "")\n')
+    nonzero = ('check("#999 本單未漏必要函式",\n'
+               '      len(required) != 0, "")\n')
+    isfalse_rows = [("fixture", ln, t, _p308_verdict(t, e))
+                    for ln, t, e in _p308_checks(isfalse)]
+    nonzero_rows = [("fixture", ln, t, _p308_verdict(t, e))
+                    for ln, t, e in _p308_checks(nonzero)]
+    check("#308 AC-2 BLOCK 1 漏判（第 2 輪）：(… in SRC) is False 的禁令 → 仍判越界",
+          _p308_over(isfalse_rows) == ["fixture:1 #999 本單不新增 foo"]
+          and [v for *_, v in isfalse_rows] == [(True, True, True)],
+          f"越界={_p308_over(isfalse_rows)!r} "
+          f"判準={[v for *_, v in isfalse_rows]!r}")
+    check("#308 AC-2 BLOCK 1 誤殺（第 2 輪）：len(required) != 0 的非空下界 → 放過",
+          _p308_over(nonzero_rows) == []
+          and [v for *_, v in nonzero_rows] == [(True, True, False)],
+          f"越界={_p308_over(nonzero_rows)!r} "
+          f"判準={[v for *_, v in nonzero_rows]!r}")
+    # 表外樣態的行為也釘住：`len(found) == 7` 不在表上 → 形態集合為空、(a)3 不成立
+    # （刻意的漏判，不是誤殺；見上方 (a)3 註解「表外樣態不判、須人工看」）。
+    outside = ('check("#999 本單不新增 foo", len(found) == 7, "")\n')
+    outside_rows = [("fixture", ln, t, _p308_verdict(t, e))
+                    for ln, t, e in _p308_checks(outside)]
+    check("#308 AC-2 表外樣態不分類（形態集合為空、(a)3 不成立、須人工看）",
+          [sorted(_p308_kinds(c)) for c in
+           _p308_claims(_p308_checks(outside)[0][2])] == [[]]
+          and [v for *_, v in outside_rows] == [(True, True, False)],
+          f"判準={[v for *_, v in outside_rows]!r}")
 
     # ── 不誤殺（`AC-5`）：`test_relay.py` 的「`_marker.py` 不含 `handoff` 字面」──
     # 它是 `#300` 的**永久設計決定**（grammar 不上移），外觀與被刪的四條相同、
