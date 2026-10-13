@@ -12,7 +12,7 @@ Bot API 無法列舉 forum topic，故映射一旦遺失無法重建——除非
                                                 改 issue body 的一般內容，保留現行
                                                 的狀態標記並讀回驗證（不做狀態遷移）
 """
-import json, os, re, subprocess, sys, urllib.error, urllib.parse, urllib.request
+import json, os, re, subprocess, sys, tempfile, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
 
 # marker 的 grammar 一律走共用模組——它是 `CH3`（channels/README.md「分區三態」）判定式的
@@ -250,8 +250,9 @@ def edit_body(issue, path):
     **本入口不做狀態遷移**（那是 `ensure`／`archive` 的事，`CH3` 的「適用範圍／
     例外」）。順序固定，`#310` `AC-3`(i)：
 
-        讀 old body → `_marker.preserve_state` → 寫暫存檔 → `gh issue edit -F`
-        → **讀回**並以 `_marker.compare_state_lines` 逐字比對完整標記行
+        讀 old body → `_marker.preserve_state` → 寫暫存檔（落**該單專屬子目錄**，
+        `C5`）→ `gh issue edit -F` → **讀回**並以 `_marker.compare_state_lines`
+        逐字比對完整標記行
 
     讀回比的是**完整標記行的字面**（分區行與封存行各自逐字），**不是**
     `(T, A, NN)`：只改 `file=` 的那一支會讓計數與兩個 `NN` 全同，只比計數的判準
@@ -280,7 +281,18 @@ def edit_body(issue, path):
     # old 為權威。old／new 的 INVALID 與「new 偷渡 old 沒有的狀態」都在這裡 raise，
     # 而 raise 發生在寫暫存檔**之前** → `gh issue edit` 不會被呼叫（`AC-4`）。
     merged = _marker.preserve_state(old, new, detail=f"issue #{issue}")
-    p = Path(os.environ.get("TMPDIR", "/tmp")) / f"devflow-editbody-{issue}.md"
+    # `C5`（`WORKFLOW.md`）：本單執行期間產生的檔案一律落在**該單的專屬子目錄**之下，
+    # 不得在暫存根留散檔。故落點是 `$TMPDIR/devflow-editbody-<issue>/`，並在它底下
+    # 再以 `mkdtemp` 開一個**本次執行**的目錄——兩層的理由：
+    #   * 專屬子目錄以單號命名，`C5` 的「該單專屬」機械可辨（測試斷言父目錄名含單號）。
+    #   * 本次執行的目錄使清除能**只針對本次產物**：收尾只刪自己寫的那個檔與自己開的
+    #     那個目錄，專屬子目錄本身**只在已空時**才收掉。呼叫者的 before／after 檔、
+    #     既有檔或其他輪的工作檔若還在裡面，`rmdir` 會失敗而留下它們——**刻意**不用
+    #     `rmtree`：那會刪掉不屬於本次執行的東西。
+    work_root = Path(os.environ.get("TMPDIR", "/tmp")) / f"devflow-editbody-{issue}"
+    work_root.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix="run-", dir=work_root))
+    p = work / f"body-{issue}.md"
     try:
         p.write_text(merged)
         # gh() 遇非零 raise SystemExit；暫存檔的清除靠 finally 涵蓋這條路徑（`AC-5`）。
@@ -288,7 +300,13 @@ def edit_body(issue, path):
         back = json.loads(gh("issue", "view", str(issue), "-R", REPO,
                              "--json", "body"))["body"]
     finally:
+        # 三條路徑（成功／`gh` 失敗／讀回失配）都走這裡；只清本次建立的產物。
         p.unlink(missing_ok=True)
+        for d in (work, work_root):
+            try:
+                d.rmdir()               # 只在**空**時成功 → 不會動到別人的檔
+            except OSError:
+                pass                    # 裡面還有非本次產物：留著，交給它的主人
     same, diff = _marker.compare_state_lines(old, back)
     if not same:
         raise SystemExit(

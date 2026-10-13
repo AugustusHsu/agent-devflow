@@ -35,27 +35,35 @@
 |---|---|
 | `_marker.preserve_state(old_body, new_body, *, detail)` | **非狀態遷移的一般修訂**的寫側：把 old body 的合法狀態標記保存進 new body。**old 為權威**（`thread`、`file=` 皆取 old）；new 試圖**新增** old 沒有的狀態類別時 raise `StateIntroduced` 並拒絕寫入；old／new 的四類 INVALID（`T>1`、`A>1`、`T=0 A=1`、`NN` 不符）raise `InvalidMarker`。讀取順序固定：old 的 INVALID → new 的 INVALID → 偷渡。純字串、零 I/O、零 `gh`，且 `new_body` 一律是回傳值的**逐字前綴**（尾端空白行與 tab 不得被刪，故**不**沿用 `upsert_*` 的 `rstrip()` 追加寫法） |
 | `_marker.compare_state_lines(before, after)` | **通用**的完整標記行比較 → `(相同?, 差異描述)`。比的是**整行**（`thread` 與 `file=` 都算），不是 `(T, A, NN)`——只改 `file=` 的那一支會讓計數與兩個 `NN` 全同 |
-| `devflow_topic.py edit-body <issue> -F <檔>` | 端到端入口：讀 old body → `preserve_state` → 寫暫存檔 → `gh issue edit -F` → **讀回**並以 `compare_state_lines` 逐字比對。不符即 exit 非 0、stderr 印「結果未定」＋單號＋寫入前快照與讀回值的兩組完整標記行，**停下交人**；**不自動重送**（會以同一份過期快照再覆蓋）、**不以舊 body 覆蓋**。讀回失配是**一次寫入的結果未定**，不是「合併成功而收尾失敗」 |
+| `devflow_topic.py edit-body <issue> -F <檔>` | 端到端入口：讀 old body → `preserve_state` → 寫暫存檔（落 `$TMPDIR/devflow-editbody-<issue>/` 這個**該單專屬子目錄**，`C5`；成功／`gh` 失敗／讀回失配三條路徑都在 `finally` 只清本次產物）→ `gh issue edit -F` → **讀回**並以 `compare_state_lines` 逐字比對。不符即 exit 非 0、stderr 印「結果未定」＋單號＋寫入前快照與讀回值的兩組完整標記行，**停下交人**；**不自動重送**（會以同一份過期快照再覆蓋）、**不以舊 body 覆蓋**。讀回失配是**一次寫入的結果未定**，不是「合併成功而收尾失敗」 |
 
 `preserve_state` 與 `upsert_topic`／`upsert_archived` 的界線**不可互換**：後者是**狀態遷移**的寫側（`ensure`／`archive` 已決定新的態，參數是新的 `thread`／`file`），依 `CH3` 的「適用範圍／例外」刻意不受保存義務約束，其正確性驗**預期的新狀態**而不是「標記不變」。故**不得**把 `preserve_state` 插進 `_to_forge`／`cmd_archive`——那等於禁止 `ensure`／`archive` 改標記。
 
 ### `compare_state_lines` 的用法與宣稱
 
+⚠️ **工作檔的落點**（`C5`：本單執行期間產生的檔案一律落在該單的專屬子目錄之下）：下例的 before／after 兩份文字**不要**直接寫在暫存根（`/tmp`、`$TMPDIR`），請先開一個以單號命名的專屬子目錄，用畢自行移除——比較器本身唯讀、不會替你清檔。
+
 ```bash
-# before／after 兩份 body 文字從哪來都可以（本入口、裸 gh、gh api、Web UI）
-gh issue view <N> -R <repo> --json body -q .body > /tmp/before.md
-# …（任何方式改 body）…
-gh issue view <N> -R <repo> --json body -q .body > /tmp/after.md
-/usr/bin/python3 - <<'PY'
-import importlib.util, pathlib, sys
+N=<issue>; REPO=<owner/repo>
+WORK="${TMPDIR:-/tmp}/devflow-statecheck-$N"      # 該單專屬子目錄，不在暫存根留散檔
+mkdir -p "$WORK"
+gh issue view "$N" -R "$REPO" --json body -q .body > "$WORK/before.md"
+#  …（任何方式改 body：edit-body、裸 gh issue edit、gh api -X PATCH、Web UI）…
+gh issue view "$N" -R "$REPO" --json body -q .body > "$WORK/after.md"
+WORK="$WORK" /usr/bin/python3 - <<'PY'
+import importlib.util, os, pathlib, sys
+work = pathlib.Path(os.environ["WORK"])
 spec = importlib.util.spec_from_file_location(
     "_marker", "devflow/channels/scripts/telegram/_marker.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-same, diff = m.compare_state_lines(pathlib.Path("/tmp/before.md").read_text(),
-                                   pathlib.Path("/tmp/after.md").read_text())
+same, diff = m.compare_state_lines((work / "before.md").read_text(),
+                                   (work / "after.md").read_text())
 print("PASS" if same else "FAIL", diff)
 sys.exit(0 if same else 1)
 PY
+rc=$?
+rm -rf "$WORK"                                    # 清除步驟：只刪本次自己開的子目錄
+exit $rc
 ```
 
 - **唯讀、可重跑、不自動修復**：它只吃兩個字串並回報，不碰 forge、不打網路、零 I/O，也不會去把標記補回去——補不補、怎麼補由人或呼叫端決定。
