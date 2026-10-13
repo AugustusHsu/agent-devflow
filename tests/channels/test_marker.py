@@ -1093,10 +1093,21 @@ def _p291_ac3():
     # `archived` 一起判），不屬任一側——拆成 `preserve_topic`／`preserve_archived`
     # 反而做不到 `T=0 A=1`、`NN` 不符這兩類跨兩式的 INVALID 判定。
     #
+    # ⚠️ **本處的主張收窄如下（裁決位 2026-10-13 指定的更正）**：
+    # 不改這兩條時，`AC-1`／`AC-9` 仍可藉**模組層賦值別名**達成全綠（審查位已實證：
+    # 把實作命名為 `_preserve_state_impl`／`_compare_state_lines_impl`，再
+    # `preserve_state = _preserve_state_impl` 公開，整套測試 `1130/1130 PASS`、rc 0）；
+    # 但別名使該 API 對 `#291 AC-3` 的 `^def` 掃描器（`_public_funcs`）**不可見**，
+    # `other == []` 之所以 PASS 是因為它看不到那個 API——守門斷言被**繞過**而非
+    # **守住**。故本單選擇**宣告式放寬**，是裁決位 2026-10-13 選定的方案
+    # （PR `#311` https://github.com/AugustusHsu/agent-devflow/pull/311#issuecomment-6152603362 ，
+    # 含可重跑的反證腳本與四項鑑別力的預跑輸出）。
+    # 下方 `_p291_ac3_discrimination` 把該反證與四項鑑別力釘成常駐斷言。
+    #
     # 處置：改為**明確的允許集合**（`P310_STATE_API`），並配一條正向對偶要求
     # 集合內的名字確實存在——否則「不屬任一側者為空」可由「什麼都不加」滿足。
-    # 鑑別力未失：允許集合外的任何不分側公開函式仍會 FAIL（下方鑑別力子測試的
-    # `archived_foo` 等突變照舊命中配對缺口）。
+    # 鑑別力未失，四條斷言各自獨立在抓一件事（逐項實跑見
+    # `_p291_ac3_discrimination`）。
     # 同理，下方的五組配對由等號改為**下界**（`<=`）：等號會讓任何後續單在
     # `_marker.py` 新增第六組配對時假 FAIL，與 `#296` `AC-7`／`#304` `AC-10`
     # ／`#306` `AC-13` 三處被 `#308` 改成下界的理由同形。
@@ -1174,6 +1185,169 @@ def _p291_ac3_mutations():
     gaps_b2, _, _ = _pair_gaps(_public_funcs(mut_b2))
     check("#291 AC-3 鑑別力：突變 B'（達成版 ＋ archived_foo）缺口 == ['LINE:foo']",
           gaps_b2 == ["LINE:foo"], f"實得 {gaps_b2!r}")
+
+
+# ── #291 AC-3 的四條斷言各自的鑑別力（`#310` 第 2 輪補；裁決位 2026-10-13 指定）──
+# 出處：PR `#311`
+# https://github.com/AugustusHsu/agent-devflow/pull/311#issuecomment-6152603362
+#
+# 為什麼要這一節：`#310` 把其中兩條改成**宣告式**的放寬（允許集合 ＋ 正向存在、
+# 配對 key 下界）。放寬之後必須證明四條斷言**各自**仍在抓一件事、而且**不是互相
+# 代償**——否則「鑑別力未失」只是作者的說法。做法是在源碼字串上做四種突變（不改
+# 真檔），每種只踩一條斷言，並**逐一附對照**：其餘三條在同一變體下仍 PASS。
+#
+#   變體                                  目標斷言            對照（其餘三條）
+#   ─────────────────────────────────────────────────────────────────────────
+#   ①允許集合外的中性公開 def             允許集合 FAIL       正向存在／下界／缺口 PASS
+#   ②狀態 API 缺一個                      正向存在 FAIL       允許集合 PASS
+#   ③必要配對整組移除（upsert 兩側）      下界 FAIL           缺口 PASS（整組不產生缺口）
+#   ④缺單側（只刪 upsert_archived）       缺口 FAIL           下界 PASS（key 仍在）
+#   ⑤模組層賦值別名（反證）              正向存在 FAIL       base 的 `other == []` PASS
+#   ─────────────────────────────────────────────────────────────────────────
+#
+# ⑤是裁決位裁示的反證：別名讓公開 API 對 `^def` 掃描器不可見，於是 base 的字面
+# 斷言「照樣 PASS」——那是**被繞過**，不是**被守住**。它也是本單選宣告式放寬
+# （而非別名）的理由，故與四項鑑別力釘在同一節。
+# 既有的 `archived_foo` 反例留在上一節（`_p291_ac3_mutations`），本節另附一條
+# 同形的確認，使「改寫後它仍命中」在本節也讀得到。
+P310_PAIR_KEYS = {"find", "has", "read", "upsert", "LINE:line", "scan"}
+
+
+def _p310_cut_func(src: str, name: str) -> str:
+    """從源碼字串切掉某個頂層函式（以 AST 的源碼區段為界，只動那個 `def`）。
+
+    不用正則切段：`_marker.py` 的函式之間夾著註解區塊與 `class`，正則的
+    `(?=^def )` 會把它們一起吃掉，突變就不只踩一件事了。
+    """
+    import ast
+    for node in ast.parse(src).body:
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            seg = ast.get_source_segment(src, node)
+            assert seg and seg in src, f"取不到 {name} 的源碼區段"
+            return src.replace(seg, "", 1)
+    raise AssertionError(f"源碼內找不到頂層函式 {name}——突變失效")
+
+
+def _p310_judge_ac3(src: str) -> dict:
+    """對一份 `_marker.py` 源碼跑 `#291 AC-3` 的四條斷言（＋ base 的兩條字面）。
+
+    走的是本檔**既有**的抽取函式 `_public_funcs`／`_pair_gaps`，與受測斷言同一支，
+    否則突變證明不了斷言的鑑別力。
+    """
+    names = _public_funcs(src)
+    gaps, table, other = _pair_gaps(names)
+    return {
+        "allowed": set(other) <= P310_STATE_API,        # 候選：允許集合
+        "api_present": P310_STATE_API <= set(names),    # 候選：正向存在
+        "keys_lower": P310_PAIR_KEYS <= set(table),     # 候選：配對下界
+        "gaps_empty": gaps == [],                       # 兩案共用：意圖本體
+        "base_other_empty": other == [],                # base 字面（對照用）
+        "base_keys_eq": set(table) == P310_PAIR_KEYS,   # base 字面（對照用）
+        "other": other, "gaps": gaps, "keys": sorted(table), "names": names,
+    }
+
+
+@case("#291 AC-3 四條斷言各自的鑑別力（`#310` 第 2 輪；每項附對照）")
+def _p291_ac3_discrimination():
+    base = _p310_judge_ac3(MARKER_SRC)
+    check("#291 AC-3 現況：四條斷言皆 PASS（判準非恆假）",
+          base["allowed"] and base["api_present"] and base["keys_lower"]
+          and base["gaps_empty"],
+          f"other={base['other']!r} 配對 keys={base['keys']!r}")
+    check("#291 AC-3 現況：base 的 `other == []` 會 FAIL（故需要宣告式放寬）",
+          base["base_other_empty"] is False, f"other={base['other']!r}")
+
+    # ①允許集合外的中性公開 def（不分 topic／archived 側，也不在允許集合內）
+    neutral = _p310_judge_ac3(
+        MARKER_SRC + "\ndef helper_normalize(x):\n    return x\n")
+    check("#291 AC-3 鑑別力①允許集合外的中性公開 def（helper_normalize）"
+          "→ 允許集合斷言 FAIL",
+          neutral["allowed"] is False, f"other={neutral['other']!r}")
+    check("#291 AC-3 鑑別力①對照：同一變體的正向存在、下界、缺口仍 PASS"
+          "（故只有允許集合在抓）",
+          neutral["api_present"] and neutral["keys_lower"]
+          and neutral["gaps_empty"],
+          f"other={neutral['other']!r} 缺口={neutral['gaps']!r}")
+
+    # ②允許的狀態 API 缺一個（`compare_state_lines` 不見）
+    missing = _p310_judge_ac3(_p310_cut_func(MARKER_SRC, "compare_state_lines"))
+    check("#291 AC-3 鑑別力②狀態 API 缺一個（compare_state_lines 不見）"
+          "→ 正向存在斷言 FAIL",
+          missing["api_present"] is False,
+          f"names 內的狀態 API={sorted(P310_STATE_API & set(missing['names']))!r}")
+    check("#291 AC-3 鑑別力②對照：允許集合斷言仍 PASS（故只有正向存在在抓）",
+          missing["allowed"] is True, f"other={missing['other']!r}")
+    check("#291 AC-3 鑑別力②對照：下界與缺口亦不受影響（兩者與狀態 API 無關）",
+          missing["keys_lower"] and missing["gaps_empty"],
+          f"配對 keys={missing['keys']!r} 缺口={missing['gaps']!r}")
+
+    # ③必要配對**整組**移除（`upsert_topic` 與 `upsert_archived` 皆刪）
+    pair_gone_src = _p310_cut_func(
+        _p310_cut_func(MARKER_SRC, "upsert_topic"), "upsert_archived")
+    pair_gone = _p310_judge_ac3(pair_gone_src)
+    check("#291 AC-3 鑑別力③必要配對整組移除（upsert 兩側皆刪）→ 下界斷言 FAIL",
+          pair_gone["keys_lower"] is False, f"配對 keys={pair_gone['keys']!r}")
+    check("#291 AC-3 鑑別力③對照：缺口為空仍 PASS"
+          "（整組移除不產生缺口，故下界是唯一在抓的）",
+          pair_gone["gaps_empty"] is True, f"缺口={pair_gone['gaps']!r}")
+    check("#291 AC-3 鑑別力③對照：允許集合與正向存在亦仍 PASS",
+          pair_gone["allowed"] and pair_gone["api_present"],
+          f"other={pair_gone['other']!r}")
+    check("#291 AC-3 鑑別力③對照：base 的等號亦 FAIL"
+          "（整組移除兩案都抓得到，差別在上一條的下界）",
+          pair_gone["base_keys_eq"] is False, f"配對 keys={pair_gone['keys']!r}")
+
+    # ④缺**單側**（只刪 `upsert_archived`）
+    one_side = _p310_judge_ac3(_p310_cut_func(MARKER_SRC, "upsert_archived"))
+    check("#291 AC-3 鑑別力④缺單側（只刪 upsert_archived）→ 配對缺口斷言 FAIL",
+          one_side["gaps_empty"] is False, f"缺口={one_side['gaps']!r}")
+    check("#291 AC-3 鑑別力④對照：下界斷言仍 PASS（key 仍在，故缺口是唯一在抓的）",
+          one_side["keys_lower"] is True, f"配對 keys={one_side['keys']!r}")
+    check("#291 AC-3 鑑別力④對照：允許集合與正向存在亦仍 PASS",
+          one_side["allowed"] and one_side["api_present"],
+          f"other={one_side['other']!r}")
+    check("#291 AC-3 鑑別力④缺口恰為 ['upsert']（指出是哪一組缺單側）",
+          one_side["gaps"] == ["upsert"], f"缺口={one_side['gaps']!r}")
+
+    # ⑤反證：模組層賦值別名使公開 API 對 `^def` 掃描器不可見
+    alias_src = (_p310_cut_func(
+        _p310_cut_func(MARKER_SRC, "preserve_state"), "compare_state_lines")
+        + "\n\ndef _preserve_state_impl(old_body, new_body, *, detail=\"\"):\n"
+          "    return new_body\n\n"
+          "def _compare_state_lines_impl(before, after):\n"
+          "    return True, \"\"\n\n"
+          "preserve_state = _preserve_state_impl\n"
+          "compare_state_lines = _compare_state_lines_impl\n")
+    alias = _p310_judge_ac3(alias_src)
+    check("#291 AC-3 反證⑤別名版：`^def` 掃描器看不到那兩個公開 API",
+          not (P310_STATE_API & set(alias["names"])),
+          f"掃描器所見公開函式數={len(alias['names'])}")
+    check("#291 AC-3 反證⑤別名版：base 的 `other == []` 照樣 PASS"
+          "（＝被繞過，不是被守住）",
+          alias["base_other_empty"] is True, f"other={alias['other']!r}")
+    check("#291 AC-3 反證⑤別名版：base 的配對等號亦照樣 PASS",
+          alias["base_keys_eq"] is True, f"配對 keys={alias['keys']!r}")
+    check("#291 AC-3 反證⑤別名版：候選的正向存在斷言 FAIL"
+          "（抓到 API 未以公開 def 現身）",
+          alias["api_present"] is False,
+          f"names 內的狀態 API={sorted(P310_STATE_API & set(alias['names']))!r}")
+    # 別名確實是可呼叫的公開屬性——證明⑤不是「API 不存在」而是「掃描器看不見」
+    alias_ns: dict = {}
+    exec(compile(alias_src, "<p310-alias>", "exec"), alias_ns)   # noqa: S102
+    check("#291 AC-3 反證⑤別名版：模組層 preserve_state 可呼叫且名稱無底線"
+          "（它確實是公開 API）",
+          callable(alias_ns.get("preserve_state"))
+          and callable(alias_ns.get("compare_state_lines")),
+          f"型別={type(alias_ns.get('preserve_state')).__name__}")
+
+    # 既有 `archived_foo` 反例在改寫後仍命中（裁示留言 D 段的同形確認）
+    foo = _p310_judge_ac3(MARKER_SRC + "\ndef archived_foo(x):\n    return x\n")
+    check("#291 AC-3 鑑別力：archived_foo 在改寫後仍命中配對缺口（既有反例未失效）",
+          foo["gaps_empty"] is False and foo["gaps"] == ["LINE:foo"],
+          f"缺口={foo['gaps']!r}")
+    check("#291 AC-3 鑑別力：archived_foo 的對照——它不踩允許集合"
+          "（`archived_` 開頭者屬 archived 側，故由缺口抓）",
+          foo["allowed"] is True, f"other={foo['other']!r}")
 
 
 # ── #291 AC-4／AC-5／AC-6 cmd_archive 第四步 ────────────────────────────────
@@ -5142,17 +5316,27 @@ def _p310_fake_gh(bin_: Path, *, old_body: str, readback, sentinel: Path,
 
 def _p310_run_edit_body(*, old_body: str, new_body: str, readback=None,
                         edit_rc: int = 0, script: Path | None = None,
-                        issue: str = "310") -> dict:
+                        issue: str = "310", seed_other: bool = False) -> dict:
     """子程序跑 `devflow_topic.py edit-body <issue> -F <檔>`，回傳觀測結果。
 
-    隔離 `TMPDIR`（暫存檔落在那裡，`AC-5` 以該目錄的殘留反證）、假 `HOME`、
-    假 `gh`（PATH 前置）。零網路、零 Telegram API。`script` 可指向突變複本。
+    隔離 `TMPDIR`（暫存檔落在那裡，`AC-5` 以該目錄的殘留反證、`C5` 以 `-F` 的路徑
+    斷言落點）、假 `HOME`、假 `gh`（PATH 前置）。零網路、零 Telegram API。
+    `script` 可指向突變複本。
+
+    `seed_other=True`：**先**在該單的專屬子目錄裡放一個不屬於本次執行的檔
+    （「其他輪的工作檔」），用來反證收尾**只清本次產物**——該檔跑完必須還在。
     """
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
         home, bin_, tmp = td / "home", td / "bin", td / "tmp"
         for d in (home, bin_, tmp):
             d.mkdir()
+        seeded = None
+        if seed_other:
+            own = tmp / f"devflow-editbody-{issue}"
+            own.mkdir(parents=True, exist_ok=True)
+            seeded = own / "other-round-work.md"
+            seeded.write_text("別人的檔：其他輪的工作檔，本次執行不得刪它\n")
         log, sentinel = td / "gh-calls.log", td / "edit-was-called"
         log.write_text("")
         _p310_fake_gh(bin_, old_body=old_body, readback=readback,
@@ -5173,7 +5357,18 @@ def _p310_run_edit_body(*, old_body: str, new_body: str, readback=None,
             "calls": [ln for ln in log.read_text().splitlines() if ln],
             "edit_called": sentinel.exists(),
             "written": sentinel.read_text() if sentinel.exists() else None,
-            "leftovers": sorted(p.name for p in tmp.rglob("*") if p.is_file()),
+            # `leftovers`／`leftdirs` 取**相對於隔離暫存根**的路徑：`AC-5` 問「有沒有
+            # 殘留」，`C5` 問「落在哪裡」，兩者都要看得見路徑而不只是檔名。
+            "leftovers": sorted(str(q.relative_to(tmp)) for q in tmp.rglob("*")
+                                if q.is_file()),
+            "leftdirs": sorted(str(q.relative_to(tmp)) for q in tmp.rglob("*")
+                               if q.is_dir()),
+            "tmp_root": str(tmp),
+            "edit_path": next((c.split(" ", 1)[1] for c in
+                               log.read_text().splitlines()
+                               if c.startswith("edit ")), None),
+            "seed_survived": seeded.exists() if seeded is not None else None,
+            "seed_path": str(seeded) if seeded is not None else None,
             "detail": (f"rc={r.returncode}\n--- stdout ---\n{r.stdout}"
                        f"--- stderr ---\n{r.stderr}"),
         }
@@ -5192,7 +5387,7 @@ def _p310_mutant_copy(td: Path, name: str, old: str, new: str) -> Path:
     return out
 
 
-# 突變的目標字面（兩個突變各自切一處；字面變動時上面的 assert 會先爆）
+# 突變的目標字面（各突變切一處；字面變動時 `_p310_mutant_copy` 的 assert 會先爆）
 P310_MUT_FINALLY_OLD = """    try:
         p.write_text(merged)
         # gh() 遇非零 raise SystemExit；暫存檔的清除靠 finally 涵蓋這條路徑（`AC-5`）。
@@ -5200,13 +5395,24 @@ P310_MUT_FINALLY_OLD = """    try:
         back = json.loads(gh("issue", "view", str(issue), "-R", REPO,
                              "--json", "body"))["body"]
     finally:
-        p.unlink(missing_ok=True)
 """
-P310_MUT_FINALLY_NEW = """    p.write_text(merged)
-    gh("issue", "edit", str(issue), "-R", REPO, "-F", str(p))
-    back = json.loads(gh("issue", "view", str(issue), "-R", REPO,
-                         "--json", "body"))["body"]
-    p.unlink(missing_ok=True)
+P310_MUT_FINALLY_NEW = """    if True:
+        p.write_text(merged)
+        gh("issue", "edit", str(issue), "-R", REPO, "-F", str(p))
+        back = json.loads(gh("issue", "view", str(issue), "-R", REPO,
+                             "--json", "body"))["body"]
+    if True:
+"""
+# `C5` 的落點突變（矩陣外，`BLOCK 2` 的反例）：把暫存檔改回**暫存根**的散檔，
+# 其餘（清除）不動——故落點斷言轉 FAIL 而 `AC-5` 的殘留斷言仍 PASS，兩者分得開。
+P310_MUT_FLAT_OLD = """    work_root = Path(os.environ.get("TMPDIR", "/tmp")) / f"devflow-editbody-{issue}"
+    work_root.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix="run-", dir=work_root))
+    p = work / f"body-{issue}.md"
+"""
+P310_MUT_FLAT_NEW = """    work_root = Path(os.environ.get("TMPDIR", "/tmp"))
+    work = work_root
+    p = work_root / f"devflow-editbody-{issue}.md"
 """
 P310_MUT_LATE_OLD = """    merged = _marker.preserve_state(old, new, detail=f"issue #{issue}")
 """
@@ -5230,7 +5436,7 @@ def _p310_ac3():
     edit_call = [c for c in r["calls"] if c.startswith("edit ")]
     check("#310 AC-3(i) `gh issue edit` 以 `-F` 吃一個暫存檔（檔名含單號）",
           len(edit_call) == 1
-          and Path(edit_call[0].split(" ", 1)[1]).name == "devflow-editbody-310.md",
+          and Path(edit_call[0].split(" ", 1)[1]).name == "body-310.md",
           f"calls={r['calls']!r}")
     written = r["written"] or ""
     check("#310 AC-3(i) 寫進 forge 的 body 由 preserve_state 產出"
@@ -5330,8 +5536,109 @@ def _p310_ac5_mutation():
         m = _p310_run_edit_body(old_body=P310_OLD_ACTIVE,
                                 new_body=P310_NEW_PLAIN, edit_rc=9, script=mut)
         check("#310 AC-5 鑑別力：突變複本（無 try/finally）在同一路徑留下暫存檔",
-              m["leftovers"] == ["devflow-editbody-310.md"],
+              len(m["leftovers"]) == 1
+              and m["leftovers"][0].endswith("body-310.md"),
               f"殘留 {m['leftovers']!r}\n{m['detail']}")
+
+
+# ── C5 落點：本單產生的檔案落在該單專屬子目錄，且只清本次產物（`BLOCK 2`）────
+# 舊 G `C5`（`WORKFLOW.md:99` @ `a78d806`）逐字：「本單執行期間產生的檔案一律落在
+# 該單的專屬子目錄之下」。`AC-5` 問的是「有沒有清掉」，`C5` 問的是「落在哪裡」——
+# 兩者是**不同**的義務，故判準分開寫，下方的落點突變也刻意只動落點、不動清除，
+# 證明兩條斷言各自在抓自己那一件事（`R1` 第 1 輪 `BLOCK 2`、裁決位 2026-10-13
+# https://github.com/AugustusHsu/agent-devflow/pull/311#issuecomment-6152603362 ）。
+P310_OWN_DIR = "devflow-editbody-310"
+
+
+def _p310_landing_ok(edit_path, tmp_root, issue: str = "310") -> bool:
+    """`C5` 的落點判準本體（現況與突變複本共用同一支）。
+
+    三項同時成立才算在位：`-F` 的檔案**不在暫存根**、其祖先中有一個**以單號命名
+    的專屬子目錄**、且整條路徑仍在該次執行的暫存根底下（沒有跑到別處去）。
+    """
+    if not edit_path:
+        return False
+    p, root = Path(edit_path), Path(tmp_root)
+    return (p.parent != root
+            and f"devflow-editbody-{issue}" in [a.name for a in p.parents]
+            and root in p.parents)
+
+
+@case("#310 C5 落點：暫存檔落該單專屬子目錄，三條路徑用畢皆不殘留")
+def _p310_c5_landing():
+    bad_back = P310_BODY + "\n" + P310_T + "\n" + P310_A_WRONG + "\n"
+    paths = (
+        ("成功路徑", dict(old_body=P310_OLD_ARCHIVED, new_body=P310_NEW_WS)),
+        ("讀回失配路徑", dict(old_body=P310_OLD_ARCHIVED,
+                             new_body=P310_NEW_PLAIN, readback=bad_back)),
+        ("gh 失敗路徑", dict(old_body=P310_OLD_ACTIVE,
+                             new_body=P310_NEW_PLAIN, edit_rc=9)),
+    )
+    for label, kw in paths:
+        r = _p310_run_edit_body(**kw)
+        check(f"#310 C5 {label}：`-F` 的暫存檔不在暫存根、落在以單號命名的專屬子目錄",
+              _p310_landing_ok(r["edit_path"], r["tmp_root"]),
+              f"-F 路徑={r['edit_path']!r}\n        暫存根={r['tmp_root']!r}")
+        check(f"#310 C5 {label}：該單專屬子目錄名為 `{P310_OWN_DIR}`",
+              bool(r["edit_path"])
+              and P310_OWN_DIR in [a.name for a in Path(r["edit_path"]).parents],
+              f"-F 路徑={r['edit_path']!r}")
+        check(f"#310 C5 {label}：用畢暫存根內無殘留檔與殘留目錄",
+              r["leftovers"] == [] and r["leftdirs"] == [],
+              f"殘留檔={r['leftovers']!r} 殘留目錄={r['leftdirs']!r}\n{r['detail']}")
+
+
+@case("#310 C5 鑑別力：落點改回暫存根的突變複本 → 落點斷言 FAIL（清除斷言仍 PASS）")
+def _p310_c5_landing_mutation():
+    with tempfile.TemporaryDirectory() as td:
+        mut = _p310_mutant_copy(Path(td), "flat-tmp",
+                                P310_MUT_FLAT_OLD, P310_MUT_FLAT_NEW)
+        m = _p310_run_edit_body(old_body=P310_OLD_ARCHIVED,
+                                new_body=P310_NEW_PLAIN, script=mut)
+        check("#310 C5 鑑別力：突變複本把暫存檔直接放在暫存根 → 落點斷言 FAIL",
+              _p310_landing_ok(m["edit_path"], m["tmp_root"]) is False,
+              f"-F 路徑={m['edit_path']!r}\n        暫存根={m['tmp_root']!r}")
+        check("#310 C5 鑑別力：突變複本的 `-F` 檔父目錄就是暫存根（散檔）",
+              bool(m["edit_path"])
+              and Path(m["edit_path"]).parent == Path(m["tmp_root"]),
+              f"-F 路徑={m['edit_path']!r}")
+        # 對照：同一個突變**仍會清掉**那個檔——故「清除」與「落點」是兩條獨立的斷言，
+        # 只驗清除的判準對 `C5` 沒有鑑別力。
+        check("#310 C5 鑑別力 對照：突變複本仍清掉暫存檔（只驗清除抓不到落點問題）",
+              m["leftovers"] == [] and m["rc"] == 0,
+              f"殘留={m['leftovers']!r} rc={m['rc']}\n{m['detail']}")
+        r = _p310_run_edit_body(old_body=P310_OLD_ARCHIVED,
+                                new_body=P310_NEW_PLAIN)
+        check("#310 C5 鑑別力 對照：受測實作在同一 fixture 下落點斷言 PASS（非恆假）",
+              _p310_landing_ok(r["edit_path"], r["tmp_root"]) is True,
+              f"-F 路徑={r['edit_path']!r}")
+
+
+@case("#310 C5 只清本次產物：專屬子目錄內既有的「其他輪工作檔」跑完仍在")
+def _p310_c5_keeps_foreign():
+    r = _p310_run_edit_body(old_body=P310_OLD_ARCHIVED, new_body=P310_NEW_PLAIN,
+                            seed_other=True)
+    check("#310 C5 只清本次產物：成功路徑 rc 0", r["rc"] == 0, r["detail"])
+    check("#310 C5 只清本次產物：預先放入的「其他輪工作檔」跑完仍存在"
+          "（收尾不以 rmtree 清整個專屬子目錄）",
+          r["seed_survived"] is True,
+          f"種入 {r['seed_path']!r}\n        殘留檔={r['leftovers']!r}")
+    check("#310 C5 只清本次產物：殘留的恰是那個外來檔，本次產物已清掉",
+          r["leftovers"] == [f"{P310_OWN_DIR}/other-round-work.md"],
+          f"殘留檔={r['leftovers']!r}")
+    check("#310 C5 只清本次產物：本次執行開的目錄已移除，只剩該單專屬子目錄",
+          r["leftdirs"] == [P310_OWN_DIR],
+          f"殘留目錄={r['leftdirs']!r}")
+    check("#310 C5 只清本次產物：該次的 `-F` 檔仍落在專屬子目錄下（落點不因此改變）",
+          _p310_landing_ok(r["edit_path"], r["tmp_root"]),
+          f"-F 路徑={r['edit_path']!r}")
+    # gh 失敗路徑同樣不得動到外來檔（失敗路徑才是最容易寫成 rmtree 的那條）
+    f = _p310_run_edit_body(old_body=P310_OLD_ACTIVE, new_body=P310_NEW_PLAIN,
+                            edit_rc=9, seed_other=True)
+    check("#310 C5 只清本次產物：`gh` 失敗路徑亦不動外來檔",
+          f["seed_survived"] is True
+          and f["leftovers"] == [f"{P310_OWN_DIR}/other-round-work.md"],
+          f"殘留檔={f['leftovers']!r}\n{f['detail']}")
 
 
 # ── AC-4 raise 時不動 forge（哨兵檔反證）────────────────────────────────────
@@ -5553,6 +5860,49 @@ def _p310_ac6_no_false_kill():
           f"命中 {len(md_rows)} 行")
     check("#310 矩陣第 7b 列 對照：全檔禁詞的判準會誤殺這段誠實說明（故不採用）",
           "保證標記不會被抹除" in honest, "")
+
+
+def _p310_readme_c5_ok(text: str) -> bool:
+    """`C5` 在 README 示例上的判準本體（現況與兩個突變共用同一支）。
+
+    五項同時成立：(1) 開一個以單號命名的專屬工作目錄；(2) 先 `mkdir -p`；
+    (3) 每個 `gh issue view` 的輸出都寫在該目錄底下；(4) 附清除步驟；
+    (5) 沒有任何一行把 before／after 寫在暫存根（`/tmp` 根）。
+    """
+    sect = _p310_section(text, P310_README_HEAD)
+    lines = [ln.strip() for ln in sect.splitlines()]
+    has_dir = any(ln.startswith("WORK=") and "devflow-statecheck-" in ln
+                  for ln in lines)
+    has_mkdir = any(ln == 'mkdir -p "$WORK"' for ln in lines)
+    views = [ln for ln in lines if ln.startswith("gh issue view")]
+    under_work = bool(views) and all('"$WORK/' in ln for ln in views)
+    has_cleanup = any(ln.startswith('rm -rf "$WORK"') for ln in lines)
+    flat = [ln for ln in lines
+            if "/tmp/before.md" in ln or "/tmp/after.md" in ln]
+    return has_dir and has_mkdir and under_work and has_cleanup and not flat
+
+
+@case("#310 C5 README 示例：工作檔落專屬子目錄並附清除步驟（兩種突變皆 FAIL）")
+def _p310_c5_readme():
+    rd = TG_SCRIPTS_README.read_text()
+    check("#310 C5 README 示例過判準（現況 PASS，判準非恆假）",
+          _p310_readme_c5_ok(rd),
+          repr(_p310_section(rd, P310_README_HEAD)[:400]))
+    sect = _p310_section(rd, P310_README_HEAD)
+    for frag, why in (("`C5`", "條文依據"),
+                      ("該單專屬子目錄", "落點的說法"),
+                      ('rm -rf "$WORK"', "清除步驟"),
+                      ("比較器本身唯讀、不會替你清檔", "清檔責任在呼叫者")):
+        check(f"#310 C5 README 示例載「{frag}」（{why}）", frag in sect, sect[:300])
+    # 突變①：把 before／after 的路徑改回暫存根的散檔（＝ `R1` 第 1 輪指出的原狀）
+    flat = rd.replace('> "$WORK/before.md"', "> /tmp/before.md", 1) \
+             .replace('> "$WORK/after.md"', "> /tmp/after.md", 1)
+    check("#310 C5 README 鑑別力：示例改回 `/tmp` 根的散檔 → 判準 FAIL",
+          _p310_readme_c5_ok(flat) is False, "")
+    # 突變②：刪掉清除步驟（落點對了但沒清）
+    nocl = rd.replace('rm -rf "$WORK"', "", 1)
+    check("#310 C5 README 鑑別力：刪掉清除步驟 → 判準 FAIL",
+          _p310_readme_c5_ok(nocl) is False, "")
 
 
 # ── AC-7 既有行為一字不變（AST）＋ 矩陣第 8 列 ──────────────────────────────
@@ -5928,8 +6278,11 @@ def _p310_ac9_placement():
     check("#310 AC-9(iv) `_marker.py` 的 import 集合封閉於 {__future__, re}",
           imports(MARKER_SRC) <= {"__future__", "re"},
           f"實得 {sorted(imports(MARKER_SRC))!r}")
-    allowed = {"json", "os", "re", "subprocess", "sys", "urllib", "pathlib",
-               "_marker", "__future__"}
+    # `tempfile` 是 `#310` 第 2 輪為 `C5` 的落點加的（`mkdtemp` 在該單專屬子目錄下
+    # 開本次執行的目錄，使清除只針對本次產物）——它是建暫存目錄的標準庫，不是鎖、
+    # 監控、排程或背景程序，故列入允許集合而非放棄這條斷言。
+    allowed = {"json", "os", "re", "subprocess", "sys", "tempfile", "urllib",
+               "pathlib", "_marker", "__future__"}
     check("#310 AC-9(iv) `devflow_topic.py` 的 import 集合封閉於既有的允許集合"
           "（本單未引入鎖／執行緒／排程）",
           imports(TOPIC_SRC) <= allowed,
