@@ -8,6 +8,9 @@ Bot API 無法列舉 forum topic，故映射一旦遺失無法重建——除非
     python3 devflow_topic.py ensure <issue>     取得或建立 topic，印出 thread_id
     python3 devflow_topic.py close  <issue>     關閉 topic（issue 結案時）
     python3 devflow_topic.py sync               從 forge 重建本機 cache
+    python3 devflow_topic.py edit-body <issue> -F <檔>
+                                                改 issue body 的一般內容，保留現行
+                                                的狀態標記並讀回驗證（不做狀態遷移）
 """
 import json, os, re, subprocess, sys, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
@@ -230,6 +233,75 @@ def sync():
     return len(c), invalid
 
 
+def _state_report(label, body):
+    """一行可讀的「完整標記行」快照（兩類各自列出，不只列差異的那一類）。
+
+    走公開的 `find_*`：它們回傳的 `lines` 就是命中行的**完整字面**，故這裡印的
+    是整行，不是 `(T, A, NN)`。
+    """
+    _, t = _marker.find_topic(body or "")
+    _, a = _marker.find_archived(body or "")
+    return f"  {label}：topic={t!r} archived={a!r}"
+
+
+def edit_body(issue, path):
+    """改 issue body 的**一般內容**，保留該單現行的合法狀態標記並讀回驗證。
+
+    **本入口不做狀態遷移**（那是 `ensure`／`archive` 的事，`CH3` 的「適用範圍／
+    例外」）。順序固定，`#310` `AC-3`(i)：
+
+        讀 old body → `_marker.preserve_state` → 寫暫存檔 → `gh issue edit -F`
+        → **讀回**並以 `_marker.compare_state_lines` 逐字比對完整標記行
+
+    讀回比的是**完整標記行的字面**（分區行與封存行各自逐字），**不是**
+    `(T, A, NN)`：只改 `file=` 的那一支會讓計數與兩個 `NN` 全同，只比計數的判準
+    對它沒有鑑別力。比較走 `_marker.compare_state_lines`——與 `AC-9` 的通用比較
+    **同一處實作**，不在這裡另寫一份。
+
+    不相符的處置（`AC-3`(iii)）：exit 非 0、stderr 印「結果未定」＋單號＋寫入前
+    快照與讀回值的**兩組完整標記行**，然後**停下交人**。**不自動重送**（會以同一
+    份過期快照再覆蓋一次）、**不以舊 body 覆蓋**（那是第二次全量取代，可能抹掉
+    別的寫者的內容）。⚠ 讀回失配**不是**「合併成功但收尾失敗」，**不引 `F4`**：
+    它是一次寫入的**結果未定**，處置是停下待人判斷。
+
+    ⚠ **宣稱射程**（`AC-3`(iv)、issue `#310` §6）：
+      * 讀回只核對「讀回值 **vs 本入口讀到的舊快照**」，**不保證偵測所有 lost update**
+        ——另一個寫者在「讀 old」之後加上封存標記時，本入口以舊快照覆蓋，
+        讀回值與舊快照仍逐字相同而對方的標記已丟。
+      * `read → preserve → write → readback` 是四次獨立的 forge 操作，其間沒有
+        互斥；**本入口未採用條件更新**（不送 `If-Match`／ETag 等前置條件、不做
+        compare-and-swap），**不是原子更新**。
+      * 故同一張 issue 的 body 寫入須**串行**：封存程序進行中不得並行跑
+        `edit-body`，反之亦然。本單不加鎖、lease、重試或監控。
+    """
+    old = json.loads(gh("issue", "view", str(issue), "-R", REPO,
+                        "--json", "body"))["body"]
+    new = Path(path).read_text()
+    # old 為權威。old／new 的 INVALID 與「new 偷渡 old 沒有的狀態」都在這裡 raise，
+    # 而 raise 發生在寫暫存檔**之前** → `gh issue edit` 不會被呼叫（`AC-4`）。
+    merged = _marker.preserve_state(old, new, detail=f"issue #{issue}")
+    p = Path(os.environ.get("TMPDIR", "/tmp")) / f"devflow-editbody-{issue}.md"
+    try:
+        p.write_text(merged)
+        # gh() 遇非零 raise SystemExit；暫存檔的清除靠 finally 涵蓋這條路徑（`AC-5`）。
+        gh("issue", "edit", str(issue), "-R", REPO, "-F", str(p))
+        back = json.loads(gh("issue", "view", str(issue), "-R", REPO,
+                             "--json", "body"))["body"]
+    finally:
+        p.unlink(missing_ok=True)
+    same, diff = _marker.compare_state_lines(old, back)
+    if not same:
+        raise SystemExit(
+            f"結果未定：issue #{issue} 的 body 已送出寫入，但讀回的完整標記行與"
+            f"寫入前的快照不符。停下交人判斷——不自動重送、不以舊 body 覆蓋。\n"
+            f"{_state_report('寫入前快照', old)}\n"
+            f"{_state_report('讀回現況', back)}\n"
+            f"  差異：{diff}\n"
+            f"  射程：本判準只核對「讀回值 vs 本入口讀到的舊快照」，"
+            f"不保證偵測所有 lost update（見 edit_body 的 docstring）")
+    return merged
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         raise SystemExit(__doc__)
@@ -248,9 +320,20 @@ if __name__ == "__main__":
                     f"INVALID: {len(invalid)} 張單有重複分區標記，已跳過不寫入 cache："
                     + " ".join(f"#{x}" for x in invalid)
                 )
+        elif cmd == "edit-body":
+            # `edit-body <issue> -F <檔>`。旗標只收 `-F`（與 `gh issue edit` 同形），
+            # 不另開 `--body`：那會讓「一般修訂」的輸入有兩條路徑而只有一條被測。
+            args = sys.argv[2:]
+            if len(args) != 3 or args[1] != "-F":
+                raise SystemExit(
+                    "用法：python3 devflow_topic.py edit-body <issue> -F <檔>")
+            edit_body(args[0], args[2])
+            print("ok")
         else:
             raise SystemExit(__doc__)
-    except _marker.InvalidMarker as e:
-        # `CH3`：exit 非 0 ＋ stderr 印 INVALID 與全部命中行，停下**不動 forge**。
-        # 走到這裡表示 gh issue edit 尚未被呼叫（upsert 在寫檔前就 raise）。
+    except (_marker.InvalidMarker, _marker.StateIntroduced) as e:
+        # `CH3`：exit 非 0 ＋ stderr 印原因，停下**不動 forge**。
+        # `InvalidMarker` 印全部命中行；`StateIntroduced`（`edit-body` 的偷渡分支）
+        # 印偷渡的那一行與逃生門。兩者都在 `gh issue edit` 之前就 raise
+        # （`upsert_*`／`preserve_state` 在寫檔前判），故 forge 必然未被動到。
         raise SystemExit(str(e))

@@ -294,3 +294,155 @@ def upsert_archived(body: str, thread, file, *, detail: str = "") -> str:
         return text.rstrip() + "\n\n" + line + "\n"
     # count=1 ＋ lambda 的理由同 upsert_topic（錨定下只有一個命中；避免反斜線轉義）。
     return ARCHIVED.sub(lambda _m: line, text, count=1)
+
+
+# ── 狀態層：保存既有狀態的一般修訂，與完整標記行的比較（`#310`）──────────────
+# ⚠ **與 upsert_* 的界線**（兩者都寫 body，語意相反，不可互相代用）：
+#
+#   * `upsert_topic`／`upsert_archived` 是**狀態遷移**的寫側：呼叫端已決定該單要
+#     進入哪一態（`ensure` 寫分區標記、`archive` 寫封存標記），參數是**新的**
+#     `thread`／`file`，既有標記行被**取代**。它們的正確性依 `channels/` 對照表的
+#     通道判準驗**預期的新狀態**（如封存後 `T=1 A=1` 且兩行 `NN` 相同）。
+#   * `preserve_state` 是**非狀態遷移的一般修訂**的寫側：呼叫端重新產出了一份
+#     body（修訂 T、補欄位、改錯字），而 `gh issue edit --body`／`-F` 是**全量
+#     取代**不是合併，故新 body 會把標記抹掉（`#306` 實例：9 秒的抹除窗口，由人
+#     肉眼發現才補回）。`preserve_state` 把 **old 的完整標記行**原字搬回新 body，
+#     **old 為權威**：new 自帶的狀態輸入一律不採信，new 試圖**新增** old 沒有的
+#     狀態類別時 raise `StateIntroduced` 並拒絕寫入。
+#
+# 故 `preserve_state` **不得**被插進 `_to_forge`／`cmd_archive`（那兩處是狀態遷移，
+# 保存義務刻意豁免；插進去等於禁止 `ensure`／`archive` 改標記）。條文側的射程見
+# `WORKFLOW.md` 的 `CH3`「保存義務」與「適用範圍／例外」兩句。
+#
+# ⚠ `preserve_state` **不沿用** `upsert_*` 的 `rstrip() + "\n\n"` 追加寫法：那會刪掉
+# new body 尾端的空白行與 tab，而一般修訂要求 **new body 逐字保留**（它須是輸出的
+# 逐字前綴）。`upsert_*` 的既有行為不因此改變——那是它們的既有語意。
+#
+# 本區段仍是**純字串、零 I/O、零 `gh`、零網路**（同 `_scan_markers` 的定位）。
+class StateIntroduced(Exception):
+    """new body 試圖新增 old 沒有的狀態類別——一般修訂不做狀態遷移，只能拒絕。
+
+    與 `InvalidMarker` 分開是因為處置不同：`InvalidMarker` 是「現況不落在三態」，
+    `StateIntroduced` 是「現況合法，但這次寫入要把態改掉」。兩者都 raise 且
+    **不動 forge**，但後者的訊息要告訴使用者怎麼讓示例字面不被當成標記
+    （`#291` 的示例誤命中就是這個情形）。
+    """
+
+
+def _state_lines(body: str, kind: str) -> list[str]:
+    """body → 該類標記的**完整命中行**清單（`kind` ∈ {topic, archived}）。
+
+    與 `find_topic`／`find_archived` 同一份已編譯 grammar，只回行的字面——
+    狀態層比的是整行（`thread` 與 `file=` 都算），不是計數也不是單一欄位。
+    """
+    return (TOPIC if kind == "topic" else ARCHIVED).findall(body or "")
+
+
+def _state_thread(line: str, kind: str) -> str:
+    """從完整標記行取 `thread` 欄（字串）。grammar 已保證該欄存在。"""
+    return (TOPIC_ID if kind == "topic" else ARCHIVED_ID).findall(line)[0]
+
+
+def _read_state(body: str, *, detail: str = "") -> dict[str, str]:
+    """body → `{kind: 完整標記行}`；**四類 INVALID 各自 raise `InvalidMarker`**。
+
+    四類即 `channels/README.md` 的收容分支：`T>1`、`A>1`、`T=0 A=1`、兩標記的
+    `NN` 不符。`read_topic`／`read_archived` 各自只看自己那一式，故只判得出前兩類；
+    狀態層要的是「這張單現在落在哪一態」，後兩類是跨兩式的判斷，必須在這裡做。
+    回傳只含實際存在的鍵（未開始 → 空 dict）。
+    """
+    t = _state_lines(body, "topic")
+    a = _state_lines(body, "archived")
+    if len(t) > 1:
+        raise InvalidMarker("topic", t, detail)
+    if len(a) > 1:
+        raise InvalidMarker("archived", a, detail)
+    if a and not t:
+        raise InvalidMarker(
+            "archived", a, detail,
+            summary="T=0 A=1（有封存標記而無分區標記）")
+    if t and a and _state_thread(t[0], "topic") != _state_thread(a[0], "archived"):
+        raise InvalidMarker(
+            "archived", t + a, detail,
+            summary=f"兩標記的 NN 不符（{_state_thread(t[0], 'topic')} vs "
+                    f"{_state_thread(a[0], 'archived')}）")
+    st: dict[str, str] = {}
+    if t:
+        st["topic"] = t[0]
+    if a:
+        st["archived"] = a[0]
+    return st
+
+
+def preserve_state(old_body: str, new_body: str, *, detail: str = "") -> str:
+    """把 old body 的合法狀態標記保存進 new body，回傳待寫入的 body。
+
+    純字串、零 I/O、零 `gh`。**讀取順序固定**：先判 old 的 INVALID、再判 new 的
+    INVALID、最後才判偷渡——否則 old 本身已 INVALID 時會先報成偷渡，掩蓋真正要
+    人處置的事（`#310` `AC-2`(f)）。
+
+    對每一類標記 `k ∈ {topic, archived}`（`#310` 的契約表）：
+
+      ====== ====== ==========================================================
+      old 有 new 有 行為
+      ====== ====== ==========================================================
+      ✓      ✓      以 **old 的完整標記行**取代 new 的那一行（`thread`、`file=`
+                    皆取 old）
+      ✓      ✗      把 old 的完整標記行補成**獨立一行**
+      ✗      ✓      **拒絕**：raise `StateIntroduced`（呼叫端因此不會寫 forge）
+      ✗      ✗      無事
+      ====== ====== ==========================================================
+
+    **逐字保留**：`new_body` 一律是回傳值的**逐字前綴**——尾端的空白行、空格與
+    tab 都不得被刪。補標記時只在 body 未以換行結尾時補一個 `\\n`（否則標記不成
+    獨立一行、不合 grammar）。**不得**改用 `rstrip()` 後接標記（見本區段開頭）。
+    """
+    old = _read_state(old_body, detail=f"old body{' ' + detail if detail else ''}")
+    new = _read_state(new_body, detail=f"new body{' ' + detail if detail else ''}")
+    out = new_body or ""
+    for kind in ("topic", "archived"):
+        if kind in old and kind in new:
+            rx = TOPIC if kind == "topic" else ARCHIVED
+            # lambda 的理由同 upsert_*：避免取代字串裡的反斜線被當成轉義。
+            out = rx.sub(lambda _m, line=old[kind]: line, out, count=1)
+        elif kind in old:
+            # 逐字前綴：只在缺換行時補一個，絕不 strip new_body 的尾端空白。
+            out = out + ("" if out.endswith("\n") else "\n") + old[kind] + "\n"
+        elif kind in new:
+            raise StateIntroduced(
+                f"{detail + '：' if detail else ''}new body 新增了 old 沒有的 "
+                f"{kind} 標記，一般修訂不做狀態遷移，拒絕寫入（forge 不動）\n"
+                f"  偷渡的行：{new[kind]}\n"
+                f"  狀態遷移請走 ensure（分區標記）或 archive（封存標記）。\n"
+                f"  若那是示例字面，有效的逃生門只有三種：縮排、放進表格列"
+                f"（行首 `|`）、或在行首加前置文字；"
+                f"⚠ 置於 ``` 圍欄內**無效**——圍欄內仍是行首，"
+                f"照樣命中錨行首行尾的判定式（`#291` 實例）")
+    return out
+
+
+def compare_state_lines(before: str, after: str) -> tuple[bool, str]:
+    """比較兩份 body 文字的**完整標記行**是否逐字相同 → `(相同?, 描述)`。
+
+    **唯讀、可重跑、純字串**：不碰 forge、不打網路、零 I/O，也**不自動修復**——
+    它只回報，處置由呼叫端（或人）決定。
+
+    **不綁任何入口**：`before`／`after` 不必取自 `edit-body`。裸
+    `gh issue edit`、`gh api -X PATCH`、GitHub Web UI 改出來的兩份 body 文字一樣
+    能套——它只吃字串（`#310` `AC-9`(i)、矩陣第 15b 列）。
+
+    比的是**整行**，不是 `(T, A, NN)`：只改 `file=` 的那一支會讓計數與 `NN` 全同，
+    只比計數的判準對它沒有鑑別力（`#310` 矩陣第 6／15 列）。
+
+    **不 raise**：`T>1`／`A>1` 這種 INVALID 組合也要能比較並回報差異
+    （`AC-9`(ii)④「新增重複標記」就是這一支），故本函式不走 `_read_state`。
+    """
+    diff = []
+    for kind in ("topic", "archived"):
+        b = _state_lines(before, kind)
+        a = _state_lines(after, kind)
+        if b != a:
+            diff.append(f"{kind}: before={b!r} after={a!r}")
+    if diff:
+        return False, "；".join(diff)
+    return True, "完整標記行逐字相同"
