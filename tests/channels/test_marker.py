@@ -6148,9 +6148,11 @@ def _p310_ac8_version():
     doc = WORKFLOW_MD.read_text()
     m = re.search(r"^version: (\S+)", doc, re.M)
     wf = m.group(1) if m else ""
-    # ⚠ 刻意**不寫** `== "1.16.0.0"`／`== "0.18.0.0"`：寫死等號會在下一張單進位時
-    # 假 FAIL 一次，正是 `#308` 清掉的形態（本檔 `#296 AC-9`／`#304 AC-10`／
-    # `#306 AC-13` 三處的同一個模式）。精確值由 T 的驗證指令與 PR diff 核。
+    # ⚠ 刻意**不寫死本單候選值的等號斷言**（兩個版本檔都不寫）：那種寫法會在下一張
+    # 單進位時假 FAIL 一次，正是 `#308` 清掉的形態（本檔 `#296 AC-9`／`#304 AC-10`
+    # ／`#306 AC-13` 三處的同一個模式）。精確值由 T 的驗證指令與 PR diff 核。
+    # 本註解亦不引述那兩個字面——`AC-8`(iii) 指定的檢查是對本檔 grep 候選值的等號，
+    # 註解裡的引述會讓那個檢查命中（PR `#311` `R1` 第 2 輪 `BLOCK 1`）。
     check("#310 AC-8(iii) WORKFLOW.md 的 frontmatter version 合 V1 的四碼形狀",
           bool(VERSION_SHAPE.fullmatch(wf)), repr(wf))
     check("#310 AC-8(iii) devflow/VERSION 合 V1 的四碼形狀",
