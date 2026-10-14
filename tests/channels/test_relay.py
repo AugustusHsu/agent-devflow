@@ -31,6 +31,7 @@ relay 有 `from devflow_archive import tool_summary`，而 `devflow_archive.py` 
 # 守門的自檢在該檔 `#308 AC-2` 一節（它掃該檔與**本檔**的當下內容）。
 from __future__ import annotations
 
+import ast
 import importlib.util
 import io
 import os
@@ -201,14 +202,12 @@ LINES = [
 LAST_MOD: list = []            # run() 把最後一次載入的模組放這裡，供需要它的案例取用
 
 
-def run(argv: list[str], fake, *, freeze_clock: bool = False):
-    """以 sys.argv 餵參數呼叫 main()，回傳 (rc, stdout, stderr)。
+def run_mod(mod, argv: list[str]):
+    """以 sys.argv 餵參數呼叫**某個已載入模組**的 `main()`，回傳 (rc, stdout, stderr)。
 
-    載入的模組另放進 `LAST_MOD[-1]`——`BLOCK 1` 要在同一個模組實例上續呼
-    `_log_path`（序號是模組級狀態），回傳值不改形狀以免動搖既有案例。
+    `#312` 起與突變模組共用（反例一律實跑，見本檔下半 `#312` 一節的 `load_mutant`）：
+    驅動只有這一份，正例與反例跑的才保證是同一條路徑（`I5` 的同一個道理）。
     """
-    mod = load(fake, freeze_clock=freeze_clock)
-    LAST_MOD.append(mod)
     saved_argv = sys.argv
     sys.argv = ["devflow_relay.py"] + argv
     out, err = io.StringIO(), io.StringIO()
@@ -221,6 +220,17 @@ def run(argv: list[str], fake, *, freeze_clock: bool = False):
     finally:
         sys.argv = saved_argv
     return rc, out.getvalue(), err.getvalue()
+
+
+def run(argv: list[str], fake, *, freeze_clock: bool = False):
+    """以 sys.argv 餵參數呼叫 main()，回傳 (rc, stdout, stderr)。
+
+    載入的模組另放進 `LAST_MOD[-1]`——`BLOCK 1` 要在同一個模組實例上續呼
+    `_log_path`（序號是模組級狀態），回傳值不改形狀以免動搖既有案例。
+    """
+    mod = load(fake, freeze_clock=freeze_clock)
+    LAST_MOD.append(mod)
+    return run_mod(mod, argv)
 
 
 def prompt_of(cmd: list[str]) -> str:
@@ -521,9 +531,14 @@ check("AC-4 env 是 os.environ 的複本＋覆寫，不是只給一個鍵（否�
       and set(os.environ) - {DEPTH_KEY, CHAIN_KEY} <= set(f4.kwargs[0].get("env", {})),
       f"env 鍵數={len(f4.kwargs[0].get('env', {})) if f4.kwargs else 0}，"
       f"缺={sorted(set(os.environ) - set(f4.kwargs[0].get('env', {})))[:5] if f4.kwargs else None}")
-check("AC-4 then-wake 喚醒的子程序同樣拿 depth+1（深度只計巢狀，不隨輪次累加）",
-      len(f4.kwargs) == 2 and f4.kwargs[1].get("env", {}).get(DEPTH_KEY) == "1",
+check("AC-4／#312 AC-6(b) then-wake 喚醒者承襲呼叫者自身的深度（relay 自身未設 ＝ 0 → 喚醒者 '0'）",
+      len(f4.kwargs) == 2 and f4.kwargs[1].get("env", {}).get(DEPTH_KEY) == "0",
       f"kwargs[1] depth={f4.kwargs[1].get('env', {}).get(DEPTH_KEY) if len(f4.kwargs) > 1 else None!r}")
+# `#312` `AC-6(b)`：本條的期望值與標題由 `#312` 授權更新。base `1aced94` 寫的是
+# 「同樣拿 depth+1」且期望 `"1"`——**那斷言的是缺陷本身**（`--then-wake` 的喚醒者是同一
+# 流程的續接，拿 `caller+1` 會讓同一張單每輪 +1，第 3 輪撞上限，`#310` 現場），而同一句
+# 的後半「不隨輪次累加」是當時的宣稱，兩者不能同時成立。斷言的**意圖**（喚醒者的深度要被驗）
+# 仍成立，故改期望值與標題，不刪、不繞過。
 check("AC-4 測完環境已還原（本程序不該留下 DEVFLOW_RELAY_DEPTH）",
       DEPTH_KEY not in os.environ, f"{DEPTH_KEY}={os.environ.get(DEPTH_KEY)!r}")
 
@@ -537,6 +552,14 @@ check("AC-4 鑑別力：relay 自身 depth=1 → 子程序拿 '2'（相對遞增
 check("AC-4 鏈（DEVFLOW_RELAY_CHAIN）累加 profile，供超限時印出",
       bool(f4b.kwargs) and f4b.kwargs[0].get("env", {}).get(CHAIN_KEY) == "dfcoord,dfmgr",
       f"chain={f4b.kwargs[0].get('env', {}).get(CHAIN_KEY) if f4b.kwargs else None!r}")
+# 同一組的喚醒者側（`#312` `AC-6(b)` 授權更新的對應值）：relay 自身 `depth=1` 時
+# primary 得 `"2"`（上面兩條，一字不改）、喚醒者得 `"1"`，鏈以 `>` 接呼叫者自己的鏈。
+check("AC-4／#312 AC-6(b) 鑑別力：relay 自身 depth=1 → 喚醒者拿 '1'（＝呼叫者自身那一層）",
+      len(f4b.kwargs) == 2 and f4b.kwargs[1].get("env", {}).get(DEPTH_KEY) == "1",
+      f"depth={f4b.kwargs[1].get('env', {}).get(DEPTH_KEY) if len(f4b.kwargs) > 1 else None!r}")
+check("AC-4／#312 AC-6(b) 鑑別力：喚醒者的鏈為 `dfcoord>dfmgr`（續接以 `>` 接，與 primary 的 `,` 分得開）",
+      len(f4b.kwargs) == 2 and f4b.kwargs[1].get("env", {}).get(CHAIN_KEY) == "dfcoord>dfmgr",
+      f"chain={f4b.kwargs[1].get('env', {}).get(CHAIN_KEY) if len(f4b.kwargs) > 1 else None!r}")
 
 # 邊界：depth=2 仍放行（2 < 3）；depth=3 拒絕。
 f4c = FakeSub(LINES)
@@ -1199,6 +1222,526 @@ check("#300 AC-3 第二棒的子程序 prompt 不要求它自報結果（否決�
 #    它標的是 relay **當下**發出的 prompt，不受此條刪除影響。
 check("#300 AC-3 判準表的最後一列只宣稱「relay 沒接手」，不把成因說成分得開",
       "relay 沒接手" in TG300 and "不宣稱它分得開" in TG300, "")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# `#312`：`--then-wake` 的續接不計巢狀深度（primary／continuation 分流）
+# ════════════════════════════════════════════════════════════════════════════
+# 要防的事（`#310` 現場）：`_child_env` 對 relay 派出的**每一個**子程序寫 `depth+1`，
+# 含 `--then-wake` 喚醒者。喚醒者是同一流程的續接、取代呼叫者繼續跑，於是同一張單每輪
+# +1，第 3 輪的 manager 以 `DEVFLOW_RELAY_DEPTH=3` 被自己的 relay 拒絕（那時的鏈
+# `dfmgr,dfmgr,dfmgr` 不是遞迴，是三輪續接）。
+#
+# 判準（裁決位 2026-10-14 選定甲案）＝「**這個子程序是怎麼被派出的**」，**不讀 profile 名**：
+#   primary（受託子程序）        → 呼叫者 `+1`，鏈以 `,` 接（行為與字面皆不變）
+#   continuation（then-wake）    → **呼叫者自身的深度**（不 +1），鏈以 `>` 接
+# 「呼叫者」＝啟動本次 relay 的那一層（relay 自己的 `_current_depth()`）。跨 profile 的
+# continuation 同樣只是**不增深**：coder（`DEPTH=2`）的 `--then-wake dfmgr` 得 `2`，
+# 不是祖先 manager 的 `1`——深度停在呼叫者那一層。
+#
+# 反例一律**實跑**：以 source 字串突變後 `importlib` 載入另一個模組名、走同一支 `run_mod`
+# 驅動（正例與反例跑同一條路徑），或對純函式層直接以突變實作對照。矩陣 11 列與本節案例
+# 的對應寫在各條標題與其上方註解裡。
+print("\n── #312 AC-1／AC-2：primary 與 continuation 的深度與鏈（純函式層）")
+
+P312_MAX = mod_consts.MAX_RELAY_DEPTH
+P312_LIMIT_SENTENCE = "純 continuation 的平層循環不增深，本機制不保證擋住它"
+
+
+def p312_mutate(src: str, old: str, new: str) -> str:
+    """字串突變。錨點須恰一處命中——漂移時回傳原文，由呼叫處「突變確實套上」那條報出，
+    不靜默變成 no-op（no-op 的反例會假 PASS，那正是反例要防的事）。"""
+    return src.replace(old, new, 1) if src.count(old) == 1 else src
+
+
+def load_mutant(src: str, name: str, fake):
+    """把突變後的 source 寫進本檔的暫存目錄、以另一個模組名載入，並注入假 subprocess。
+
+    形狀同 `test_marker.py` 的突變案例（寫暫存檔 ＋ `spec_from_file_location`）。
+    同層 import（`devflow_archive`）由 `load()` 已登錄的 `sys.modules` 解析。
+    """
+    path = TESTTMP / f"{name}.py"
+    path.write_text(src)
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.subprocess = fake
+    mod.OPENING_DELAY = 10 ** 9
+    mod.HEARTBEAT_AFTER = 10 ** 9
+    mod.time.strftime = _REAL_STRFTIME
+    return mod
+
+
+# 突變的錨點（都是受測檔裡恰一處的字面；錨點漂移由「突變確實套上」那幾條報出）
+P312_DEPTH_LINE = "    env[DEPTH_ENV] = str(depth if continuation else depth + 1)\n"
+P312_LIMIT_LINE = "    if depth >= MAX_RELAY_DEPTH:\n"
+
+# 矩陣 1：維持 `#312` 之前的行為（對每個子程序都 +1）→ AC-1(b) 的期望值不成立。
+P312_MUT_ALWAYS = p312_mutate(RELAY_SRC, P312_DEPTH_LINE,
+                              "    env[DEPTH_ENV] = str(depth + 1)\n")
+# 矩陣 2：讓 primary 也承襲呼叫者深度 → AC-1(a) 與 AC-4（巢狀不再被擋）皆不成立。
+P312_MUT_NEVER = p312_mutate(RELAY_SRC, P312_DEPTH_LINE,
+                             "    env[DEPTH_ENV] = str(depth)\n")
+# 矩陣 7：**以 profile 名去重**——profile 已在鏈上就不 +1（T 明列禁止的判準）。
+P312_MUT_DEDUP = p312_mutate(
+    RELAY_SRC, P312_DEPTH_LINE,
+    '    _chain = os.environ.get(CHAIN_ENV, "").replace(CHAIN_CONT_SEP, CHAIN_NEST_SEP)\n'
+    '    _seen = [p for p in _chain.split(CHAIN_NEST_SEP) if p]\n'
+    "    env[DEPTH_ENV] = str(depth if (continuation or profile in _seen) else depth + 1)\n")
+# 矩陣 8：把 `--then-wake` 到**不同** profile 者當成 primary（+1）→ AC-5(b) 不成立。
+P312_MUT_CROSS = p312_mutate(
+    RELAY_SRC, P312_DEPTH_LINE,
+    '    _last = os.environ.get(CHAIN_ENV, "")'
+    ".replace(CHAIN_CONT_SEP, CHAIN_NEST_SEP).split(CHAIN_NEST_SEP)[-1]\n"
+    "    env[DEPTH_ENV] = str(depth if (continuation and profile == _last) else depth + 1)\n")
+# 矩陣 5：上限判準改看鏈去重後的集合大小 → AC-4 的真遞迴轉為放行。
+P312_MUT_SETSIZE = p312_mutate(
+    RELAY_SRC, P312_LIMIT_LINE,
+    '    _uniq = {p for p in os.environ.get(CHAIN_ENV, "")'
+    ".replace(CHAIN_CONT_SEP, CHAIN_NEST_SEP).split(CHAIN_NEST_SEP) if p}\n"
+    "    if len(_uniq) >= MAX_RELAY_DEPTH:\n")
+# 矩陣 9：上限被改大 → AC-6(a) 的兩條（常數值、字面恰一次）轉為不成立。
+P312_MUT_BIGGER = p312_mutate(RELAY_SRC, "\nMAX_RELAY_DEPTH = 3\n", "\nMAX_RELAY_DEPTH = 9\n")
+# 矩陣 10：條件式被加上環境旁路開關 → AC-6(c) 的 AST 檢查命中。
+P312_MUT_BYPASS = p312_mutate(
+    RELAY_SRC, P312_LIMIT_LINE,
+    '    if depth >= MAX_RELAY_DEPTH and not os.environ.get("RELAY_NO_DEPTH"):\n')
+# 矩陣 11：把超限訊息裡的射程說明刪掉 → AC-5(d) 的訊息斷言轉為不成立。
+P312_MUT_NOSCOPE = p312_mutate(
+    RELAY_SRC,
+    '              f"純 continuation 的平層循環不增深，本機制不保證擋住它。",\n',
+    '              f"（射程說明已被刪除）",\n')
+
+check("#312 突變確實套上（八種 source 突變都與受測原文不同）",
+      all(m != RELAY_SRC for m in (P312_MUT_ALWAYS, P312_MUT_NEVER, P312_MUT_DEDUP,
+                                   P312_MUT_CROSS, P312_MUT_SETSIZE, P312_MUT_BIGGER,
+                                   P312_MUT_BYPASS, P312_MUT_NOSCOPE)),
+      "錨點漂移：某個突變沒有套上去（no-op 的反例會假 PASS）")
+
+# ── AC-1：深度語意（純函式層，零子程序、零網路）───────────────────────────────
+f312_pure = FakeSub(LINES)
+m312 = load(f312_pure)
+P312_CALLER = {DEPTH_KEY: "1", CHAIN_KEY: "dfmgr"}        # 呼叫者＝manager 那一層
+p312_prim = with_env(P312_CALLER, lambda: m312._child_env("dfimpl"))
+p312_cont = with_env(P312_CALLER, lambda: m312._child_env("dfmgr", continuation=True))
+
+check("#312 AC-1(a) primary 的深度 ＝ 呼叫者 +1（呼叫者 1 → primary '2'）",
+      p312_prim[DEPTH_KEY] == "2", f"primary depth={p312_prim[DEPTH_KEY]!r}")
+check("#312 AC-1(b) continuation 的深度 ＝ 呼叫者自身（呼叫者 1 → 喚醒者 '1'）",
+      p312_cont[DEPTH_KEY] == "1", f"continuation depth={p312_cont[DEPTH_KEY]!r}")
+_p312_ac1 = [lbl for lbl, _, _ in RESULTS if lbl.startswith("#312 AC-1(")]
+check("#312 AC-1(c) primary 與 continuation 各有一條獨立斷言（聚合值或單一條都算未達成）",
+      len([t for t in _p312_ac1 if "AC-1(a)" in t]) >= 1
+      and len([t for t in _p312_ac1 if "AC-1(b)" in t]) >= 1,
+      f"本節 AC-1 的斷言標題={_p312_ac1!r}")
+check("#312 AC-1 這一段是純函式層：一個子程序都沒派、一則訊息都沒送",
+      len(f312_pure.spawned) == 0 and len(f312_pure.sent) == 0,
+      f"spawned={f312_pure.spawned} sent={f312_pure.sent}")
+
+# 矩陣 1：維持現行（每個子程序都 +1）→ AC-1(b) 的期望值轉為不成立。
+_m1 = load_mutant(P312_MUT_ALWAYS, "devflow_relay_mut_always", FakeSub(LINES))
+_c1 = with_env(P312_CALLER, lambda: _m1._child_env("dfmgr", continuation=True))
+check("#312 矩陣 1：對每個子程序都 +1 的突變下，喚醒者得 '2' ≠ AC-1(b) 的 '1'（實跑對照）",
+      _c1[DEPTH_KEY] == "2" and _c1[DEPTH_KEY] != p312_cont[DEPTH_KEY],
+      f"突變={_c1[DEPTH_KEY]!r} 正確={p312_cont[DEPTH_KEY]!r}")
+
+# 矩陣 2：primary 也承襲呼叫者深度 → AC-1(a) 的期望值轉為不成立。
+_m2 = load_mutant(P312_MUT_NEVER, "devflow_relay_mut_never", FakeSub(LINES))
+_p2 = with_env(P312_CALLER, lambda: _m2._child_env("dfimpl"))
+check("#312 矩陣 2：primary 也承襲呼叫者深度的突變下，primary 得 '1' ≠ AC-1(a) 的 '2'（實跑對照）",
+      _p2[DEPTH_KEY] == "1" and _p2[DEPTH_KEY] != p312_prim[DEPTH_KEY],
+      f"突變={_p2[DEPTH_KEY]!r} 正確={p312_prim[DEPTH_KEY]!r}")
+
+# ── AC-2：鏈上機械可區分，超限訊息看得出哪幾層巢狀、哪幾層續接 ────────────────
+check("#312 AC-2 primary 以 `,` 接、continuation 以 `>` 接（同一呼叫者，兩類鏈不同）",
+      p312_prim[CHAIN_KEY] == "dfmgr,dfimpl" and p312_cont[CHAIN_KEY] == "dfmgr>dfmgr",
+      f"primary={p312_prim[CHAIN_KEY]!r} continuation={p312_cont[CHAIN_KEY]!r}")
+check("#312 AC-2 兩個分隔符各寫成模組常數（`,` 巢狀、`>` 續接）",
+      m312.CHAIN_NEST_SEP == "," and m312.CHAIN_CONT_SEP == ">",
+      f"nest={m312.CHAIN_NEST_SEP!r} cont={m312.CHAIN_CONT_SEP!r}")
+
+f312_over = FakeSub(LINES)
+P312_MIXED_CHAIN = "dfcoord,dfmgr>dfmgr,dfimpl"
+rc312_over, _, err312_over = with_env(
+    {DEPTH_KEY: str(P312_MAX), CHAIN_KEY: P312_MIXED_CHAIN},
+    lambda: run(["4149", "hi", "--issue", "312", "--then-wake", "dfmgr"], f312_over))
+check("#312 AC-2 超限訊息印出混合鏈的原文（巢狀與續接兩種接法都在）",
+      P312_MIXED_CHAIN in err312_over, repr(err312_over[:500]))
+check("#312 AC-2 超限訊息解釋 `,`／`>` 的意義（讀訊息就看得出哪幾層是巢狀、哪幾層是續接）",
+      "`,` ＝巢狀一層" in err312_over and "`>` ＝同一流程的續接" in err312_over
+      and "continuation" in err312_over and "primary" in err312_over,
+      repr(err312_over[:600]))
+
+# ── AC-3：同一張單連續 6 輪（每輪 primary ＋ then-wake 續接）──────────────────
+print("\n── #312 AC-3：同一張單連續 6 輪不累加")
+
+P312_ROUNDS = 6
+P312_ARGV = ["4149", "hi", "-p", "dfimpl", "--issue", "312", "--then-wake", "dfmgr"]
+p312_env = {DEPTH_KEY: "1", CHAIN_KEY: "dfmgr"}       # 第 1 輪的 manager（coord → mgr 之後）
+p312_log: list[tuple] = []
+for _n in range(1, P312_ROUNDS + 1):
+    _f = FakeSub(LINES)
+    _rc, _, _ = with_env(dict(p312_env), lambda f=_f: run(list(P312_ARGV), f))
+    _prim_env = _f.kwargs[0].get("env", {}) if _f.kwargs else {}
+    _cont_env = _f.kwargs[1].get("env", {}) if len(_f.kwargs) > 1 else {}
+    p312_log.append((_n, _rc, len(_f.spawned), _prim_env.get(DEPTH_KEY),
+                     _cont_env.get(DEPTH_KEY), _prim_env.get(CHAIN_KEY),
+                     _cont_env.get(CHAIN_KEY)))
+    if not _cont_env:
+        break
+    p312_env = {DEPTH_KEY: _cont_env[DEPTH_KEY], CHAIN_KEY: _cont_env[CHAIN_KEY]}
+
+print("     逐輪：" + "；".join(
+    f"第 {n} 輪 rc={rc} spawned={sp} primary={pd} 續接={cd} 續接鏈={cc}"
+    for n, rc, sp, pd, cd, _pc, cc in p312_log))
+
+check("#312 AC-3(a) 六輪的 primary 深度恆為同一值（'2'）",
+      len(p312_log) == P312_ROUNDS and {r[3] for r in p312_log} == {"2"},
+      f"輪數={len(p312_log)} primary 深度集合={ {r[3] for r in p312_log} !r}")
+check("#312 AC-3(b) 六輪的續接者深度恆為同一值（'1' ＝呼叫者自身那一層）",
+      len(p312_log) == P312_ROUNDS and {r[4] for r in p312_log} == {"1"},
+      f"續接深度集合={ {r[4] for r in p312_log} !r}")
+check("#312 AC-3(c) 六輪都放行（每輪 rc 0 且恰兩個子程序）",
+      len(p312_log) == P312_ROUNDS
+      and all(r[1] == 0 and r[2] == 2 for r in p312_log),
+      f"逐輪 (rc, spawned)={[(r[1], r[2]) for r in p312_log]!r}")
+check("#312 AC-3 鏈仍逐輪成長（深度不累加，但棒次全保留，供 `#313` 的判準使用）",
+      p312_log[-1][6].count(">") == P312_ROUNDS and p312_log[-1][6].startswith("dfmgr"),
+      f"第 6 輪的續接鏈={p312_log[-1][6]!r}")
+
+# 矩陣 4：現行實作（每個子程序都 +1）跑同樣六輪 → 第 3 輪即被拒。
+p312_mut_env = {DEPTH_KEY: "1", CHAIN_KEY: "dfmgr"}
+p312_mut_log: list[tuple] = []
+for _n in range(1, P312_ROUNDS + 1):
+    _f = FakeSub(LINES)
+    _mm = load_mutant(P312_MUT_ALWAYS, f"devflow_relay_mut_always_r{_n}", _f)
+    _rc, _, _ = with_env(dict(p312_mut_env), lambda m=_mm: run_mod(m, list(P312_ARGV)))
+    p312_mut_log.append((_n, _rc, len(_f.spawned)))
+    if len(_f.kwargs) < 2:
+        break
+    _ce = _f.kwargs[1].get("env", {})
+    p312_mut_env = {DEPTH_KEY: _ce[DEPTH_KEY], CHAIN_KEY: _ce[CHAIN_KEY]}
+
+check("#312 矩陣 4：現行實作的突變跑同一組六輪 → 第 3 輪即被拒且零子程序（實跑對照）",
+      [n for n, rc, _ in p312_mut_log if rc not in (0, None)] == [3]
+      and p312_mut_log[-1][2] == 0 and len(p312_mut_log) == 3,
+      f"逐輪 (輪, rc, spawned)={p312_mut_log!r}")
+
+# ── AC-4：真實巢狀仍被擋，且拒絕在派子程序之前 ───────────────────────────────
+print("\n── #312 AC-4／AC-5：primary 的巢狀與遞迴仍被擋（判準不是 profile 名）")
+
+# coordinator(0) → manager(1) → coder(2) → coder(3)：逐層以真 `_child_env` 推，不寫死值。
+_e_coord = {DEPTH_KEY: None, CHAIN_KEY: None}
+p312_mgr = with_env(_e_coord, lambda: m312._child_env("dfmgr"))
+p312_coder = with_env({DEPTH_KEY: p312_mgr[DEPTH_KEY], CHAIN_KEY: p312_mgr[CHAIN_KEY]},
+                      lambda: m312._child_env("dfimpl"))
+p312_coder2 = with_env({DEPTH_KEY: p312_coder[DEPTH_KEY], CHAIN_KEY: p312_coder[CHAIN_KEY]},
+                       lambda: m312._child_env("dfimpl"))
+P312_NEST_ENV = {DEPTH_KEY: p312_coder2[DEPTH_KEY], CHAIN_KEY: p312_coder2[CHAIN_KEY]}
+check("#312 AC-4 primary 疊 primary 疊 primary → 第三層達上限（深度 '3'、鏈三層皆以 `,` 接）",
+      p312_coder2[DEPTH_KEY] == str(P312_MAX)
+      and p312_coder2[CHAIN_KEY] == "dfmgr,dfimpl,dfimpl"
+      and ">" not in p312_coder2[CHAIN_KEY],
+      f"深度={p312_coder2[DEPTH_KEY]!r} 鏈={p312_coder2[CHAIN_KEY]!r}")
+
+f312_nest = FakeSub(LINES)
+rc312_nest, _, err312_nest = with_env(
+    P312_NEST_ENV, lambda: run(["4149", "hi", "--issue", "312", "--then-wake", "dfmgr"],
+                               f312_nest))
+check("#312 AC-4 該層的 relay 拒絕派子程序（rc 非 0）",
+      rc312_nest not in (0, None), f"rc={rc312_nest}")
+check("#312 AC-4 拒絕在派子程序之前：spawned 計數 0 反證 Popen 未被呼叫",
+      len(f312_nest.spawned) == 0, f"spawned={f312_nest.spawned}")
+
+# 矩陣 2 的後半：primary 也承襲呼叫者深度時，巢狀不再被擋。
+_m2b_env = {DEPTH_KEY: None, CHAIN_KEY: None}
+_m2_mgr = with_env(_m2b_env, lambda: _m2._child_env("dfmgr"))
+_m2_coder = with_env({DEPTH_KEY: _m2_mgr[DEPTH_KEY], CHAIN_KEY: _m2_mgr[CHAIN_KEY]},
+                     lambda: _m2._child_env("dfimpl"))
+_m2_coder2 = with_env({DEPTH_KEY: _m2_coder[DEPTH_KEY], CHAIN_KEY: _m2_coder[CHAIN_KEY]},
+                      lambda: _m2._child_env("dfimpl"))
+_f2b = FakeSub(LINES)
+_m2run = load_mutant(P312_MUT_NEVER, "devflow_relay_mut_never_run", _f2b)
+_rc2b, _, _ = with_env({DEPTH_KEY: _m2_coder2[DEPTH_KEY], CHAIN_KEY: _m2_coder2[CHAIN_KEY]},
+                       lambda: run_mod(_m2run, ["4149", "hi"]))
+check("#312 矩陣 2：primary 不增深的突變下，三層巢狀的深度停在 '0' 並被放行（實跑對照）",
+      _m2_coder2[DEPTH_KEY] == "0" and _rc2b == 0 and len(_f2b.spawned) == 1,
+      f"三層後深度={_m2_coder2[DEPTH_KEY]!r} rc={_rc2b} spawned={len(_f2b.spawned)}")
+
+# 矩陣 5：上限判準改看鏈去重後的集合大小 → 同一個真遞迴情境轉為放行。
+_f5 = FakeSub(LINES)
+_m5 = load_mutant(P312_MUT_SETSIZE, "devflow_relay_mut_setsize", _f5)
+_rc5, _, _ = with_env(P312_NEST_ENV,
+                      lambda: run_mod(_m5, ["4149", "hi", "--issue", "312",
+                                            "--then-wake", "dfmgr"]))
+check("#312 矩陣 5：上限改看鏈去重後的集合大小 → 同一個三層巢狀轉為放行（實跑對照）",
+      _rc5 == 0 and len(_f5.spawned) == 2 and rc312_nest not in (0, None),
+      f"突變 rc={_rc5} spawned={len(_f5.spawned)}；正確實作 rc={rc312_nest}")
+
+# 矩陣 6：深度檢查搬到 `Popen` 之後 → `spawned` 計數轉非零。
+def p312_main_fn(src: str):
+    """受測 source 的 `main()` 節點。"""
+    return next(n for n in ast.walk(ast.parse(src))
+                if isinstance(n, ast.FunctionDef) and n.name == "main")
+
+
+def p312_limit_ifs(src: str) -> list:
+    """`main()` 內**條件式含 `MAX_RELAY_DEPTH`** 的那些 `if`（base `1aced94` 恰 1 個）。"""
+    return [n for n in ast.walk(p312_main_fn(src))
+            if isinstance(n, ast.If) and "MAX_RELAY_DEPTH" in ast.unparse(n.test)]
+
+
+def p312_move_limit_check(src: str) -> str:
+    """把深度檢查那一整塊搬到第一個 `_run_child` 之後（拒絕改為發生在派工之後）。
+
+    行號由 AST 取，不寫死——搬到 `if args.then_wake:` 之前，故首棒已經派出去了。
+    """
+    lines = src.splitlines(keepends=True)
+    main_fn = p312_main_fn(src)
+    blk = p312_limit_ifs(src)[0]
+    target = next(n for n in main_fn.body
+                  if isinstance(n, ast.If) and ast.unparse(n.test) == "args.then_wake")
+    block = lines[blk.lineno - 1:blk.end_lineno]
+    rest = lines[:blk.lineno - 1] + lines[blk.end_lineno:]
+    at = target.lineno - 1 - len(block)          # 區塊被切掉後，目標行上移同樣的行數
+    return "".join(rest[:at] + block + rest[at:])
+
+
+P312_MUT_LATE = p312_move_limit_check(RELAY_SRC)
+_f6 = FakeSub(LINES)
+_m6 = load_mutant(P312_MUT_LATE, "devflow_relay_mut_late", _f6)
+_rc6, _, _ = with_env(P312_NEST_ENV, lambda: run_mod(_m6, ["4149", "hi"]))
+check("#312 矩陣 6：深度檢查搬到 Popen 之後 → spawned 轉非零，AC-4 的哨兵條件不成立（實跑對照）",
+      P312_MUT_LATE != RELAY_SRC and len(_f6.spawned) >= 1 and _rc6 == 2,
+      f"突變 spawned={len(_f6.spawned)} rc={_rc6}；正確實作 spawned={len(f312_nest.spawned)}")
+
+# ── AC-5：判準不是 profile 名 ───────────────────────────────────────────────
+# (a) 真遞迴 `coder → (primary) coder`：正確實作下子程序達上限、那一層被拒；
+#     以 profile 名去重的突變下深度停在 '2'，同一情境被放行。兩者輸出不同。
+P312_CODER_ENV = {DEPTH_KEY: "2", CHAIN_KEY: "dfmgr,dfimpl"}
+p312_rec = with_env(P312_CODER_ENV, lambda: m312._child_env("dfimpl"))
+_f7 = FakeSub(LINES)
+_m7 = load_mutant(P312_MUT_DEDUP, "devflow_relay_mut_dedup", _f7)
+p312_rec_mut = with_env(P312_CODER_ENV, lambda: _m7._child_env("dfimpl"))
+f312_rec = FakeSub(LINES)
+rc312_rec, _, _ = with_env({DEPTH_KEY: p312_rec[DEPTH_KEY], CHAIN_KEY: p312_rec[CHAIN_KEY]},
+                           lambda: run(["4149", "hi"], f312_rec))
+_rc7, _, _ = with_env({DEPTH_KEY: p312_rec_mut[DEPTH_KEY],
+                       CHAIN_KEY: p312_rec_mut[CHAIN_KEY]},
+                      lambda: run_mod(_m7, ["4149", "hi"]))
+check("#312 AC-5(c) 同一 profile 的 primary 疊加（真遞迴）→ 子程序達上限、該層被拒",
+      p312_rec[DEPTH_KEY] == str(P312_MAX) and rc312_rec not in (0, None)
+      and len(f312_rec.spawned) == 0,
+      f"深度={p312_rec[DEPTH_KEY]!r} rc={rc312_rec} spawned={f312_rec.spawned}")
+check("#312 AC-5(a) 矩陣 7：以 profile 名去重的突變實跑 → 同一個真遞迴深度停在 '2' 且被放行",
+      p312_rec_mut[DEPTH_KEY] == "2" and _rc7 == 0 and len(_f7.spawned) == 1,
+      f"突變深度={p312_rec_mut[DEPTH_KEY]!r} rc={_rc7} spawned={len(_f7.spawned)}")
+check("#312 AC-5(a) 兩者輸出不同（放行 vs 拒絕）→ 判準不得用 profile 名",
+      (p312_rec_mut[DEPTH_KEY], _rc7) != (p312_rec[DEPTH_KEY], rc312_rec)
+      and _rc7 == 0 and rc312_rec not in (0, None),
+      f"突變=(深度 {p312_rec_mut[DEPTH_KEY]!r}, rc {_rc7})；"
+      f"正確=(深度 {p312_rec[DEPTH_KEY]!r}, rc {rc312_rec})")
+
+# (b) 跨 profile 的 continuation：放行、不 +1，停在呼叫者自身那一層（不是祖先層）。
+f312_cross = FakeSub(LINES)
+rc312_cross, _, _ = with_env(
+    P312_CODER_ENV,
+    lambda: run(["4149", "hi", "-p", "dfimpl", "--issue", "312", "--then-wake", "dfmgr"],
+                f312_cross))
+_cross_cont = f312_cross.kwargs[1].get("env", {}) if len(f312_cross.kwargs) > 1 else {}
+check("#312 AC-5(b) 跨 profile 的 continuation 放行且不 +1：深度 ＝ 呼叫者自身那一層（'2'）",
+      rc312_cross == 0 and len(f312_cross.spawned) == 2
+      and _cross_cont.get(DEPTH_KEY) == "2",
+      f"rc={rc312_cross} spawned={len(f312_cross.spawned)} "
+      f"喚醒者深度={_cross_cont.get(DEPTH_KEY)!r}")
+check("#312 AC-5(b) 它停在呼叫者那一層，≠ 祖先 manager 的 '1'（只是不增深）",
+      _cross_cont.get(DEPTH_KEY) != "1" and _cross_cont.get(DEPTH_KEY) == "2"
+      and _cross_cont.get(CHAIN_KEY) == "dfmgr,dfimpl>dfmgr",
+      f"喚醒者深度={_cross_cont.get(DEPTH_KEY)!r} 鏈={_cross_cont.get(CHAIN_KEY)!r}")
+
+# 矩陣 8：把跨 profile 的 then-wake 當成 primary（+1）→ AC-5(b) 的期望值不成立。
+_f8 = FakeSub(LINES)
+_m8 = load_mutant(P312_MUT_CROSS, "devflow_relay_mut_cross", _f8)
+with_env(P312_CODER_ENV,
+         lambda: run_mod(_m8, ["4149", "hi", "-p", "dfimpl", "--issue", "312",
+                               "--then-wake", "dfmgr"]))
+_m8_cont = _f8.kwargs[1].get("env", {}) if len(_f8.kwargs) > 1 else {}
+check("#312 矩陣 8：跨 profile 的續接被當成 primary 的突變下，喚醒者得 '3' ≠ AC-5(b) 的 '2'",
+      _m8_cont.get(DEPTH_KEY) == "3"
+      and _m8_cont.get(DEPTH_KEY) != _cross_cont.get(DEPTH_KEY),
+      f"突變={_m8_cont.get(DEPTH_KEY)!r} 正確={_cross_cont.get(DEPTH_KEY)!r}")
+
+# (d) 射程收窄：純 continuation 的平層循環不增深，本單**不保證**擋住它（`#313` 的材料）。
+#     以下不是「已修好」的證據，是把已知限制釘住：50 次純續接後深度仍為呼叫者那一層。
+p312_flat = dict(P312_CALLER)
+for _i in range(50):
+    _nx = with_env(p312_flat, lambda: m312._child_env("dfmgr", continuation=True))
+    p312_flat = {DEPTH_KEY: _nx[DEPTH_KEY], CHAIN_KEY: _nx[CHAIN_KEY]}
+check("#312 AC-5(d) 已知限制：50 次純 continuation 後深度仍為 '1'（平層循環不增深，故上限擋不到它）",
+      p312_flat[DEPTH_KEY] == "1" and p312_flat[CHAIN_KEY].count(">") == 50,
+      f"深度={p312_flat[DEPTH_KEY]!r} 鏈長={len(p312_flat[CHAIN_KEY])}")
+check("#312 AC-5(d) 超限訊息逐字載明該限制（不假稱已修好）",
+      P312_LIMIT_SENTENCE in err312_over, repr(err312_over[-400:]))
+
+# 矩陣 11 的訊息側：刪掉說明 → 同一條判定轉為不成立。
+_f11 = FakeSub(LINES)
+_m11 = load_mutant(P312_MUT_NOSCOPE, "devflow_relay_mut_noscope", _f11)
+_rc11, _, _err11 = with_env({DEPTH_KEY: str(P312_MAX), CHAIN_KEY: P312_MIXED_CHAIN},
+                            lambda: run_mod(_m11, ["4149", "hi"]))
+check("#312 矩陣 11（訊息側）：刪掉射程說明的突變下，同一條判定轉為不成立（實跑對照）",
+      P312_LIMIT_SENTENCE not in _err11 and P312_LIMIT_SENTENCE in err312_over
+      and _rc11 == 2,
+      f"突變訊息尾={_err11[-200:]!r}")
+
+# ── AC-6：既有行為、無旁路開關（局部檢查）────────────────────────────────────
+print("\n── #312 AC-6：既有判準與無旁路開關（AST 局部檢查）")
+
+# (a) 上限的值與「字面只出現一次」由上方 AC-4 兩條既有斷言守著（維持 PASS）。
+#     矩陣 9 以突變對照：改大之後那兩條的期望值都不成立。
+_m9 = load_mutant(P312_MUT_BIGGER, "devflow_relay_mut_bigger", FakeSub(LINES))
+check("#312 矩陣 9：上限被改大的突變下，常數值與字面計數兩條的期望值皆轉為不成立（實跑對照）",
+      _m9.MAX_RELAY_DEPTH != P312_MAX
+      and len(re.findall(r"^MAX_RELAY_DEPTH\s*=\s*3$", P312_MUT_BIGGER, re.M)) == 0
+      and len(re.findall(r"^MAX_RELAY_DEPTH\s*=\s*3$", RELAY_SRC, re.M)) == 1,
+      f"突變值={_m9.MAX_RELAY_DEPTH!r} 受測值={P312_MAX!r}")
+
+
+def p312_limit_probe(src: str) -> tuple[int, list[str], bool]:
+    """AC-6(c) 的那一支檢查（正例與反例共用）。
+
+    回傳 (命中的 `if` 個數, 條件式子樹內的環境讀取清單, 條件式是否只由 `depth` 與
+    `MAX_RELAY_DEPTH` 的比較構成)。環境讀取的判法：`ast.walk` 找 `Call`，其
+    `ast.unparse` 含 `environ`。
+
+    ⚠️ **偵測射程（如實，不得誇大，T `AC-6(c)` 四點）**：
+      1. 本檢查**只**覆蓋「**該 `if` 的條件式裡**多了環境讀取或布林旁路」這一形狀。
+      2. 它**不保證抓到別處的旁路**——例如在 `main()` 更前面插入
+         `if os.environ.get(...): return 0`，或在 `_child_env`／`_current_depth` 裡動手。
+      3. 行為測試（`depth=3` 應拒絕）**只有在突變路徑被激活時才抓得到**：未設該開關跑的
+         `depth=3` 測試不足以保證擋住「有開關才提前 return」的實作——開關未設時那個實作
+         與正確實作行為相同（本節下方以突變實跑證明這一點）。
+      4. 故本單的保證是「對條件式被加上旁路這一形狀有正反測試」（矩陣第 10 列），
+         **不是**「全檔語意上沒有任何旁路」。要覆蓋任意位置的旁路需要另一種檢查
+         （例如對所有提前 `return` 的路徑做可達性分析），不在本單射程。
+    """
+    ifs = p312_limit_ifs(src)
+    if len(ifs) != 1:
+        return len(ifs), [], False
+    test = ifs[0].test
+    envs = [ast.unparse(c) for c in ast.walk(test)
+            if isinstance(c, ast.Call) and "environ" in ast.unparse(c)]
+    names = sorted({n.id for n in ast.walk(test) if isinstance(n, ast.Name)})
+    shape = isinstance(test, ast.Compare) and names == ["MAX_RELAY_DEPTH", "depth"]
+    return len(ifs), envs, shape
+
+
+p312_hits, p312_envs, p312_shape = p312_limit_probe(RELAY_SRC)
+check("#312 AC-6(c) main() 內條件式含 MAX_RELAY_DEPTH 的 if 恰一個（檢查位置唯一）",
+      p312_hits == 1, f"命中個數={p312_hits}")
+check("#312 AC-6(c) 該條件式的子樹裡一個環境讀取都沒有（ast.walk 找 Call、unparse 含 environ）",
+      p312_envs == [], f"命中的環境讀取={p312_envs!r}")
+check("#312 AC-6(c) 該條件式只由 depth 與 MAX_RELAY_DEPTH 的比較構成",
+      p312_shape, f"命中的 Name={sorted({n.id for n in ast.walk(p312_limit_ifs(RELAY_SRC)[0].test) if isinstance(n, ast.Name)})!r}")
+
+_h10, _e10, _s10 = p312_limit_probe(P312_MUT_BYPASS)
+check("#312 矩陣 10：條件式加上 `and not os.environ.get(...)` → 同一支檢查命中環境讀取",
+      _h10 == 1 and len(_e10) >= 1 and "RELAY_NO_DEPTH" in " ".join(_e10) and not _s10,
+      f"突變命中={_e10!r} 形狀={_s10}")
+# 射程第 3 點的實證：開關未設時，突變與正確實作的行為相同——行為測試抓不到它。
+_fb = FakeSub(LINES)
+_mb = load_mutant(P312_MUT_BYPASS, "devflow_relay_mut_bypass", _fb)
+_rcb, _, _ = with_env({DEPTH_KEY: str(P312_MAX), CHAIN_KEY: P312_MIXED_CHAIN,
+                       "RELAY_NO_DEPTH": None},
+                      lambda: run_mod(_mb, ["4149", "hi"]))
+check("#312 AC-6(c) 射程：開關未設時該突變的行為與正確實作相同（故只有 AST 檢查抓得到它）",
+      _rcb == 2 and len(_fb.spawned) == 0 and rc312_nest not in (0, None)
+      and len(_e10) >= 1,
+      f"突變 rc={_rcb} spawned={len(_fb.spawned)}；AST 命中={_e10!r}")
+
+# (d) relay 只寫**子程序環境的複本**：源碼裡一個 `os.environ[...]` 賦值都沒有，
+#     兩個鍵的寫入都落在 `_child_env` 內。
+_p312_tree = ast.parse(RELAY_SRC)
+_p312_env_assigns = [ast.unparse(t) for n in ast.walk(_p312_tree)
+                     if isinstance(n, (ast.Assign, ast.AugAssign))
+                     for t in (n.targets if isinstance(n, ast.Assign) else [n.target])
+                     if ast.unparse(t).startswith("os.environ")]
+_p312_child_fn = next(n for n in ast.walk(_p312_tree)
+                      if isinstance(n, ast.FunctionDef) and n.name == "_child_env")
+_p312_key_assigns = [ast.unparse(t) for n in ast.walk(_p312_tree)
+                     if isinstance(n, ast.Assign) for t in n.targets
+                     if ast.unparse(t) in ("env[DEPTH_ENV]", "env[CHAIN_ENV]")]
+_p312_key_in_child = [ast.unparse(t) for n in ast.walk(_p312_child_fn)
+                      if isinstance(n, ast.Assign) for t in n.targets
+                      if ast.unparse(t) in ("env[DEPTH_ENV]", "env[CHAIN_ENV]")]
+check("#312 AC-6(d) 源碼裡一個 `os.environ[...]` 賦值都沒有（relay 不改自己的程序環境）",
+      _p312_env_assigns == [], f"命中={_p312_env_assigns!r}")
+check("#312 AC-6(d) 兩個鍵的寫入都落在 `_child_env` 內（寫的是子程序環境的複本）",
+      sorted(_p312_key_assigns) == sorted(_p312_key_in_child)
+      and sorted(_p312_key_in_child) == ["env[CHAIN_ENV]", "env[DEPTH_ENV]"],
+      f"全檔={_p312_key_assigns!r} `_child_env` 內={_p312_key_in_child!r}")
+check("#312 AC-6(d) 深度與鏈的鍵名沿用既有兩個（沒有第三個 DEVFLOW_RELAY_* 深度鍵）",
+      m312.DEPTH_ENV == "DEVFLOW_RELAY_DEPTH" and m312.CHAIN_ENV == "DEVFLOW_RELAY_CHAIN"
+      and sorted(re.findall(r'"(DEVFLOW_RELAY_[A-Z]+)"', RELAY_SRC))
+      == ["DEVFLOW_RELAY_CHAIN", "DEVFLOW_RELAY_DEPTH"],
+      f"命中={sorted(re.findall(r'(DEVFLOW_RELAY_[A-Z]+)', RELAY_SRC))!r}")
+
+# ── AC-7：`telegram.md` 的「子程序退出後的銜接」格 ──────────────────────────
+print("\n── #312 AC-7：telegram.md 的格與 R9 狀態")
+
+TG312 = TELEGRAM_MD.read_text()
+TG312_ROW = next((ln for ln in TG312.splitlines()
+                  if ln.startswith("| 子程序退出後的銜接")), "")
+TG312_VALUE, TG312_STATUS = (TG312_ROW.split(" | ")[2:4] + ["", ""])[:2]
+
+# 該格須載明的字面（正向、位置斷言：切出那一列再比對，不用全檔禁詞）。
+P312_DOC_NEEDLES = (
+    "primary",
+    "continuation",
+    "呼叫者自身",
+    "`,` ＝巢狀一層",
+    "`>` ＝同一流程的續接",
+    P312_LIMIT_SENTENCE,
+    "只覆蓋「該 `if` 的條件式裡多了環境讀取或布林旁路」這一形狀",
+    "不保證抓到別處的旁路",
+    "未設該開關跑的 `depth=3` 行為測試",
+    "不是全檔語意保證",
+)
+
+
+def p312_doc_ok(row: str) -> list[str]:
+    """該格缺了哪些必載字面（空清單＝都在）。正例與反例共用同一支。"""
+    return [n for n in P312_DOC_NEEDLES if n not in row]
+
+
+check("#312 AC-7 該格載明 primary／continuation 的區別、`,`／`>` 的讀法與兩段射程（逐項命中）",
+      p312_doc_ok(TG312_ROW) == [], f"缺={p312_doc_ok(TG312_ROW)!r}")
+check("#312 AC-7 值欄的深度宣稱與實作一致（續接承襲呼叫者自身那一層、不增深）",
+      "承襲**呼叫者自身**的深度" in TG312_VALUE and "不增深" in TG312_VALUE,
+      repr(TG312_VALUE[-600:]))
+check("#312 AC-7 該格以「不增深」描述跨 profile 的續接，沒有「回到外層／退回祖先層」的說法",
+      "回到外層" not in TG312_ROW and "退回祖先層" not in TG312_ROW
+      and "不增深" in TG312_VALUE and "不是祖先 manager 的 `1`" in TG312_VALUE,
+      f"值欄尾={TG312_VALUE[-300:]!r}")
+check("#312 AC-7 `R9` 狀態欄為 `📝 已宣稱` 並標明子類（程式層正反測試，不逕標 `✅`）",
+      TG312_STATUS.startswith("📝 已宣稱") and "驗證未達 `✅`" in TG312_STATUS,
+      f"狀態欄開頭={TG312_STATUS[:120]!r}")
+check("#312 AC-7 既有的 `#298` 驗證方式與受測環境記載仍在（`R9`：不得刪去）",
+      "tests/channels/test_relay.py" in TG312_STATUS and "2026-10-07" in TG312_STATUS
+      and "7bb4cb4" in TG312_STATUS and "298" in TG312_STATUS,
+      repr(TG312_STATUS[:300]))
+check("#312 AC-7 受測環境（`R10`）記載更新為本次（日期、base、worktree）",
+      "2026-10-15" in TG312_STATUS and "1aced94" in TG312_STATUS
+      and "worktree `312`" in TG312_STATUS, repr(TG312_STATUS[-500:]))
+
+# 矩陣 11 的文件側：刪掉射程說明 → 同一支判定轉為不成立。
+_row11 = TG312_ROW.replace(P312_LIMIT_SENTENCE, "")
+check("#312 矩陣 11（文件側）：刪掉該說明後，同一支判定報出缺漏（實跑對照）",
+      p312_doc_ok(_row11) == [P312_LIMIT_SENTENCE] and p312_doc_ok(TG312_ROW) == [],
+      f"突變後缺={p312_doc_ok(_row11)!r}")
+
+check("#312 AC-7 VERSION 為 `V2` 的 c 位進位（嚴格大於 0.18.0.0，整數元組比較）",
+      tuple(int(x) for x in VERSION_FILE.read_text().strip().split(".")) > (0, 18, 0, 0),
+      f"raw={VERSION_FILE.read_text().strip()!r}")
 
 
 # ── 收尾 ────────────────────────────────────────────────────────────────────
