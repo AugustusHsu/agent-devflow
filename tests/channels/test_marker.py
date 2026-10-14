@@ -865,6 +865,11 @@ def _ac7():
 MARKER_SRC = (SCRIPTS / "_marker.py").read_text()
 ARCHIVE_SRC = (SCRIPTS / "devflow_archive.py").read_text()
 
+# `_marker.py` 的**狀態層**公開 API：標的是整個狀態（`topic` 與 `archived` 一起判），
+# 故不屬 `topic`／`archived` 任一側。`#291 AC-3` 的允許集合用它（見該節的改寫註解）；
+# `#310` 的 `AC-9`(iii) 另有一條正向斷言要求這兩個名字確實是公開函式。
+P310_STATE_API = {"preserve_state", "compare_state_lines"}
+
 
 # ── #291 AC-1 archived_line 產出合規字面，三個反例各自 raise ──────────────────
 @case("#291 AC-1 archived_line 產出恰匹配 ARCHIVED_RE，三個反例 raise")
@@ -1076,15 +1081,51 @@ def _p291_ac3():
                           for k, v in sorted(table.items()))
               + f"\n        缺口: {gaps!r} 無法歸類: {other!r}")
     check("#291 AC-3 配對缺口集合為空", gaps == [], detail)
-    check("#291 AC-3 無法歸類的公開函式為空（每個都屬某一側）", other == [], detail)
+    # ── `#310` 改寫（原為 `other == []`）：允許集合形式，依檔頂 (c) ────────────
+    #
+    # **意圖仍成立 → 改寫，不刪**：這條要釘住的是「`topic`／`archived` 兩側的
+    # 公開 API 名稱對稱」——某個 `<verb>_topic` 不得沒有 `<verb>_archived` 對應。
+    # 過寬的是**形式**：`other == []` 要求「每個公開函式都屬某一側」，於是
+    # `_marker.py` **永遠**不能有不分側的公開 API，而那是一道沒人宣告過的禁令。
+    #
+    # `#310` 撞上它：`AC-1` 逐字要求 `_marker.preserve_state`、`AC-9` 要求一個
+    # 吃兩份 body 的通用比較 API。兩者的標的都是**整個狀態**（`topic` 與
+    # `archived` 一起判），不屬任一側——拆成 `preserve_topic`／`preserve_archived`
+    # 反而做不到 `T=0 A=1`、`NN` 不符這兩類跨兩式的 INVALID 判定。
+    #
+    # ⚠️ **本處的主張收窄如下（裁決位 2026-10-13 指定的更正）**：
+    # 不改這兩條時，`AC-1`／`AC-9` 仍可藉**模組層賦值別名**達成全綠（審查位已實證：
+    # 把實作命名為 `_preserve_state_impl`／`_compare_state_lines_impl`，再
+    # `preserve_state = _preserve_state_impl` 公開，整套測試 `1130/1130 PASS`、rc 0）；
+    # 但別名使該 API 對 `#291 AC-3` 的 `^def` 掃描器（`_public_funcs`）**不可見**，
+    # `other == []` 之所以 PASS 是因為它看不到那個 API——守門斷言被**繞過**而非
+    # **守住**。故本單選擇**宣告式放寬**，是裁決位 2026-10-13 選定的方案
+    # （PR `#311` https://github.com/AugustusHsu/agent-devflow/pull/311#issuecomment-6152603362 ，
+    # 含可重跑的反證腳本與四項鑑別力的預跑輸出）。
+    # 下方 `_p291_ac3_discrimination` 把該反證與四項鑑別力釘成常駐斷言。
+    #
+    # 處置：改為**明確的允許集合**（`P310_STATE_API`），並配一條正向對偶要求
+    # 集合內的名字確實存在——否則「不屬任一側者為空」可由「什麼都不加」滿足。
+    # 鑑別力未失，四條斷言各自獨立在抓一件事（逐項實跑見
+    # `_p291_ac3_discrimination`）。
+    # 同理，下方的五組配對由等號改為**下界**（`<=`）：等號會讓任何後續單在
+    # `_marker.py` 新增第六組配對時假 FAIL，與 `#296` `AC-7`／`#304` `AC-10`
+    # ／`#306` `AC-13` 三處被 `#308` 改成下界的理由同形。
+    # 依 `L3`：標的檔在 `#310` 的 write scope 內、未改動任何 AC 要驗的事，
+    # 屬工程判斷，已在 issue `#310` 留言登錄。
+    check("#291 AC-3 不屬任一側的公開函式落在狀態層的允許集合內",
+          set(other) <= P310_STATE_API,
+          detail + f"\n        允許集合: {sorted(P310_STATE_API)!r}")
+    check("#291 AC-3 允許集合非空轉：狀態層的公開 API 確實都在公開清單內",
+          P310_STATE_API <= set(names), repr(names))
     check("#291 AC-3 本單新增的兩個函式確實在公開清單內",
           {"archived_line", "upsert_archived"} <= set(names), repr(names))
     check("#291 AC-3 兩者皆為模組的可呼叫屬性（源碼與模組一致）",
           all(callable(getattr(marker, n, None))
               for n in ("archived_line", "upsert_archived")))
     check("#291 AC-3 五組配對齊備（find／has／read／upsert／LINE:line）"
-          "＋ `#287` 新增的 scan 一組",
-          set(table) == {"find", "has", "read", "upsert", "LINE:line", "scan"},
+          "＋ `#287` 新增的 scan 一組（下界形式，非等號；見上方 `#310` 改寫註解）",
+          {"find", "has", "read", "upsert", "LINE:line", "scan"} <= set(table),
           f"{sorted(table)!r}")
 
 
@@ -1144,6 +1185,169 @@ def _p291_ac3_mutations():
     gaps_b2, _, _ = _pair_gaps(_public_funcs(mut_b2))
     check("#291 AC-3 鑑別力：突變 B'（達成版 ＋ archived_foo）缺口 == ['LINE:foo']",
           gaps_b2 == ["LINE:foo"], f"實得 {gaps_b2!r}")
+
+
+# ── #291 AC-3 的四條斷言各自的鑑別力（`#310` 第 2 輪補；裁決位 2026-10-13 指定）──
+# 出處：PR `#311`
+# https://github.com/AugustusHsu/agent-devflow/pull/311#issuecomment-6152603362
+#
+# 為什麼要這一節：`#310` 把其中兩條改成**宣告式**的放寬（允許集合 ＋ 正向存在、
+# 配對 key 下界）。放寬之後必須證明四條斷言**各自**仍在抓一件事、而且**不是互相
+# 代償**——否則「鑑別力未失」只是作者的說法。做法是在源碼字串上做四種突變（不改
+# 真檔），每種只踩一條斷言，並**逐一附對照**：其餘三條在同一變體下仍 PASS。
+#
+#   變體                                  目標斷言            對照（其餘三條）
+#   ─────────────────────────────────────────────────────────────────────────
+#   ①允許集合外的中性公開 def             允許集合 FAIL       正向存在／下界／缺口 PASS
+#   ②狀態 API 缺一個                      正向存在 FAIL       允許集合 PASS
+#   ③必要配對整組移除（upsert 兩側）      下界 FAIL           缺口 PASS（整組不產生缺口）
+#   ④缺單側（只刪 upsert_archived）       缺口 FAIL           下界 PASS（key 仍在）
+#   ⑤模組層賦值別名（反證）              正向存在 FAIL       base 的 `other == []` PASS
+#   ─────────────────────────────────────────────────────────────────────────
+#
+# ⑤是裁決位裁示的反證：別名讓公開 API 對 `^def` 掃描器不可見，於是 base 的字面
+# 斷言「照樣 PASS」——那是**被繞過**，不是**被守住**。它也是本單選宣告式放寬
+# （而非別名）的理由，故與四項鑑別力釘在同一節。
+# 既有的 `archived_foo` 反例留在上一節（`_p291_ac3_mutations`），本節另附一條
+# 同形的確認，使「改寫後它仍命中」在本節也讀得到。
+P310_PAIR_KEYS = {"find", "has", "read", "upsert", "LINE:line", "scan"}
+
+
+def _p310_cut_func(src: str, name: str) -> str:
+    """從源碼字串切掉某個頂層函式（以 AST 的源碼區段為界，只動那個 `def`）。
+
+    不用正則切段：`_marker.py` 的函式之間夾著註解區塊與 `class`，正則的
+    `(?=^def )` 會把它們一起吃掉，突變就不只踩一件事了。
+    """
+    import ast
+    for node in ast.parse(src).body:
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            seg = ast.get_source_segment(src, node)
+            assert seg and seg in src, f"取不到 {name} 的源碼區段"
+            return src.replace(seg, "", 1)
+    raise AssertionError(f"源碼內找不到頂層函式 {name}——突變失效")
+
+
+def _p310_judge_ac3(src: str) -> dict:
+    """對一份 `_marker.py` 源碼跑 `#291 AC-3` 的四條斷言（＋ base 的兩條字面）。
+
+    走的是本檔**既有**的抽取函式 `_public_funcs`／`_pair_gaps`，與受測斷言同一支，
+    否則突變證明不了斷言的鑑別力。
+    """
+    names = _public_funcs(src)
+    gaps, table, other = _pair_gaps(names)
+    return {
+        "allowed": set(other) <= P310_STATE_API,        # 候選：允許集合
+        "api_present": P310_STATE_API <= set(names),    # 候選：正向存在
+        "keys_lower": P310_PAIR_KEYS <= set(table),     # 候選：配對下界
+        "gaps_empty": gaps == [],                       # 兩案共用：意圖本體
+        "base_other_empty": other == [],                # base 字面（對照用）
+        "base_keys_eq": set(table) == P310_PAIR_KEYS,   # base 字面（對照用）
+        "other": other, "gaps": gaps, "keys": sorted(table), "names": names,
+    }
+
+
+@case("#291 AC-3 四條斷言各自的鑑別力（`#310` 第 2 輪；每項附對照）")
+def _p291_ac3_discrimination():
+    base = _p310_judge_ac3(MARKER_SRC)
+    check("#291 AC-3 現況：四條斷言皆 PASS（判準非恆假）",
+          base["allowed"] and base["api_present"] and base["keys_lower"]
+          and base["gaps_empty"],
+          f"other={base['other']!r} 配對 keys={base['keys']!r}")
+    check("#291 AC-3 現況：base 的 `other == []` 會 FAIL（故需要宣告式放寬）",
+          base["base_other_empty"] is False, f"other={base['other']!r}")
+
+    # ①允許集合外的中性公開 def（不分 topic／archived 側，也不在允許集合內）
+    neutral = _p310_judge_ac3(
+        MARKER_SRC + "\ndef helper_normalize(x):\n    return x\n")
+    check("#291 AC-3 鑑別力①允許集合外的中性公開 def（helper_normalize）"
+          "→ 允許集合斷言 FAIL",
+          neutral["allowed"] is False, f"other={neutral['other']!r}")
+    check("#291 AC-3 鑑別力①對照：同一變體的正向存在、下界、缺口仍 PASS"
+          "（故只有允許集合在抓）",
+          neutral["api_present"] and neutral["keys_lower"]
+          and neutral["gaps_empty"],
+          f"other={neutral['other']!r} 缺口={neutral['gaps']!r}")
+
+    # ②允許的狀態 API 缺一個（`compare_state_lines` 不見）
+    missing = _p310_judge_ac3(_p310_cut_func(MARKER_SRC, "compare_state_lines"))
+    check("#291 AC-3 鑑別力②狀態 API 缺一個（compare_state_lines 不見）"
+          "→ 正向存在斷言 FAIL",
+          missing["api_present"] is False,
+          f"names 內的狀態 API={sorted(P310_STATE_API & set(missing['names']))!r}")
+    check("#291 AC-3 鑑別力②對照：允許集合斷言仍 PASS（故只有正向存在在抓）",
+          missing["allowed"] is True, f"other={missing['other']!r}")
+    check("#291 AC-3 鑑別力②對照：下界與缺口亦不受影響（兩者與狀態 API 無關）",
+          missing["keys_lower"] and missing["gaps_empty"],
+          f"配對 keys={missing['keys']!r} 缺口={missing['gaps']!r}")
+
+    # ③必要配對**整組**移除（`upsert_topic` 與 `upsert_archived` 皆刪）
+    pair_gone_src = _p310_cut_func(
+        _p310_cut_func(MARKER_SRC, "upsert_topic"), "upsert_archived")
+    pair_gone = _p310_judge_ac3(pair_gone_src)
+    check("#291 AC-3 鑑別力③必要配對整組移除（upsert 兩側皆刪）→ 下界斷言 FAIL",
+          pair_gone["keys_lower"] is False, f"配對 keys={pair_gone['keys']!r}")
+    check("#291 AC-3 鑑別力③對照：缺口為空仍 PASS"
+          "（整組移除不產生缺口，故下界是唯一在抓的）",
+          pair_gone["gaps_empty"] is True, f"缺口={pair_gone['gaps']!r}")
+    check("#291 AC-3 鑑別力③對照：允許集合與正向存在亦仍 PASS",
+          pair_gone["allowed"] and pair_gone["api_present"],
+          f"other={pair_gone['other']!r}")
+    check("#291 AC-3 鑑別力③對照：base 的等號亦 FAIL"
+          "（整組移除兩案都抓得到，差別在上一條的下界）",
+          pair_gone["base_keys_eq"] is False, f"配對 keys={pair_gone['keys']!r}")
+
+    # ④缺**單側**（只刪 `upsert_archived`）
+    one_side = _p310_judge_ac3(_p310_cut_func(MARKER_SRC, "upsert_archived"))
+    check("#291 AC-3 鑑別力④缺單側（只刪 upsert_archived）→ 配對缺口斷言 FAIL",
+          one_side["gaps_empty"] is False, f"缺口={one_side['gaps']!r}")
+    check("#291 AC-3 鑑別力④對照：下界斷言仍 PASS（key 仍在，故缺口是唯一在抓的）",
+          one_side["keys_lower"] is True, f"配對 keys={one_side['keys']!r}")
+    check("#291 AC-3 鑑別力④對照：允許集合與正向存在亦仍 PASS",
+          one_side["allowed"] and one_side["api_present"],
+          f"other={one_side['other']!r}")
+    check("#291 AC-3 鑑別力④缺口恰為 ['upsert']（指出是哪一組缺單側）",
+          one_side["gaps"] == ["upsert"], f"缺口={one_side['gaps']!r}")
+
+    # ⑤反證：模組層賦值別名使公開 API 對 `^def` 掃描器不可見
+    alias_src = (_p310_cut_func(
+        _p310_cut_func(MARKER_SRC, "preserve_state"), "compare_state_lines")
+        + "\n\ndef _preserve_state_impl(old_body, new_body, *, detail=\"\"):\n"
+          "    return new_body\n\n"
+          "def _compare_state_lines_impl(before, after):\n"
+          "    return True, \"\"\n\n"
+          "preserve_state = _preserve_state_impl\n"
+          "compare_state_lines = _compare_state_lines_impl\n")
+    alias = _p310_judge_ac3(alias_src)
+    check("#291 AC-3 反證⑤別名版：`^def` 掃描器看不到那兩個公開 API",
+          not (P310_STATE_API & set(alias["names"])),
+          f"掃描器所見公開函式數={len(alias['names'])}")
+    check("#291 AC-3 反證⑤別名版：base 的 `other == []` 照樣 PASS"
+          "（＝被繞過，不是被守住）",
+          alias["base_other_empty"] is True, f"other={alias['other']!r}")
+    check("#291 AC-3 反證⑤別名版：base 的配對等號亦照樣 PASS",
+          alias["base_keys_eq"] is True, f"配對 keys={alias['keys']!r}")
+    check("#291 AC-3 反證⑤別名版：候選的正向存在斷言 FAIL"
+          "（抓到 API 未以公開 def 現身）",
+          alias["api_present"] is False,
+          f"names 內的狀態 API={sorted(P310_STATE_API & set(alias['names']))!r}")
+    # 別名確實是可呼叫的公開屬性——證明⑤不是「API 不存在」而是「掃描器看不見」
+    alias_ns: dict = {}
+    exec(compile(alias_src, "<p310-alias>", "exec"), alias_ns)   # noqa: S102
+    check("#291 AC-3 反證⑤別名版：模組層 preserve_state 可呼叫且名稱無底線"
+          "（它確實是公開 API）",
+          callable(alias_ns.get("preserve_state"))
+          and callable(alias_ns.get("compare_state_lines")),
+          f"型別={type(alias_ns.get('preserve_state')).__name__}")
+
+    # 既有 `archived_foo` 反例在改寫後仍命中（裁示留言 D 段的同形確認）
+    foo = _p310_judge_ac3(MARKER_SRC + "\ndef archived_foo(x):\n    return x\n")
+    check("#291 AC-3 鑑別力：archived_foo 在改寫後仍命中配對缺口（既有反例未失效）",
+          foo["gaps_empty"] is False and foo["gaps"] == ["LINE:foo"],
+          f"缺口={foo['gaps']!r}")
+    check("#291 AC-3 鑑別力：archived_foo 的對照——它不踩允許集合"
+          "（`archived_` 開頭者屬 archived 側，故由缺口抓）",
+          foo["allowed"] is True, f"other={foo['other']!r}")
 
 
 # ── #291 AC-4／AC-5／AC-6 cmd_archive 第四步 ────────────────────────────────
@@ -4789,6 +4993,1321 @@ def _p308_ac2():
           len(ac5) == 1 and [v for _, v in ac5] == [(True, False, True)],
           f"命中情形={ac5!r}（空清單表示該條標題已變動，判準失去這個對照）")
 
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# `#310`：issue body 寫入的保存與讀回義務（`AC-1`～`AC-9` ＋ 反例矩陣 18 列）
+# ════════════════════════════════════════════════════════════════════════════
+# 要防的事（`#306` 2026-10-08 實例，兩個獨立來源互相印證）：`gh issue edit --body`
+# ／`-F` 是**全量取代**不是合併，任何「重新產出一份 body」形式的一般修訂都會把
+# `CH3` 的狀態標記抹掉，使該單落回 `T=0 A=0` ＝未開始 → 下一次執行重建分區，或
+# 重做封存並覆寫既有匯出檔。該次抹除窗口約 9 秒，由人肉眼發現才補回。
+#
+# 本族的判準原則（與 T 的 `AC` 逐條對應）：
+#   * 字串層（`AC-1`／`AC-2`／`AC-9`）純 fixture，零 I/O、零 `gh`。
+#   * 腳本層（`AC-3`／`AC-4`／`AC-5`）走子程序 ＋ 假 `gh`（PATH 前置）＋ 假 `HOME`
+#     ＋ **隔離的 `TMPDIR`**，零網路、零 Telegram API；`gh issue edit` 是否被呼叫
+#     一律以**哨兵檔**反證（形狀同本檔上方 `AC-3` 腳本層那一節）。
+#   * 文件層（`AC-6`／`AC-8`）**正向、位置斷言**：切出指定的節／表格列再比對整行
+#     或完整義務句。刪除與搬到無關節／無關列都必須 FAIL，而文中另有否定說明或
+#     引用錯誤宣稱當反例時仍須 PASS（**不用全檔禁詞**——那會誤殺誠實的否定說明）。
+#   * 既有行為（`AC-7`）以 AST 比對 base，並以**同一支判定**在突變源碼上得到相反
+#     結果（矩陣第 8 列）。
+#   * 版本（`AC-8`(iii)）只驗四碼形狀與下界，**不寫死等號**——寫死等號會在下一張
+#     單進位時假 FAIL，正是 `#308` 剛清掉的形態。
+# 出處：https://github.com/AugustusHsu/agent-devflow/issues/310
+
+# ── fixtures（字面即規格；標記行一律由 `_marker` 的建構子產生，不手抄）─────────
+P310_T = marker.topic_line(5169)
+P310_T_OTHER = marker.topic_line(1234)
+P310_A_RIGHT = marker.archived_line(5169, "/archive/right.md")
+P310_A_WRONG = marker.archived_line(5169, "/archive/wrong.md")
+P310_A_NN = marker.archived_line(9999, "/archive/right.md")
+
+P310_BODY = "# 某單\n\n內容一\n\n## 段\n內容二\n"
+P310_NEW_PLAIN = "# 某單（改）\n\n內容一改\n\n## 段\n內容二改\n"
+# ⚠ 尾端刻意留一個「兩個空格」結尾的行、一行只有空白的行與一行只有 tab 的行：
+# `AC-1`(a′)／(b′) 的逐字保留就靠它們有鑑別力（`rstrip()` 的突變會把它們吃掉）。
+P310_NEW_WS = "# 某單（改）\n\n內容一改  \n\n## 段\n內容二改\n   \n\t\n"
+
+P310_OLD_NONE = P310_BODY
+P310_OLD_ACTIVE = P310_BODY + "\n" + P310_T + "\n"
+P310_OLD_ARCHIVED = P310_BODY + "\n" + P310_T + "\n" + P310_A_RIGHT + "\n"
+P310_OLD_T2 = P310_BODY + "\n" + P310_T + "\n" + P310_T + "\n"
+P310_OLD_A2 = (P310_BODY + "\n" + P310_T + "\n" + P310_A_RIGHT + "\n"
+               + P310_A_RIGHT + "\n")
+P310_OLD_A_ONLY = P310_BODY + "\n" + P310_A_RIGHT + "\n"
+P310_OLD_NN = P310_BODY + "\n" + P310_T + "\n" + P310_A_NN + "\n"
+
+P310_NEW_T = P310_NEW_PLAIN + "\n" + P310_T + "\n"
+P310_NEW_T_OTHER = P310_NEW_PLAIN + "\n" + P310_T_OTHER + "\n"
+P310_NEW_A = P310_NEW_PLAIN + "\n" + P310_T + "\n" + P310_A_WRONG + "\n"
+P310_NEW_T2 = P310_NEW_PLAIN + "\n" + P310_T + "\n" + P310_T + "\n"
+P310_NEW_A2 = (P310_NEW_PLAIN + "\n" + P310_T + "\n" + P310_A_WRONG + "\n"
+               + P310_A_WRONG + "\n")
+P310_NEW_A_ONLY = P310_NEW_PLAIN + "\n" + P310_A_WRONG + "\n"
+P310_NEW_NN = P310_NEW_PLAIN + "\n" + P310_T + "\n" + P310_A_NN + "\n"
+
+P310_INVALID_OLD = (("T>1", P310_OLD_T2), ("A>1", P310_OLD_A2),
+                    ("T=0 A=1", P310_OLD_A_ONLY), ("NN 不符", P310_OLD_NN))
+P310_INVALID_NEW = (("T>1", P310_NEW_T2), ("A>1", P310_NEW_A2),
+                    ("T=0 A=1", P310_NEW_A_ONLY), ("NN 不符", P310_NEW_NN))
+
+TOPIC_SRC = (SCRIPTS / "devflow_topic.py").read_text()
+TG_MD = REPO / "devflow" / "channels" / "telegram.md"
+TG_SCRIPTS_README = SCRIPTS / "README.md"
+WORKFLOW_MD = REPO / "devflow" / "WORKFLOW.md"
+
+
+def _p310_raises(fn, exc) -> tuple[bool, object]:
+    """跑 `fn()`：命中 `exc` → `(True, 例外)`；其餘 → `(False, 例外或回傳值)`。"""
+    try:
+        got = fn()
+    except exc as e:                                  # noqa: BLE001
+        return True, e
+    except Exception as e:                            # noqa: BLE001
+        return False, e
+    return False, got
+
+
+def _p310_lines(body: str) -> tuple[list[str], list[str]]:
+    """`(分區行們, 封存行們)`——走公開的 `find_*`，取命中行的完整字面。"""
+    return marker.find_topic(body)[1], marker.find_archived(body)[1]
+
+
+# ── 突變實作（反例矩陣的未達成候選；與受測函式同簽章，可互換呼叫）──────────────
+def _p310_mut_noop(old_body, new_body, **kw):
+    """矩陣第 1／9／10 列：`return new_body`（什麼都不保存、也不擋偷渡）。"""
+    return new_body
+
+
+def _p310_mut_topic_only(old_body, new_body, **kw):
+    """矩陣第 2 列：只保存分區標記，封存標記丟掉（已封存的單落回 active）。"""
+    out = new_body
+    t, _a = _p310_lines(old_body)
+    if t and not _p310_lines(out)[0]:
+        out = out + ("" if out.endswith("\n") else "\n") + t[0] + "\n"
+    return out
+
+
+def _p310_mut_prefer_new(old_body, new_body, **kw):
+    """矩陣第 3 列：以 new 側的值為權威（只在 new 沒有該類標記時才補 old）。"""
+    out = new_body
+    for lines, got in zip(_p310_lines(old_body), _p310_lines(new_body)):
+        if lines and not got:
+            out = out + ("" if out.endswith("\n") else "\n") + lines[0] + "\n"
+    return out
+
+
+def _p310_mut_take_first(old_body, new_body, **kw):
+    """矩陣第 4 列：靜默取第一個命中（`T>1` 不 raise，INVALID 被吞掉）。"""
+    out = new_body
+    for lines in _p310_lines(old_body):
+        if lines and lines[0] not in out:
+            out = out + ("" if out.endswith("\n") else "\n") + lines[0] + "\n"
+    return out
+
+
+def _p310_mut_rstrip(old_body, new_body, **kw):
+    """矩陣第 13 列：沿用 `upsert_*` 的 `rstrip()` 追加 → 吃掉 new 的尾端空白。"""
+    out = new_body
+    for kind, lines in zip(("topic", "archived"), _p310_lines(old_body)):
+        if lines and not _p310_lines(out)[0 if kind == "topic" else 1]:
+            out = out.rstrip() + "\n\n" + lines[0] + "\n"
+    return out
+
+
+def _p310_counts_judgment(before: str, after: str) -> tuple[bool, str]:
+    """矩陣第 6／15 列的**缺陷判準**：只比 `(T, A, NN)`，不比完整行。
+
+    它對「只改 `file=`」沒有鑑別力——計數與兩個 `NN` 全同，故放行。
+    本檔以它與 `marker.compare_state_lines` 在**同一份 fixture** 上得到相反結果，
+    證明「比完整標記行」那一條斷言不是恆真。
+    """
+    def key(body):
+        t, a = _p310_lines(body)
+        ids = (marker.find_topic(body)[0], marker.find_archived(body)[0])
+        return (len(t), len(a), tuple(ids[0]), tuple(ids[1]))
+    return key(before) == key(after), "只比 (T, A, NN)"
+
+
+# ── AC-1 preserve_state 對 old 四態正確、逐字保留 ───────────────────────────
+@case("#310 AC-1 preserve_state：old 四態 ＋ new_body 逐字保留（純字串、零 I/O）")
+def _p310_ac1():
+    check("#310 AC-1(a) old 未開始、new 無標記 → 與 new_body 逐字相同",
+          marker.preserve_state(P310_OLD_NONE, P310_NEW_PLAIN) == P310_NEW_PLAIN,
+          repr(marker.preserve_state(P310_OLD_NONE, P310_NEW_PLAIN)))
+    got = marker.preserve_state(P310_OLD_NONE, P310_NEW_WS)
+    check("#310 AC-1(a′) new_body 尾端含空白行與 tab → 仍逐字相同",
+          got == P310_NEW_WS, f"實得 {got!r}")
+
+    out = marker.preserve_state(P310_OLD_ACTIVE, P310_NEW_PLAIN)
+    t, a = _p310_lines(out)
+    check("#310 AC-1(b) old active、new 無標記 → T=1 A=0 且該行與 old 逐字相同",
+          (len(t), len(a)) == (1, 0) and t == [P310_T], f"T={t!r} A={a!r}")
+
+    out_ws = marker.preserve_state(P310_OLD_ACTIVE, P310_NEW_WS)
+    check("#310 AC-1(b′) 逐字保留：new_body 是輸出的逐字前綴（尾端空白行與 tab 都在）",
+          out_ws.startswith(P310_NEW_WS) and _p310_lines(out_ws)[0] == [P310_T],
+          f"輸出尾段 {out_ws[len(P310_NEW_PLAIN):]!r}")
+    check("#310 AC-1(b′) 補上的標記自成獨立一行（合 grammar，故 T=1）",
+          out_ws.splitlines()[-1] == P310_T and len(_p310_lines(out_ws)[0]) == 1,
+          f"末行 {out_ws.splitlines()[-1]!r}")
+
+    out_arch = marker.preserve_state(P310_OLD_ARCHIVED, P310_NEW_WS)
+    t, a = _p310_lines(out_arch)
+    check("#310 AC-1(c) old 已封存、new 無標記 → T=1 A=1，兩行各與 old 逐字相同"
+          "（含 file=）",
+          (t, a) == ([P310_T], [P310_A_RIGHT]), f"T={t!r} A={a!r}")
+    check("#310 AC-1(c) old 已封存時 new_body 仍為逐字前綴",
+          out_arch.startswith(P310_NEW_WS), f"輸出 {out_arch!r}")
+
+    for label, fx in P310_INVALID_OLD:
+        hit, got = _p310_raises(
+            lambda fx=fx: marker.preserve_state(fx, P310_NEW_PLAIN),
+            marker.InvalidMarker)
+        check(f"#310 AC-1(d) old 的 INVALID「{label}」→ raise InvalidMarker"
+              "（不回傳 body）",
+              hit, f"實得 {type(got).__name__}: {got!r}")
+        if hit:
+            check(f"#310 AC-1(d) old「{label}」的訊息含 INVALID 字樣與命中行",
+                  "INVALID" in str(got) and any(
+                      ln in str(got) for ln in (P310_T, P310_A_RIGHT, P310_A_NN)),
+                  str(got))
+
+
+@case("#310 AC-1 鑑別力：矩陣第 1／2／13 列的突變實作在同一 fixture 下轉 FAIL")
+def _p310_ac1_mutations():
+    # 第 1 列：no-op → old active 的標記根本沒被保存（AC-1(b) 的判準轉 FAIL）
+    out = _p310_mut_noop(P310_OLD_ACTIVE, P310_NEW_PLAIN)
+    check("#310 矩陣第 1 列 no-op 突變 → AC-1(b) FAIL（T=0，標記沒被保存）",
+          _p310_lines(out)[0] == [], f"實得 T={_p310_lines(out)[0]!r}")
+    # 第 2 列：只保存 topic → 已封存的單落回 active
+    out = _p310_mut_topic_only(P310_OLD_ARCHIVED, P310_NEW_PLAIN)
+    check("#310 矩陣第 2 列 只保存分區標記 → AC-1(c) FAIL（A=0，封存標記丟了）",
+          _p310_lines(out) == ([P310_T], []), f"實得 {_p310_lines(out)!r}")
+    # 第 13 列：rstrip() 追加 → 逐字前綴不成立（尾端空白被吃掉）
+    out = _p310_mut_rstrip(P310_OLD_ACTIVE, P310_NEW_WS)
+    check("#310 矩陣第 13 列 rstrip() 追加突變 → AC-1(b′) FAIL（new 不再是逐字前綴）",
+          not out.startswith(P310_NEW_WS),
+          f"突變輸出的對應位置 {out[len(P310_NEW_WS.rstrip()):][:12]!r}"
+          f"（new 的尾端原為 {P310_NEW_WS[-6:]!r}）")
+    check("#310 矩陣第 13 列 對照：受測實作在同一 fixture 下仍是逐字前綴（判準非恆假）",
+          marker.preserve_state(P310_OLD_ACTIVE, P310_NEW_WS).startswith(P310_NEW_WS))
+    # 既有 upsert_* 的 rstrip 行為是它們的**既有語意**，本單不改（`AC-7`）。
+    check("#310 矩陣第 13 列 對照：upsert_topic 仍保留既有的 rstrip 追加行為"
+          "（本單不動它）",
+          marker.upsert_topic(P310_NEW_WS, 5169).startswith(P310_NEW_WS.rstrip()),
+          repr(marker.upsert_topic(P310_NEW_WS, 5169)[-40:]))
+
+
+# ── AC-2 new 的狀態輸入：old 為權威、拒絕新增 ───────────────────────────────
+@case("#310 AC-2 new 的狀態輸入：old 為權威、偷渡拒絕、讀取順序")
+def _p310_ac2():
+    out = marker.preserve_state(P310_OLD_ACTIVE, P310_NEW_T_OTHER)
+    check("#310 AC-2(a) old 有分區標記、new 自帶別的 thread → 取 old 的字面",
+          _p310_lines(out)[0] == [P310_T], f"實得 {_p310_lines(out)[0]!r}")
+    out = marker.preserve_state(P310_OLD_ARCHIVED, P310_NEW_A)
+    check("#310 AC-2(b) old 有封存標記、new 的 file= 不同 → 取 old 的完整行",
+          _p310_lines(out)[1] == [P310_A_RIGHT], f"實得 {_p310_lines(out)[1]!r}")
+    check("#310 AC-2(b) 取 old 之後 body 內已無 new 側的 file= 字面",
+          P310_A_WRONG not in out, repr(out))
+
+    hit, got = _p310_raises(
+        lambda: marker.preserve_state(P310_OLD_NONE, P310_NEW_T),
+        marker.StateIntroduced)
+    check("#310 AC-2(c) old 未開始、new 自帶分區標記 → raise StateIntroduced",
+          hit, f"實得 {type(got).__name__}: {got!r}")
+    msg = str(got) if hit else ""
+    for frag, why in (("縮排", "逃生門一"), ("表格列", "逃生門二"),
+                      ("行首加", "逃生門三"), ("圍欄", "``` 圍欄"),
+                      ("無效", "圍欄內無效")):
+        check(f"#310 AC-2(g) StateIntroduced 的訊息載「{frag}」（{why}）",
+              frag in msg, msg)
+    check("#310 AC-2(g) 訊息同時指出偷渡的那一行（人才知道改哪裡）",
+          P310_T in msg, msg)
+
+    hit, got = _p310_raises(
+        lambda: marker.preserve_state(P310_OLD_ACTIVE, P310_NEW_A),
+        marker.StateIntroduced)
+    check("#310 AC-2(d) old active、new 自帶封存標記 → raise StateIntroduced"
+          "（不得把單改成已封存）",
+          hit, f"實得 {type(got).__name__}: {got!r}")
+
+    for label, fx in P310_INVALID_NEW:
+        hit, got = _p310_raises(
+            lambda fx=fx: marker.preserve_state(P310_OLD_ARCHIVED, fx),
+            marker.InvalidMarker)
+        check(f"#310 AC-2(e) new 自身的 INVALID「{label}」→ raise InvalidMarker",
+              hit, f"實得 {type(got).__name__}: {got!r}")
+
+    # (f) 讀取順序：old INVALID ＋ new 偷渡 → **先**報 InvalidMarker
+    hit, got = _p310_raises(
+        lambda: marker.preserve_state(P310_OLD_T2, P310_NEW_A),
+        marker.InvalidMarker)
+    check("#310 AC-2(f) old INVALID ＋ new 偷渡 → 先報 InvalidMarker",
+          hit, f"實得 {type(got).__name__}: {got!r}")
+    check("#310 AC-2(f) 該情形不得報成 StateIntroduced（順序被斷言）",
+          hit and not isinstance(got, marker.StateIntroduced),
+          f"實得 {type(got).__name__}")
+
+
+@case("#310 AC-2 鑑別力：矩陣第 3／4／9／10 列的突變實作轉 FAIL")
+def _p310_ac2_mutations():
+    out = _p310_mut_prefer_new(P310_OLD_ARCHIVED, P310_NEW_A)
+    check("#310 矩陣第 3 列 以 new 為權威 → AC-2(b) FAIL（file= 取到 new 側的值）",
+          _p310_lines(out)[1] == [P310_A_WRONG], f"實得 {_p310_lines(out)[1]!r}")
+    hit, _got = _p310_raises(
+        lambda: _p310_mut_take_first(P310_OLD_T2, P310_NEW_PLAIN),
+        marker.InvalidMarker)
+    check("#310 矩陣第 4 列 靜默取第一個命中 → AC-1(d) FAIL（INVALID 沒有 raise）",
+          hit is False, "突變實作把 T>1 吞掉了（這正是它該被擋下的理由）")
+    out = _p310_mut_noop(P310_OLD_NONE, P310_NEW_T)
+    check("#310 矩陣第 9 列 no-op → AC-2(c) FAIL（偷渡的分區標記進了 body）",
+          _p310_lines(out)[0] == [P310_T], f"實得 {_p310_lines(out)[0]!r}")
+    out = _p310_mut_noop(P310_OLD_ACTIVE, P310_NEW_A)
+    check("#310 矩陣第 10 列 no-op → AC-2(d) FAIL（單被改成已封存）",
+          _p310_lines(out)[1] == [P310_A_WRONG], f"實得 {_p310_lines(out)[1]!r}")
+
+
+# ── AC-3／AC-4／AC-5 的腳本層共用機制 ───────────────────────────────────────
+# 假 `gh` 的三個行為（全部可觀測，故斷言不靠轉述）：
+#   * `issue view`：哨兵檔**不存在**時回 old body；存在時回「寫進去的那份」，
+#     或回 `readback` 指定的覆寫值（讀回失配的 fixture 就靠它）。
+#   * `issue edit`：把 `-F` 檔的內容寫進**哨兵檔**（故哨兵既反證「被呼叫」，
+#     也留下「寫了什麼」），再依 `edit_rc` 決定成敗。
+#   * 其餘呼叫：exit 8（確保測試不被未預期的 `gh` 呼叫靜默通過）。
+# 呼叫序列另記進 log，`AC-3`(i) 的順序就斷言在它上面。
+def _p310_fake_gh(bin_: Path, *, old_body: str, readback, sentinel: Path,
+                  log: Path, edit_rc: int = 0):
+    fake = bin_ / "gh"
+    fake.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        f"OLD = {old_body!r}\n"
+        f"READBACK = {readback!r}\n"
+        f"SENTINEL = {str(sentinel)!r}\n"
+        f"LOG = {str(log)!r}\n"
+        f"EDIT_RC = {edit_rc!r}\n"
+        "a = sys.argv[1:]\n"
+        "def record(tag):\n"
+        "    with open(LOG, 'a') as f:\n"
+        "        f.write(tag + '\\n')\n"
+        "if a[:2] == ['issue', 'view']:\n"
+        "    if os.path.exists(SENTINEL):\n"
+        "        body = READBACK if READBACK is not None else open(SENTINEL).read()\n"
+        "    else:\n"
+        "        body = OLD\n"
+        "    record('view')\n"
+        "    print(json.dumps({'body': body}))\n"
+        "    sys.exit(0)\n"
+        "if a[:2] == ['issue', 'edit']:\n"
+        "    path = a[a.index('-F') + 1] if '-F' in a else ''\n"
+        "    record('edit ' + path)\n"
+        "    open(SENTINEL, 'w').write(open(path).read() if path else '')\n"
+        "    if EDIT_RC:\n"
+        "        print('fake gh: issue edit 失敗', file=sys.stderr)\n"
+        "    sys.exit(EDIT_RC)\n"
+        "record('other ' + ' '.join(a))\n"
+        "print('unexpected gh call: ' + ' '.join(a), file=sys.stderr)\n"
+        "sys.exit(8)\n")
+    fake.chmod(0o755)
+
+
+def _p310_run_edit_body(*, old_body: str, new_body: str, readback=None,
+                        edit_rc: int = 0, script: Path | None = None,
+                        issue: str = "310", seed_other: bool = False) -> dict:
+    """子程序跑 `devflow_topic.py edit-body <issue> -F <檔>`，回傳觀測結果。
+
+    隔離 `TMPDIR`（暫存檔落在那裡，`AC-5` 以該目錄的殘留反證、`C5` 以 `-F` 的路徑
+    斷言落點）、假 `HOME`、假 `gh`（PATH 前置）。零網路、零 Telegram API。
+    `script` 可指向突變複本。
+
+    `seed_other=True`：**先**在該單的專屬子目錄裡放一個不屬於本次執行的檔
+    （「其他輪的工作檔」），用來反證收尾**只清本次產物**——該檔跑完必須還在。
+    """
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        home, bin_, tmp = td / "home", td / "bin", td / "tmp"
+        for d in (home, bin_, tmp):
+            d.mkdir()
+        seeded = None
+        if seed_other:
+            own = tmp / f"devflow-editbody-{issue}"
+            own.mkdir(parents=True, exist_ok=True)
+            seeded = own / "other-round-work.md"
+            seeded.write_text("別人的檔：其他輪的工作檔，本次執行不得刪它\n")
+        log, sentinel = td / "gh-calls.log", td / "edit-was-called"
+        log.write_text("")
+        _p310_fake_gh(bin_, old_body=old_body, readback=readback,
+                      sentinel=sentinel, log=log, edit_rc=edit_rc)
+        body_file = td / "new-body.md"
+        body_file.write_text(new_body)
+        env = dict(os.environ, HOME=str(home), TMPDIR=str(tmp),
+                   PATH=f"{bin_}:{os.environ.get('PATH', '')}",
+                   PYTHONDONTWRITEBYTECODE="1")
+        r = subprocess.run([PY, str(script or (SCRIPTS / "devflow_topic.py")),
+                            "edit-body", issue, "-F", str(body_file)],
+                           capture_output=True, text=True, env=env,
+                           stdin=subprocess.DEVNULL, timeout=120)
+        return {
+            "rc": r.returncode,
+            "stdout": r.stdout,
+            "stderr": r.stderr,
+            "calls": [ln for ln in log.read_text().splitlines() if ln],
+            "edit_called": sentinel.exists(),
+            "written": sentinel.read_text() if sentinel.exists() else None,
+            # `leftovers`／`leftdirs` 取**相對於隔離暫存根**的路徑：`AC-5` 問「有沒有
+            # 殘留」，`C5` 問「落在哪裡」，兩者都要看得見路徑而不只是檔名。
+            "leftovers": sorted(str(q.relative_to(tmp)) for q in tmp.rglob("*")
+                                if q.is_file()),
+            "leftdirs": sorted(str(q.relative_to(tmp)) for q in tmp.rglob("*")
+                               if q.is_dir()),
+            "tmp_root": str(tmp),
+            "edit_path": next((c.split(" ", 1)[1] for c in
+                               log.read_text().splitlines()
+                               if c.startswith("edit ")), None),
+            "seed_survived": seeded.exists() if seeded is not None else None,
+            "seed_path": str(seeded) if seeded is not None else None,
+            "detail": (f"rc={r.returncode}\n--- stdout ---\n{r.stdout}"
+                       f"--- stderr ---\n{r.stderr}"),
+        }
+
+
+def _p310_mutant_copy(td: Path, name: str, old: str, new: str) -> Path:
+    """把 `devflow_topic.py` 的某段字面換掉，寫成突變複本（`_marker.py` 同層複製）。
+
+    突變未套用時直接 `assert` 失敗——「fixture 與受測對象不同步」會讓鑑別力子測試
+    空轉，那比沒有鑑別力更糟（本檔既有突變複本的同一個理由）。
+    """
+    assert old in TOPIC_SRC, f"{name}：突變的目標字面已變，鑑別力子測試失效"
+    out = td / "devflow_topic.py"
+    out.write_text(TOPIC_SRC.replace(old, new, 1))
+    (td / "_marker.py").write_text((SCRIPTS / "_marker.py").read_text())
+    return out
+
+
+# 突變的目標字面（各突變切一處；字面變動時 `_p310_mutant_copy` 的 assert 會先爆）
+P310_MUT_FINALLY_OLD = """    try:
+        p.write_text(merged)
+        # gh() 遇非零 raise SystemExit；暫存檔的清除靠 finally 涵蓋這條路徑（`AC-5`）。
+        gh("issue", "edit", str(issue), "-R", REPO, "-F", str(p))
+        back = json.loads(gh("issue", "view", str(issue), "-R", REPO,
+                             "--json", "body"))["body"]
+    finally:
+"""
+P310_MUT_FINALLY_NEW = """    if True:
+        p.write_text(merged)
+        gh("issue", "edit", str(issue), "-R", REPO, "-F", str(p))
+        back = json.loads(gh("issue", "view", str(issue), "-R", REPO,
+                             "--json", "body"))["body"]
+    if True:
+"""
+# `C5` 的落點突變（矩陣外，`BLOCK 2` 的反例）：把暫存檔改回**暫存根**的散檔，
+# 其餘（清除）不動——故落點斷言轉 FAIL 而 `AC-5` 的殘留斷言仍 PASS，兩者分得開。
+P310_MUT_FLAT_OLD = """    work_root = Path(os.environ.get("TMPDIR", "/tmp")) / f"devflow-editbody-{issue}"
+    work_root.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix="run-", dir=work_root))
+    p = work / f"body-{issue}.md"
+"""
+P310_MUT_FLAT_NEW = """    work_root = Path(os.environ.get("TMPDIR", "/tmp"))
+    work = work_root
+    p = work_root / f"devflow-editbody-{issue}.md"
+"""
+P310_MUT_LATE_OLD = """    merged = _marker.preserve_state(old, new, detail=f"issue #{issue}")
+"""
+P310_MUT_LATE_NEW = """    merged = new
+"""
+P310_MUT_LATE_TAIL_OLD = """    same, diff = _marker.compare_state_lines(old, back)
+"""
+P310_MUT_LATE_TAIL_NEW = """    _marker.preserve_state(old, new, detail=f"issue #{issue}")
+    same, diff = _marker.compare_state_lines(old, back)
+"""
+
+
+# ── AC-3 edit-body 端到端 ───────────────────────────────────────────────────
+@case("#310 AC-3 edit-body 端到端：子程序順序、讀回比完整標記行、成功路徑 rc 0")
+def _p310_ac3():
+    r = _p310_run_edit_body(old_body=P310_OLD_ARCHIVED, new_body=P310_NEW_WS)
+    check("#310 AC-3 成功路徑 rc 0", r["rc"] == 0, r["detail"])
+    check("#310 AC-3(i) 呼叫順序為 view → edit → view（讀 old → 寫 → 讀回）",
+          [c.split(" ")[0] for c in r["calls"]] == ["view", "edit", "view"],
+          f"calls={r['calls']!r}\n{r['detail']}")
+    edit_call = [c for c in r["calls"] if c.startswith("edit ")]
+    check("#310 AC-3(i) `gh issue edit` 以 `-F` 吃一個暫存檔（檔名含單號）",
+          len(edit_call) == 1
+          and Path(edit_call[0].split(" ", 1)[1]).name == "body-310.md",
+          f"calls={r['calls']!r}")
+    written = r["written"] or ""
+    check("#310 AC-3(i) 寫進 forge 的 body 由 preserve_state 產出"
+          "（與函式層的輸出逐字相同）",
+          written == marker.preserve_state(P310_OLD_ARCHIVED, P310_NEW_WS),
+          f"實寫 {written!r}")
+    check("#310 AC-3 寫進 forge 的 body 保留了 old 的兩行完整標記",
+          _p310_lines(written) == ([P310_T], [P310_A_RIGHT]),
+          f"實得 {_p310_lines(written)!r}")
+    check("#310 AC-3 新內容逐字保留（new_body 是寫入內容的逐字前綴）",
+          written.startswith(P310_NEW_WS), f"實寫 {written!r}")
+    check("#310 AC-5 成功路徑：隔離 TMPDIR 內無暫存檔殘留",
+          r["leftovers"] == [], f"殘留 {r['leftovers']!r}")
+
+
+@case("#310 AC-3(iii) 讀回失配：rc 非零、stderr 印「結果未定」與兩組完整標記行")
+def _p310_ac3_mismatch():
+    # 讀回值與寫入前快照**只差 file=**（`T`、`A`、兩個 `NN` 全同）——第 6 列的 fixture
+    bad_back = P310_BODY + "\n" + P310_T + "\n" + P310_A_WRONG + "\n"
+    r = _p310_run_edit_body(old_body=P310_OLD_ARCHIVED, new_body=P310_NEW_PLAIN,
+                            readback=bad_back)
+    err = r["stderr"]
+    check("#310 AC-3(iii) rc 非零", r["rc"] != 0, r["detail"])
+    check("#310 AC-3(iii) stderr 印「結果未定」與單號", "結果未定" in err
+          and "#310" in err, r["detail"])
+    check("#310 AC-3(iii) stderr 印寫入前快照的完整標記行（兩行逐字）",
+          P310_T in err and P310_A_RIGHT in err, r["detail"])
+    check("#310 AC-3(iii) stderr 印讀回現況的完整標記行（含 new 側的 file=）",
+          P310_A_WRONG in err, r["detail"])
+    check("#310 AC-3(iii) stderr 標明兩組的身分（寫入前快照／讀回現況）",
+          "寫入前快照" in err and "讀回現況" in err, r["detail"])
+    # 處置：停下交人。**不自動重送** ＝ 全程只有一次 issue edit；
+    # **不以舊 body 覆蓋** ＝ 唯一那次寫入的內容不是 old body。
+    check("#310 AC-3(iii) 不自動重送：`gh issue edit` 全程恰一次",
+          len([c for c in r["calls"] if c.startswith("edit ")]) == 1,
+          f"calls={r['calls']!r}")
+    check("#310 AC-3(iii) 不以舊 body 覆蓋：唯一那次寫入的內容不是 old body",
+          (r["written"] or "") != P310_OLD_ARCHIVED, f"實寫 {r['written']!r}")
+    check("#310 AC-3(iii) stderr 的處置字面載明停下交人、不重送、不以舊 body 覆蓋",
+          "停下交人" in err and "不自動重送" in err and "不以舊 body 覆蓋" in err,
+          r["detail"])
+    # ⚠ 讀回失配**不是**「合併成功但收尾失敗」，故處置不得引 `F4`（T 逐字要求）。
+    # 這是本入口的**永久**處置規範，不是一張單的 diff 限制。
+    check("#310 AC-3(iii) 處置不引 `F4`（它不是「合併成功但收尾失敗」）",
+          "結果未定" in err and "F4" not in err, r["detail"])
+    check("#310 AC-5 失配路徑：rc 非零但隔離 TMPDIR 內無暫存檔殘留",
+          r["leftovers"] == [], f"殘留 {r['leftovers']!r}")
+
+
+@case("#310 AC-3(ii)／矩陣第 6 列 讀回判準的鑑別力：只比 (T, A, NN) 會放行")
+def _p310_ac3_readback_power():
+    before = P310_OLD_ARCHIVED
+    after = P310_BODY + "\n" + P310_T + "\n" + P310_A_WRONG + "\n"
+    same_counts, _why = _p310_counts_judgment(before, after)
+    same_lines, diff = marker.compare_state_lines(before, after)
+    check("#310 矩陣第 6 列 缺陷判準（只比 (T, A, NN)）對「只改 file=」放行"
+          "（故該判準無鑑別力）",
+          same_counts is True, f"實得 {same_counts!r}")
+    check("#310 AC-3(ii) 受測判準（比完整標記行）擋下同一份 fixture",
+          same_lines is False, f"實得 {same_lines!r} {diff}")
+    check("#310 AC-3(ii) 受測判準對「完全未變」仍放行（非恆假）",
+          marker.compare_state_lines(before, before)[0] is True)
+    check("#310 矩陣第 6 列 對照：缺陷判準對「改 NN」仍擋下 → 缺陷只在 file= 這一支",
+          _p310_counts_judgment(before, P310_OLD_NN)[0] is False)
+    # (iv) 宣稱射程：lost update 的反例在字串層可重現——以舊快照覆蓋後，
+    # 讀回值與舊快照**逐字相同**（讀回 PASS），而並行寫者的封存標記已丟。
+    old_snapshot = P310_OLD_ACTIVE
+    concurrent = P310_OLD_ARCHIVED            # 另一寫者在這之後加了封存標記
+    written = marker.preserve_state(old_snapshot, P310_NEW_PLAIN)
+    check("#310 AC-3(iv) lost update 反例：以舊快照覆蓋後封存標記已丟",
+          _p310_lines(written) == ([P310_T], []), f"實得 {_p310_lines(written)!r}")
+    check("#310 AC-3(iv) 該情形的讀回（讀回值 vs 舊快照）仍 PASS → 偵測不到",
+          marker.compare_state_lines(old_snapshot, written)[0] is True)
+    check("#310 AC-3(iv) 對照：以真實前態比才看得出遺失（而本入口沒有真實前態）",
+          marker.compare_state_lines(concurrent, written)[0] is False)
+    doc = topic.edit_body.__doc__ or ""
+    for frag, why in (("不保證偵測所有 lost update", "射程第一句"),
+                      ("未採用條件更新", "非原子更新的來源"),
+                      ("不是原子更新", "非原子更新"),
+                      ("串行", "使用限制"),
+                      ("不引 `F4`", "處置不引 F4")):
+        check(f"#310 AC-3(iv) edit_body 的 docstring 載「{frag}」（{why}）",
+              frag in doc, doc[:400])
+
+
+@case("#310 AC-5 鑑別力：拿掉 try/finally 的突變複本在 gh 失敗時留下暫存檔")
+def _p310_ac5_mutation():
+    r = _p310_run_edit_body(old_body=P310_OLD_ACTIVE, new_body=P310_NEW_PLAIN,
+                            edit_rc=9)
+    check("#310 AC-5 受測實作：`gh issue edit` 失敗時 rc 非零",
+          r["rc"] != 0, r["detail"])
+    check("#310 AC-5 受測實作：`gh issue edit` 失敗時暫存檔仍被清掉",
+          r["leftovers"] == [], f"殘留 {r['leftovers']!r}\n{r['detail']}")
+    with tempfile.TemporaryDirectory() as td:
+        mut = _p310_mutant_copy(Path(td), "no-finally",
+                                P310_MUT_FINALLY_OLD, P310_MUT_FINALLY_NEW)
+        m = _p310_run_edit_body(old_body=P310_OLD_ACTIVE,
+                                new_body=P310_NEW_PLAIN, edit_rc=9, script=mut)
+        check("#310 AC-5 鑑別力：突變複本（無 try/finally）在同一路徑留下暫存檔",
+              len(m["leftovers"]) == 1
+              and m["leftovers"][0].endswith("body-310.md"),
+              f"殘留 {m['leftovers']!r}\n{m['detail']}")
+
+
+# ── C5 落點：本單產生的檔案落在該單專屬子目錄，且只清本次產物（`BLOCK 2`）────
+# 舊 G `C5`（`WORKFLOW.md:99` @ `a78d806`）逐字：「本單執行期間產生的檔案一律落在
+# 該單的專屬子目錄之下」。`AC-5` 問的是「有沒有清掉」，`C5` 問的是「落在哪裡」——
+# 兩者是**不同**的義務，故判準分開寫，下方的落點突變也刻意只動落點、不動清除，
+# 證明兩條斷言各自在抓自己那一件事（`R1` 第 1 輪 `BLOCK 2`、裁決位 2026-10-13
+# https://github.com/AugustusHsu/agent-devflow/pull/311#issuecomment-6152603362 ）。
+P310_OWN_DIR = "devflow-editbody-310"
+
+
+def _p310_landing_ok(edit_path, tmp_root, issue: str = "310") -> bool:
+    """`C5` 的落點判準本體（現況與突變複本共用同一支）。
+
+    三項同時成立才算在位：`-F` 的檔案**不在暫存根**、其祖先中有一個**以單號命名
+    的專屬子目錄**、且整條路徑仍在該次執行的暫存根底下（沒有跑到別處去）。
+    """
+    if not edit_path:
+        return False
+    p, root = Path(edit_path), Path(tmp_root)
+    return (p.parent != root
+            and f"devflow-editbody-{issue}" in [a.name for a in p.parents]
+            and root in p.parents)
+
+
+@case("#310 C5 落點：暫存檔落該單專屬子目錄，三條路徑用畢皆不殘留")
+def _p310_c5_landing():
+    bad_back = P310_BODY + "\n" + P310_T + "\n" + P310_A_WRONG + "\n"
+    paths = (
+        ("成功路徑", dict(old_body=P310_OLD_ARCHIVED, new_body=P310_NEW_WS)),
+        ("讀回失配路徑", dict(old_body=P310_OLD_ARCHIVED,
+                             new_body=P310_NEW_PLAIN, readback=bad_back)),
+        ("gh 失敗路徑", dict(old_body=P310_OLD_ACTIVE,
+                             new_body=P310_NEW_PLAIN, edit_rc=9)),
+    )
+    for label, kw in paths:
+        r = _p310_run_edit_body(**kw)
+        check(f"#310 C5 {label}：`-F` 的暫存檔不在暫存根、落在以單號命名的專屬子目錄",
+              _p310_landing_ok(r["edit_path"], r["tmp_root"]),
+              f"-F 路徑={r['edit_path']!r}\n        暫存根={r['tmp_root']!r}")
+        check(f"#310 C5 {label}：該單專屬子目錄名為 `{P310_OWN_DIR}`",
+              bool(r["edit_path"])
+              and P310_OWN_DIR in [a.name for a in Path(r["edit_path"]).parents],
+              f"-F 路徑={r['edit_path']!r}")
+        check(f"#310 C5 {label}：用畢暫存根內無殘留檔與殘留目錄",
+              r["leftovers"] == [] and r["leftdirs"] == [],
+              f"殘留檔={r['leftovers']!r} 殘留目錄={r['leftdirs']!r}\n{r['detail']}")
+
+
+@case("#310 C5 鑑別力：落點改回暫存根的突變複本 → 落點斷言 FAIL（清除斷言仍 PASS）")
+def _p310_c5_landing_mutation():
+    with tempfile.TemporaryDirectory() as td:
+        mut = _p310_mutant_copy(Path(td), "flat-tmp",
+                                P310_MUT_FLAT_OLD, P310_MUT_FLAT_NEW)
+        m = _p310_run_edit_body(old_body=P310_OLD_ARCHIVED,
+                                new_body=P310_NEW_PLAIN, script=mut)
+        check("#310 C5 鑑別力：突變複本把暫存檔直接放在暫存根 → 落點斷言 FAIL",
+              _p310_landing_ok(m["edit_path"], m["tmp_root"]) is False,
+              f"-F 路徑={m['edit_path']!r}\n        暫存根={m['tmp_root']!r}")
+        check("#310 C5 鑑別力：突變複本的 `-F` 檔父目錄就是暫存根（散檔）",
+              bool(m["edit_path"])
+              and Path(m["edit_path"]).parent == Path(m["tmp_root"]),
+              f"-F 路徑={m['edit_path']!r}")
+        # 對照：同一個突變**仍會清掉**那個檔——故「清除」與「落點」是兩條獨立的斷言，
+        # 只驗清除的判準對 `C5` 沒有鑑別力。
+        check("#310 C5 鑑別力 對照：突變複本仍清掉暫存檔（只驗清除抓不到落點問題）",
+              m["leftovers"] == [] and m["rc"] == 0,
+              f"殘留={m['leftovers']!r} rc={m['rc']}\n{m['detail']}")
+        r = _p310_run_edit_body(old_body=P310_OLD_ARCHIVED,
+                                new_body=P310_NEW_PLAIN)
+        check("#310 C5 鑑別力 對照：受測實作在同一 fixture 下落點斷言 PASS（非恆假）",
+              _p310_landing_ok(r["edit_path"], r["tmp_root"]) is True,
+              f"-F 路徑={r['edit_path']!r}")
+
+
+@case("#310 C5 只清本次產物：專屬子目錄內既有的「其他輪工作檔」跑完仍在")
+def _p310_c5_keeps_foreign():
+    r = _p310_run_edit_body(old_body=P310_OLD_ARCHIVED, new_body=P310_NEW_PLAIN,
+                            seed_other=True)
+    check("#310 C5 只清本次產物：成功路徑 rc 0", r["rc"] == 0, r["detail"])
+    check("#310 C5 只清本次產物：預先放入的「其他輪工作檔」跑完仍存在"
+          "（收尾不以 rmtree 清整個專屬子目錄）",
+          r["seed_survived"] is True,
+          f"種入 {r['seed_path']!r}\n        殘留檔={r['leftovers']!r}")
+    check("#310 C5 只清本次產物：殘留的恰是那個外來檔，本次產物已清掉",
+          r["leftovers"] == [f"{P310_OWN_DIR}/other-round-work.md"],
+          f"殘留檔={r['leftovers']!r}")
+    check("#310 C5 只清本次產物：本次執行開的目錄已移除，只剩該單專屬子目錄",
+          r["leftdirs"] == [P310_OWN_DIR],
+          f"殘留目錄={r['leftdirs']!r}")
+    check("#310 C5 只清本次產物：該次的 `-F` 檔仍落在專屬子目錄下（落點不因此改變）",
+          _p310_landing_ok(r["edit_path"], r["tmp_root"]),
+          f"-F 路徑={r['edit_path']!r}")
+    # gh 失敗路徑同樣不得動到外來檔（失敗路徑才是最容易寫成 rmtree 的那條）
+    f = _p310_run_edit_body(old_body=P310_OLD_ACTIVE, new_body=P310_NEW_PLAIN,
+                            edit_rc=9, seed_other=True)
+    check("#310 C5 只清本次產物：`gh` 失敗路徑亦不動外來檔",
+          f["seed_survived"] is True
+          and f["leftovers"] == [f"{P310_OWN_DIR}/other-round-work.md"],
+          f"殘留檔={f['leftovers']!r}\n{f['detail']}")
+
+
+# ── AC-4 raise 時不動 forge（哨兵檔反證）────────────────────────────────────
+@case("#310 AC-4 InvalidMarker／StateIntroduced 時不動 forge（哨兵檔反證）")
+def _p310_ac4():
+    cases = (
+        ("old T>1（InvalidMarker）", P310_OLD_T2, P310_NEW_PLAIN, "INVALID"),
+        ("new 偷渡分區標記（StateIntroduced）", P310_OLD_NONE, P310_NEW_T,
+         "拒絕寫入"),
+        ("new 偷渡封存標記（StateIntroduced）", P310_OLD_ACTIVE, P310_NEW_A,
+         "拒絕寫入"),
+        ("new 自身 A>1（InvalidMarker）", P310_OLD_ARCHIVED, P310_NEW_A2,
+         "INVALID"),
+    )
+    for label, old, new, frag in cases:
+        r = _p310_run_edit_body(old_body=old, new_body=new)
+        check(f"#310 AC-4 {label} → rc 非零", r["rc"] != 0, r["detail"])
+        check(f"#310 AC-4 {label} → stderr 含「{frag}」",
+              frag in r["stderr"], r["detail"])
+        check(f"#310 AC-4 {label} → 哨兵檔不存在：`gh issue edit` 未被呼叫",
+              r["edit_called"] is False,
+              r["detail"] + (f"\n哨兵內容：{r['written']!r}" if r["written"] else ""))
+        check(f"#310 AC-4 {label} → 呼叫序列只有讀（無 edit）",
+              [c.split(" ")[0] for c in r["calls"]] == ["view"],
+              f"calls={r['calls']!r}")
+        check(f"#310 AC-5 {label} → 暫存檔未被產生（raise 在寫檔之前）",
+              r["leftovers"] == [], f"殘留 {r['leftovers']!r}")
+
+
+@case("#310 AC-4 鑑別力／矩陣第 5 列：raise 搬到 gh issue edit 之後 → 哨兵檔出現")
+def _p310_ac4_mutation():
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        mut = _p310_mutant_copy(td, "late-preserve",
+                                P310_MUT_LATE_OLD, P310_MUT_LATE_NEW)
+        src = mut.read_text()
+        assert P310_MUT_LATE_TAIL_OLD in src, "矩陣第 5 列：第二處切點的字面已變"
+        mut.write_text(src.replace(P310_MUT_LATE_TAIL_OLD,
+                                   P310_MUT_LATE_TAIL_NEW, 1))
+        m = _p310_run_edit_body(old_body=P310_OLD_NONE, new_body=P310_NEW_T,
+                                script=mut)
+        check("#310 矩陣第 5 列 突變複本把偷渡的 body 寫進 forge（哨兵檔存在）"
+              "→ AC-4 FAIL",
+              m["edit_called"] is True,
+              f"calls={m['calls']!r}\n{m['detail']}")
+        check("#310 矩陣第 5 列 突變複本寫進去的 body 帶著偷渡的分區標記",
+              _p310_lines(m["written"] or "")[0] == [P310_T],
+              f"實寫 {m['written']!r}")
+        check("#310 矩陣第 5 列 對照：受測實作在同一 fixture 下哨兵檔不存在"
+              "（判準非恆真）",
+              _p310_run_edit_body(old_body=P310_OLD_NONE,
+                                  new_body=P310_NEW_T)["edit_called"] is False)
+
+
+# ── AC-6 限制聲明的位置斷言 ────────────────────────────────────────────────
+# 判準是**正向 ＋ 位置**：聲明整行須在**指定的節／表格列**內。
+#   * 刪除 → FAIL；搬到無關節／無關列 → FAIL（故全檔搜尋的判準不堪用，下方有對照）。
+#   * 文中另有誠實的否定說明、或引用錯誤宣稱當反例 → **仍 PASS**（故不用全檔禁詞，
+#     那會誤殺誠實的說明——`#310` 原型 I 組已實證）。
+P310_DISCLAIMER = ("**已知限制（不得略）**：`gh api -X PATCH`、GitHub Web UI 與"
+                   "任何不經本入口的寫入無法攔截；本入口未採用條件更新，"
+                   "不是原子更新。")
+P310_NO_SCAN = "掃描不存在，它不是讀回或比較的前提"
+P310_README_HEAD = r"body 寫入保留狀態標記"
+P310_MD_ROW_HEAD = "| body 寫入保留狀態標記 |"
+
+
+def _p310_md_rows(md: str) -> list[str]:
+    return [ln for ln in md.splitlines() if ln.startswith(P310_MD_ROW_HEAD)]
+
+
+def _p310_section(text: str, head_re: str) -> str:
+    """切出 `^##+ <head_re>` 到下一個**同級或更高級標題**之間的節文（不含標題行）。
+
+    與上方 `_p306_section` 的差別**只有一處**：本函式跳過 ``` 圍欄內的行。
+    理由：本節含一段 `bash` 範例，其 shell 註解以 `# ` 起頭，`_p306_section`
+    會把它當成 markdown 的一級標題而提早結束切段——節文被截短後，節內的斷言
+    對「聲明還在不在」就失去意義（它會變成「聲明在不在節的前半段」）。
+    這是收窄而非放寬：圍欄外的標題一律照算。
+    """
+    lines = text.splitlines()
+    start, level, fenced = None, 0, False
+    for i, ln in enumerate(lines):
+        if ln.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if not fenced and re.match(rf"^##+ .*{head_re}", ln):
+            start = i
+            level = len(ln) - len(ln.lstrip("#"))
+            break
+    if start is None:
+        return ""
+    body, fenced = [], False
+    for ln in lines[start + 1:]:
+        if ln.lstrip().startswith("```"):
+            fenced = not fenced
+        elif not fenced:
+            m = re.match(r"^(#+) ", ln)
+            if m and len(m.group(1)) <= level:
+                break
+        body.append(ln)
+    return "\n".join(body)
+
+
+def _p310_md_ok(md: str) -> bool:
+    """`AC-6`(i) 的判準本體：聲明整行須在**那一列**內（現況與反例共用同一支）。"""
+    rows = _p310_md_rows(md)
+    return len(rows) == 1 and P310_DISCLAIMER in rows[0]
+
+
+def _p310_readme_ok(text: str) -> bool:
+    """`AC-6`(ii) 的判準本體：聲明整行須在**指定小節**內（節文以標題層級切）。"""
+    sect = _p310_section(text, P310_README_HEAD)
+    return any(ln.strip() == "- " + P310_DISCLAIMER for ln in sect.splitlines())
+
+
+def _p310_whole_file_ok(text: str) -> bool:
+    """對照用的**缺陷判準**：只掃全檔。搬到無關節／無關列時它會誤判 PASS。"""
+    return P310_DISCLAIMER in text
+
+
+@case("#310 AC-6 限制聲明在位：telegram.md 的新格與 scripts/telegram/README.md 的小節")
+def _p310_ac6():
+    md = TG_MD.read_text()
+    rd = TG_SCRIPTS_README.read_text()
+    rows = _p310_md_rows(md)
+    check("#310 AC-6(i) telegram.md 有恰一格「body 寫入保留狀態標記」"
+          "（單行、`|` 分欄）",
+          len(rows) == 1, f"命中 {len(rows)} 行")
+    check("#310 AC-6(i) 該列的限制欄內有字面固定的聲明（整行比對）",
+          _p310_md_ok(md), rows[0][-400:] if rows else "")
+    check("#310 AC-6(iv) 該列明寫掃描不存在（不得把事後掃描寫成現有的機械保證）",
+          bool(rows) and P310_NO_SCAN in rows[0], rows[0][-400:] if rows else "")
+    if rows:
+        row = rows[0]
+        for frag, why in (("edit-body", "入口名"),
+                          ("preserve_state", "保存的實作"),
+                          ("compare_state_lines", "AC-9 的通用比較"),
+                          ("唯讀", "AC-9 的宣稱"),
+                          ("不自動修復", "AC-9 的宣稱"),
+                          ("不綁入口", "AC-9 不要求來自本入口"),
+                          ("結果未定", "讀回失配的處置"),
+                          ("不自動重送", "讀回失配的處置"),
+                          ("不以舊 body 覆蓋", "讀回失配的處置"),
+                          ("不保證偵測所有 lost update", "§6.2 的限制"),
+                          ("串行", "§6.2 的使用限制"),
+                          ("刻意豁免", "狀態遷移的例外"),
+                          ("G4", "位階指向 README"),
+                          ("forge 側零實跑", "R9 的狀態理由"),
+                          ("驗證未達 `✅`", "R9 子類"),
+                          ("3.12.3", "R10 受測環境的 python"),
+                          ("2026-10-13", "R10 的首次驗證＝最近確認"),
+                          ("哨兵", "程式層證據：不動 forge 的反證")):
+            check(f"#310 AC-6(i) 新格載「{frag}」（{why}）", frag in row,
+                  row[:200])
+        status = row.split(" | ")[-1]
+        check("#310 AC-6(i) 新格的狀態欄為 📝（依 `R9`，forge 側零實跑不得標 ✅）",
+              status.startswith("📝") and "✅ 可用" not in status,
+              status[:200])
+    check("#310 AC-6(ii) README 的指定小節內有對應的聲明行",
+          _p310_readme_ok(rd), repr(_p310_section(rd, P310_README_HEAD)[:300]))
+    sect = _p310_section(rd, P310_README_HEAD)
+    check("#310 AC-6(ii) 該小節的節文非空（否則節內檢查空轉）",
+          len(sect.strip()) >= 500, f"{len(sect.strip())} 字")
+    for frag, why in (("唯讀、可重跑、不自動修復", "AC-9 的宣稱"),
+                      ("不綁入口", "AC-9 不要求來自本入口"),
+                      (P310_NO_SCAN, "AC-6(iv)"),
+                      ("`G4` 逐字", "位階表引條文原文"),
+                      ("**必需**", "滿足 G4 的那幾項"),
+                      ("**建議**", "未滿足 G4 的那幾項"),
+                      ("升級條件", "建議項的升級條件"),
+                      ("不得以「降為建議」替代漏做", "§7.2 第三條禁止")):
+        check(f"#310 AC-6(ii)／`G4` README 小節載「{frag}」（{why}）",
+              frag in sect, sect[:300])
+
+
+@case("#310 AC-6(iii)／矩陣第 7 列 鑑別力：刪除與搬到無關節／無關列皆 FAIL")
+def _p310_ac6_mutations():
+    md = TG_MD.read_text()
+    rd = TG_SCRIPTS_README.read_text()
+    check("#310 AC-6(iii) 現況過判準（兩檔皆 PASS，判準非恆假）",
+          _p310_md_ok(md) and _p310_readme_ok(rd), "")
+    # ① 刪除
+    md_del = md.replace(P310_DISCLAIMER, "", 1)
+    rd_del = rd.replace("- " + P310_DISCLAIMER + "\n", "", 1)
+    check("#310 矩陣第 7 列 telegram.md 刪掉聲明 → 判準 FAIL",
+          _p310_md_ok(md_del) is False, "")
+    check("#310 矩陣第 7 列 README 刪掉聲明 → 判準 FAIL",
+          _p310_readme_ok(rd_del) is False, "")
+    # ② 搬到無關列／無關節（字面還在檔內，位置錯了）
+    other_rows = [ln for ln in md.splitlines() if ln.startswith("| 分區探活 |")]
+    check("#310 矩陣第 7 列 變異可施作（telegram.md 有「分區探活」那一列當落點）",
+          len(other_rows) == 1, f"命中 {len(other_rows)} 行")
+    if other_rows:
+        md_moved = md_del.replace(other_rows[0],
+                                  other_rows[0] + " " + P310_DISCLAIMER, 1)
+        check("#310 矩陣第 7 列 telegram.md 聲明搬到無關列 → 判準 FAIL（位置被斷言）",
+              _p310_md_ok(md_moved) is False, "")
+        check("#310 矩陣第 7 列 對照：只掃全檔的缺陷判準對同一變異誤判 PASS",
+              _p310_whole_file_ok(md_moved) is True, "")
+    rd_moved = rd_del.replace("## 驗證\n", "## 驗證\n\n- " + P310_DISCLAIMER + "\n", 1)
+    check("#310 矩陣第 7 列 README 聲明搬到無關節 → 判準 FAIL（位置被斷言）",
+          _p310_readme_ok(rd_moved) is False, "")
+    check("#310 矩陣第 7 列 對照：只掃全檔的缺陷判準對 README 的同一變異誤判 PASS",
+          _p310_whole_file_ok(rd_moved) is True, "")
+
+
+@case("#310 矩陣第 7b 列 不誤殺：文中另有否定說明或引用錯誤宣稱當反例 → 仍 PASS")
+def _p310_ac6_no_false_kill():
+    md, rd = TG_MD.read_text(), TG_SCRIPTS_README.read_text()
+    honest = ("\n> 反例引用：曾有人寫「保證標記不會被抹除」，那是錯的宣稱；"
+              "本工具**不**保證標記不會被抹除。\n")
+    check("#310 矩陣第 7b 列 README 另加誠實的否定說明與錯誤宣稱的引用 → 仍 PASS",
+          _p310_readme_ok(rd + honest) is True, "")
+    md_rows = _p310_md_rows(md)
+    md_quote = md + honest
+    check("#310 矩陣第 7b 列 telegram.md 另加同樣的反例引用 → 仍 PASS",
+          _p310_md_ok(md_quote) is True and len(_p310_md_rows(md_quote)) == 1,
+          f"命中 {len(md_rows)} 行")
+    check("#310 矩陣第 7b 列 對照：全檔禁詞的判準會誤殺這段誠實說明（故不採用）",
+          "保證標記不會被抹除" in honest, "")
+
+
+def _p310_readme_c5_ok(text: str) -> bool:
+    """`C5` 在 README 示例上的判準本體（現況與兩個突變共用同一支）。
+
+    五項同時成立：(1) 開一個以單號命名的專屬工作目錄；(2) 先 `mkdir -p`；
+    (3) 每個 `gh issue view` 的輸出都寫在該目錄底下；(4) 附清除步驟；
+    (5) 沒有任何一行把 before／after 寫在暫存根（`/tmp` 根）。
+    """
+    sect = _p310_section(text, P310_README_HEAD)
+    lines = [ln.strip() for ln in sect.splitlines()]
+    has_dir = any(ln.startswith("WORK=") and "devflow-statecheck-" in ln
+                  for ln in lines)
+    has_mkdir = any(ln == 'mkdir -p "$WORK"' for ln in lines)
+    views = [ln for ln in lines if ln.startswith("gh issue view")]
+    under_work = bool(views) and all('"$WORK/' in ln for ln in views)
+    has_cleanup = any(ln.startswith('rm -rf "$WORK"') for ln in lines)
+    flat = [ln for ln in lines
+            if "/tmp/before.md" in ln or "/tmp/after.md" in ln]
+    return has_dir and has_mkdir and under_work and has_cleanup and not flat
+
+
+@case("#310 C5 README 示例：工作檔落專屬子目錄並附清除步驟（兩種突變皆 FAIL）")
+def _p310_c5_readme():
+    rd = TG_SCRIPTS_README.read_text()
+    check("#310 C5 README 示例過判準（現況 PASS，判準非恆假）",
+          _p310_readme_c5_ok(rd),
+          repr(_p310_section(rd, P310_README_HEAD)[:400]))
+    sect = _p310_section(rd, P310_README_HEAD)
+    for frag, why in (("`C5`", "條文依據"),
+                      ("該單專屬子目錄", "落點的說法"),
+                      ('rm -rf "$WORK"', "清除步驟"),
+                      ("比較器本身唯讀、不會替你清檔", "清檔責任在呼叫者")):
+        check(f"#310 C5 README 示例載「{frag}」（{why}）", frag in sect, sect[:300])
+    # 突變①：把 before／after 的路徑改回暫存根的散檔（＝ `R1` 第 1 輪指出的原狀）
+    flat = rd.replace('> "$WORK/before.md"', "> /tmp/before.md", 1) \
+             .replace('> "$WORK/after.md"', "> /tmp/after.md", 1)
+    check("#310 C5 README 鑑別力：示例改回 `/tmp` 根的散檔 → 判準 FAIL",
+          _p310_readme_c5_ok(flat) is False, "")
+    # 突變②：刪掉清除步驟（落點對了但沒清）
+    nocl = rd.replace('rm -rf "$WORK"', "", 1)
+    check("#310 C5 README 鑑別力：刪掉清除步驟 → 判準 FAIL",
+          _p310_readme_c5_ok(nocl) is False, "")
+
+
+# ── AC-7 既有行為一字不變（AST）＋ 矩陣第 8 列 ──────────────────────────────
+P310_BASE = "a78d806"            # 本單的 base（`#309` 合併後的 main）
+
+
+def _p310_funcs(src: str) -> dict:
+    import ast
+    return {n.name: ast.dump(n) for n in ast.parse(src).body
+            if isinstance(n, ast.FunctionDef)}
+
+
+def _p310_calls_in(src: str, func: str) -> set:
+    """`func` 的函式體內**所有被呼叫的名字**（`f()` 的 `f`、`m.f()` 的 `f`）。
+
+    `AC-7` 的機械判準：`preserve_state` 不得出現在 `_to_forge`／`cmd_archive`
+    的呼叫集合裡——保存義務對合法狀態遷移刻意豁免，插進去等於禁止 `ensure`
+    ／`archive` 改標記（與 `AC-7` 自相矛盾，矩陣第 8 列）。
+    走 AST 而非字串搜尋：註解或 docstring 提到該名字不算呼叫。
+    """
+    import ast
+    out = set()
+    for node in ast.parse(src).body:
+        if not (isinstance(node, ast.FunctionDef) and node.name == func):
+            continue
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Call):
+                f = sub.func
+                if isinstance(f, ast.Name):
+                    out.add(f.id)
+                elif isinstance(f, ast.Attribute):
+                    out.add(f.attr)
+    return out
+
+
+@case("#310 AC-7 既有兩個 marker-aware 入口的 AST 與 base 相同、呼叫集合不含保存層")
+def _p310_ac7():
+    old_topic = subprocess.run(
+        ["git", "show",
+         f"{P310_BASE}:devflow/channels/scripts/telegram/devflow_topic.py"],
+        capture_output=True, text=True, cwd=REPO).stdout
+    old_archive = subprocess.run(
+        ["git", "show",
+         f"{P310_BASE}:devflow/channels/scripts/telegram/devflow_archive.py"],
+        capture_output=True, text=True, cwd=REPO).stdout
+    ok_t = check(f"#310 AC-7 取得 base（{P310_BASE}）的 devflow_topic.py",
+                 bool(old_topic.strip()), "git show 無輸出（該 commit 不可達）")
+    ok_a = check(f"#310 AC-7 取得 base（{P310_BASE}）的 devflow_archive.py",
+                 bool(old_archive.strip()), "git show 無輸出（該 commit 不可達）")
+    if not (ok_t and ok_a):
+        return
+    o, n = _p310_funcs(old_topic), _p310_funcs(TOPIC_SRC)
+    for name in ("_to_forge", "_from_forge", "ensure", "close", "sync"):
+        check(f"#310 AC-7 devflow_topic.py 的 {name} 的 AST 與 base 相同",
+              name in o and name in n and o[name] == n[name],
+              f"base 有={name in o} 現有={name in n}")
+    oa, na = _p310_funcs(old_archive), _p310_funcs(ARCHIVE_SRC)
+    check("#310 AC-7 devflow_archive.py 的 cmd_archive 的 AST 與 base 相同",
+          "cmd_archive" in oa and "cmd_archive" in na
+          and oa["cmd_archive"] == na["cmd_archive"],
+          f"base 有={'cmd_archive' in oa} 現有={'cmd_archive' in na}")
+    check("#310 AC-7 devflow_archive.py 全檔函式的 AST 與 base 逐一相同"
+          "（本族不碰封存那支）",
+          oa == na, f"差異 {sorted(k for k in oa.keys() | na.keys() if oa.get(k) != na.get(k))!r}")
+    om, nm = _p310_funcs(old_topic), _p310_funcs(TOPIC_SRC)
+    check("#310 AC-7 devflow_topic.py 既有函式一個都沒被移除",
+          set(om) <= set(nm), f"缺 {sorted(set(om) - set(nm))!r}")
+    # 既有 upsert_* 的 AST 亦與 base 相同（`_marker.py` 只**新增**公開 API）
+    old_marker = subprocess.run(
+        ["git", "show", f"{P310_BASE}:devflow/channels/scripts/telegram/_marker.py"],
+        capture_output=True, text=True, cwd=REPO).stdout
+    if check(f"#310 AC-7 取得 base（{P310_BASE}）的 _marker.py",
+             bool(old_marker.strip()), "git show 無輸出"):
+        omk, nmk = _p310_funcs(old_marker), _p310_funcs(MARKER_SRC)
+        same = {k: omk[k] == nmk.get(k) for k in omk}
+        check("#310 AC-7 _marker.py 既有函式的 AST 與 base 逐一相同"
+              "（本單只新增公開 API）",
+              all(same.values()),
+              f"相異 {sorted(k for k, v in same.items() if not v)!r}")
+        added = sorted(set(nmk) - set(omk))
+        check("#310 AC-9(iii) 新增的函式含 preserve_state 與 compare_state_lines"
+              "（下界形式，非等號）",
+              {"preserve_state", "compare_state_lines"} <= set(added),
+              f"新增 {added!r}")
+
+
+@case("#310 矩陣第 8 列 `_to_forge`／`cmd_archive` 的呼叫集合不含 preserve_state")
+def _p310_ac7_matrix8():
+    for src, func, label in ((TOPIC_SRC, "_to_forge", "devflow_topic.py"),
+                             (ARCHIVE_SRC, "cmd_archive", "devflow_archive.py")):
+        calls = _p310_calls_in(src, func)
+        check(f"#310 矩陣第 8 列 {label} 的 {func} 呼叫集合內沒有 preserve_state"
+              f"（AST；狀態遷移刻意豁免）",
+              "preserve_state" not in calls, f"呼叫集合 {sorted(calls)!r}")
+        check(f"#310 矩陣第 8 列 對照：{func} 的呼叫集合非空（AST 判定沒有空轉）",
+              len(calls) > 0, f"呼叫集合 {sorted(calls)!r}")
+    # 鑑別力：把誤用插進 `_to_forge` 的突變源碼，同一支判定須命中。
+    mutated = TOPIC_SRC.replace(
+        '    body = _marker.upsert_topic(body, thread_id, detail=f"issue #{issue}")',
+        '    body = _marker.upsert_topic(body, thread_id, detail=f"issue #{issue}")\n'
+        '    body = _marker.preserve_state(body, body, detail=f"issue #{issue}")', 1)
+    assert mutated != TOPIC_SRC, "矩陣第 8 列：突變的目標字面已變，鑑別力失效"
+    check("#310 矩陣第 8 列 鑑別力：把 preserve_state 插進 `_to_forge` 的突變源碼"
+          "→ 同一支判定命中（AC-7 FAIL）",
+          "preserve_state" in _p310_calls_in(mutated, "_to_forge"),
+          f"突變後的呼叫集合 {sorted(_p310_calls_in(mutated, '_to_forge'))!r}")
+    check("#310 矩陣第 8 列 鑑別力：突變只影響 `_to_forge`，`sync` 的呼叫集合不變",
+          _p310_calls_in(mutated, "sync") == _p310_calls_in(TOPIC_SRC, "sync"))
+
+
+# ── AC-8 條文義務本身（完整義務句 ＋ 位置 ＋ 四種突變）──────────────────────
+# 判準刻意**不是**「規則 ID 存在」「四個關鍵詞出現」或「整套測試全綠」：
+#   * 關鍵詞判準被**否定句**打敗——「本條不要求保留、不必讀回、不需串行，且不得報
+#     結果未定」含全部四個關鍵詞，仍 PASS。下方有一條對照專門證明這件事。
+#   * 故改為**四句完整句的逐字比對**，且**只在 `CH3` 段內**找（搬到 `CH1` 不算）。
+# 切段：自 `- \`CH3\`` 起，至下一個 `- \`` 條目／下一個 `## ` 節標題／檔尾。
+# ⚠ **不可**用 `^- \`CH` 當結束錨——`CH3` 是第 13 節最後一個 `CH` 條目，那樣切出
+# 長度 0（T 的 `AC-8`(i) 逐字警告）。下方有一條對照把這件事釘住。
+P310_S_PRESERVE = "對 issue body 的非狀態遷移的一般修訂須保留該單現行的合法狀態標記"
+P310_S_SCOPE = ("`ensure`／`archive` 等合法狀態遷移不受保存義務約束，"
+                "其正確性依 `channels/` 對照表的通道判準驗預期的新狀態")
+P310_S_READBACK = ("寫入後須讀回並逐字比對完整標記行，不符即停下並報「結果未定」、"
+                   "讀回現況，不自動重送、不以舊 body 覆蓋")
+P310_S_SERIAL = "同一 issue 的 body 寫入須串行"
+P310_SENTENCES = ((P310_S_PRESERVE, "保存義務（限定射程）"),
+                  (P310_S_SCOPE, "適用範圍／例外"),
+                  (P310_S_READBACK, "讀回義務"),
+                  (P310_S_SERIAL, "串行前提"))
+P310_KEYWORDS = ("保留", "讀回", "結果未定", "串行")
+P310_NEGATED = ("本條不要求保留既有標記、不必讀回、不需串行，且不得報結果未定。")
+P310_UNIVERSAL = "對 issue body 的任何寫入都須保留舊標記不變"
+
+
+def _p310_slice_ch3(doc: str) -> str:
+    """切出 `CH3` 那一段（含其續行）。"""
+    m = re.search(r"^- `CH3`.*?(?=^- `|^## |\Z)", doc, re.S | re.M)
+    return m.group(0) if m else ""
+
+
+def _p310_ch3_ok(doc: str) -> bool:
+    """`AC-8`(i) 的判準本體：四句**完整句**須都在 `CH3` 段內（現況與突變共用）。"""
+    seg = _p310_slice_ch3(doc)
+    return bool(seg) and all(s in seg for s, _why in P310_SENTENCES)
+
+
+def _p310_keyword_ok(doc: str) -> bool:
+    """對照用的**缺陷判準**：只看四個關鍵詞。否定句含全部四詞，故它會誤判 PASS。"""
+    seg = _p310_slice_ch3(doc)
+    return bool(seg) and all(k in seg for k in P310_KEYWORDS)
+
+
+@case("#310 AC-8 WORKFLOW.md 的 CH3 段內含四句完整義務句（逐句字面比對）")
+def _p310_ac8():
+    doc = WORKFLOW_MD.read_text()
+    seg = _p310_slice_ch3(doc)
+    check("#310 AC-8(i) CH3 段切得出來且非空（否則段內檢查空轉）",
+          len(seg.strip()) >= 200, f"{len(seg.strip())} 字")
+    check("#310 AC-8(i) CH3 段止於第 14 節之前（切段的結束錨有效）",
+          "## 14." not in seg and "- `CH1`" not in seg, seg[-200:])
+    for sentence, why in P310_SENTENCES:
+        check(f"#310 AC-8(i) CH3 段內逐字載「{why}」那一句", sentence in seg,
+              f"缺句：{sentence}\n--- 段文尾段 ---\n{seg[-400:]}")
+    check("#310 AC-8(i) 現況過判準（判準非恆假）", _p310_ch3_ok(doc), "")
+    # 保存義務**不得**寫成無限制的全稱句（那會禁止 `ensure`／`archive` 改標記）
+    check("#310 AC-8 CH3 段內沒有無限制的全稱句（它與 AC-7 矛盾）",
+          P310_UNIVERSAL not in seg, seg[-400:])
+    # 兩個已知限制（§6.1／§6.2）寫進條文，引用者不得略
+    for frag, why in (("不是原子更新", "§6.1"),
+                      ("未採用條件更新", "§6.1"),
+                      ("不保證偵測所有 lost update", "§6.2")):
+        check(f"#310 AC-8 CH3 段內載限制「{frag}」（{why}）", frag in seg,
+              seg[-600:])
+    check("#310 AC-8 條文不宣稱 forge 的 API 是否提供條件更新機制（未實測）",
+          "不**宣稱 forge 的 API 是否提供該機制" in seg
+          or "不宣稱 forge 的 API 是否提供該機制" in seg, seg[-600:])
+    # ⚠ 對照：以 `^- \`CH` 當**唯一**的結束錨會切不出東西——`CH3` 是第 13 節最後
+    # 一個 `CH` 條目，後面沒有任何 `^- \`CH` 行，`re.search` 因此回 `None`
+    # ＝段文長度 0（T 的 `AC-8`(i) 逐字警告）。受測的切法另有 `^## ` 與 `\Z`
+    # 兩個結束錨，故切得出來——這條把兩者的差別釘住。
+    bad = re.search(r"^- `CH3`.*?(?=^- `CH)", doc, re.S | re.M)
+    check("#310 AC-8(i) 對照：以 `^- `CH` 當唯一結束錨切不出 CH3 段（長度 0）",
+          bad is None and len(seg) > 0,
+          f"實得 {None if bad is None else len(bad.group(0))}"
+          f"（受測切法 {len(seg)} 字）")
+
+
+@case("#310 AC-8(ii)／矩陣第 11／12／14 列 四種突變皆 FAIL（關鍵詞判準則會誤判）")
+def _p310_ac8_mutations():
+    doc = WORKFLOW_MD.read_text()
+    seg = _p310_slice_ch3(doc)
+    # ① 刪除任一句
+    for sentence, why in P310_SENTENCES:
+        mut = doc.replace(sentence, "", 1)
+        check(f"#310 AC-8(ii)① 刪除「{why}」那一句 → 判準 FAIL",
+              _p310_ch3_ok(mut) is False, "")
+    # ② 四句搬到 CH1（字面還在檔內，位置錯了）
+    lines = doc.splitlines(keepends=True)
+    idx = [i for i, ln in enumerate(lines) if P310_S_PRESERVE in ln]
+    ch1 = [i for i, ln in enumerate(lines) if ln.startswith("- `CH1`")]
+    check("#310 AC-8(ii)② 變異可施作（義務句在一行內、CH1 條目存在）",
+          len(idx) == 1 and len(ch1) == 1, f"義務句行 {idx!r} CH1 行 {ch1!r}")
+    if len(idx) == 1 and len(ch1) == 1:
+        moved = lines[idx[0]]
+        rest = [ln for i, ln in enumerate(lines) if i != idx[0]]
+        j = [i for i, ln in enumerate(rest) if ln.startswith("- `CH1`")][0]
+        mut = "".join(rest[:j + 1] + [moved] + rest[j + 1:])
+        check("#310 矩陣第 11 列／AC-8(ii)② 四句搬到 CH1 → 判準 FAIL（位置被斷言）",
+              _p310_ch3_ok(mut) is False, "")
+        check("#310 矩陣第 11 列 對照：搬走後四句仍在檔內（全檔搜尋會誤判 PASS）",
+              all(s in mut for s, _why in P310_SENTENCES), "")
+    # ③ 改寫成否定
+    mut_neg = doc.replace(
+        P310_S_PRESERVE, P310_NEGATED, 1).replace(
+        P310_S_SCOPE, "", 1).replace(P310_S_READBACK, "", 1).replace(
+        P310_S_SERIAL, "", 1)
+    check("#310 矩陣第 12 列／AC-8(ii)③ 義務改寫成否定 → 判準 FAIL",
+          _p310_ch3_ok(mut_neg) is False, "")
+    check("#310 矩陣第 12 列 對照：否定句含四個關鍵詞 → 關鍵詞判準誤判 PASS"
+          "（故不採用那種判準）",
+          _p310_keyword_ok(mut_neg) is True,
+          f"CH3 段 {_p310_slice_ch3(mut_neg)[-200:]!r}")
+    check("#310 矩陣第 12 列 對照：否定句自身確實含全部四個關鍵詞",
+          all(k in P310_NEGATED for k in P310_KEYWORDS), P310_NEGATED)
+    # ④ 刪掉「適用範圍／例外」那一句，保存義務變成無限制的全稱句
+    mut_uni = doc.replace(P310_S_PRESERVE, P310_UNIVERSAL, 1).replace(
+        P310_S_SCOPE, "", 1)
+    check("#310 矩陣第 14 列／AC-8(ii)④ 刪掉適用範圍／例外、保存義務變全稱句"
+          "→ 判準 FAIL",
+          _p310_ch3_ok(mut_uni) is False, "")
+    check("#310 矩陣第 14 列 突變④的危害可辨識：全稱句在、例外句不在"
+          "（等於禁止 ensure／archive 改標記，與 AC-7 矛盾）",
+          P310_UNIVERSAL in _p310_slice_ch3(mut_uni)
+          and P310_S_SCOPE not in _p310_slice_ch3(mut_uni), "")
+    check("#310 矩陣第 14 列 對照：突變④下關鍵詞判準仍誤判 PASS",
+          _p310_keyword_ok(mut_uni) is True, "")
+    check("#310 AC-8(ii) 現況在同一支判準下 PASS（四種突變的 FAIL 不是恆假）",
+          _p310_ch3_ok(doc) is True and len(seg) > 0, "")
+
+
+@case("#310 AC-8(iii) 版本只驗四碼形狀與下界（不寫死等號）")
+def _p310_ac8_version():
+    kit = (REPO / "devflow" / "VERSION").read_text().strip()
+    doc = WORKFLOW_MD.read_text()
+    m = re.search(r"^version: (\S+)", doc, re.M)
+    wf = m.group(1) if m else ""
+    # ⚠ 刻意**不寫死本單候選值的等號斷言**（兩個版本檔都不寫）：那種寫法會在下一張
+    # 單進位時假 FAIL 一次，正是 `#308` 清掉的形態（本檔 `#296 AC-9`／`#304 AC-10`
+    # ／`#306 AC-13` 三處的同一個模式）。精確值由 T 的驗證指令與 PR diff 核。
+    # 本註解亦不引述那兩個字面——`AC-8`(iii) 指定的檢查是對本檔 grep 候選值的等號，
+    # 註解裡的引述會讓那個檢查命中（PR `#311` `R1` 第 2 輪 `BLOCK 1`）。
+    check("#310 AC-8(iii) WORKFLOW.md 的 frontmatter version 合 V1 的四碼形狀",
+          bool(VERSION_SHAPE.fullmatch(wf)), repr(wf))
+    check("#310 AC-8(iii) devflow/VERSION 合 V1 的四碼形狀",
+          bool(VERSION_SHAPE.fullmatch(kit)), repr(kit))
+    ok, why = _version_gt(wf, "1.15.0.0")
+    check("#310 AC-8(iii) WORKFLOW.md 的 version 嚴格大於 base 的 1.15.0.0",
+          ok, f"{wf!r}：{why}")
+    ok, why = _version_gt(kit, "0.17.1.0")
+    check("#310 AC-8(iii) devflow/VERSION 嚴格大於 base 的 0.17.1.0",
+          ok, f"{kit!r}：{why}")
+
+
+# ── AC-9 通用的完整標記比較 API ────────────────────────────────────────────
+@case("#310 AC-9 compare_state_lines：相同 → PASS，四種破壞各自 FAIL 並指出差異")
+def _p310_ac9():
+    before = P310_OLD_ARCHIVED
+    same_text = ("# 標題全改\n\n別的內容\n\n" + P310_T + "\n" + P310_A_RIGHT + "\n")
+    ok, msg = marker.compare_state_lines(before, before)
+    check("#310 AC-9(ii) 兩份完全相同 → PASS", ok is True, msg)
+    ok, msg = marker.compare_state_lines(before, same_text)
+    check("#310 AC-9(ii) 標記行相同而其餘文字全改 → 仍 PASS（只管標記行）",
+          ok is True, msg)
+    breaks = (
+        ("①刪掉標記行", P310_BODY + "\n" + P310_T + "\n"),
+        ("②改 thread 的 NN", P310_OLD_NN),
+        ("③只改 file=（其餘不變）",
+         P310_BODY + "\n" + P310_T + "\n" + P310_A_WRONG + "\n"),
+        ("④新增重複標記（A>1）", P310_OLD_A2),
+    )
+    for label, fx in breaks:
+        ok, msg = marker.compare_state_lines(before, fx)
+        check(f"#310 AC-9(ii) {label} → FAIL 並指出差異",
+              ok is False and "before=" in msg and "after=" in msg,
+              f"實得 {ok!r}：{msg}")
+        check(f"#310 AC-9(ii) {label} 的差異描述含 before 側的完整標記行",
+              P310_A_RIGHT in msg or P310_T in msg, msg)
+    ok, msg = marker.compare_state_lines(before, P310_OLD_T2)
+    check("#310 AC-9(ii)④ 新增重複的分區標記（T>1）亦 FAIL 而不 raise"
+          "（INVALID 組合也要能比較）",
+          ok is False and "topic" in msg, msg)
+    # (ii)③ 的鑑別力（矩陣第 15 列）：缺陷判準放行「只改 file=」
+    only_file = P310_BODY + "\n" + P310_T + "\n" + P310_A_WRONG + "\n"
+    check("#310 矩陣第 15 列 缺陷判準（只比 (T, A, NN)）對「只改 file=」放行"
+          "→ 證明 AC-9(ii)③ 有鑑別力",
+          _p310_counts_judgment(before, only_file)[0] is True, "")
+    check("#310 矩陣第 15 列 對照：缺陷判準對「改 NN」仍擋下（缺陷只在 file= 那支）",
+          _p310_counts_judgment(before, P310_OLD_NN)[0] is False, "")
+
+
+@case("#310 矩陣第 15b 列 AC-9 不綁入口：三種來源的 before／after 一視同仁")
+def _p310_ac9_sources():
+    before = P310_OLD_ARCHIVED
+    only_file = P310_BODY + "\n" + P310_T + "\n" + P310_A_WRONG + "\n"
+    # 三種來源在字串層完全等價，差別只在「誰寫的」——本 API 只吃字串，
+    # 故不要求 before／after 取自 `edit-body`（T 的 `AC-9`(i)）。
+    for src in ("裸 gh issue edit", "gh api -X PATCH", "GitHub Web UI"):
+        same_ok, _m = marker.compare_state_lines(before, before)
+        bad_ok, msg = marker.compare_state_lines(before, only_file)
+        check(f"#310 矩陣第 15b 列 {src} 的 before／after：未變 → PASS、"
+              f"只改 file= → FAIL",
+              same_ok is True and bad_ok is False, msg)
+    check("#310 矩陣第 15b 列 API 的簽章只吃兩份文字（不帶入口參數）",
+          marker.compare_state_lines.__code__.co_varnames[:2] == ("before", "after"),
+          repr(marker.compare_state_lines.__code__.co_varnames[:3]))
+    doc = marker.compare_state_lines.__doc__ or ""
+    for frag in ("唯讀", "不自動修復", "不綁任何入口"):
+        check(f"#310 AC-9(i) compare_state_lines 的 docstring 載「{frag}」",
+              frag in doc, doc[:300])
+
+
+@case("#310 矩陣第 15c 列 AC-9／AC-1 唯讀：open／gh／api 換成會 raise 的樁後仍可用")
+def _p310_ac9_readonly():
+    import builtins
+
+    def exploding(*a, **k):
+        raise AssertionError("狀態層不得開檔、呼叫 gh 或打網路")
+
+    before = P310_OLD_ARCHIVED
+    only_file = P310_BODY + "\n" + P310_T + "\n" + P310_A_WRONG + "\n"
+    orig = (builtins.open, topic.gh, topic.api, archive.api)
+    builtins.open, topic.gh, topic.api, archive.api = (exploding,) * 4
+    try:
+        ok, msg = marker.compare_state_lines(before, only_file)
+        check("#310 矩陣第 15c 列 compare_state_lines 在爆炸樁下仍完成"
+              "（純字串、零 I/O、零 gh）",
+              ok is False and "before=" in msg, msg)
+        out = marker.preserve_state(P310_OLD_ACTIVE, P310_NEW_WS)
+        check("#310 矩陣第 15c 列 preserve_state 在爆炸樁下仍完成（AC-1 的零 I/O）",
+              out.startswith(P310_NEW_WS) and _p310_lines(out)[0] == [P310_T],
+              repr(out[-60:]))
+    except AssertionError as e:
+        check(f"#310 矩陣第 15c 列 狀態層觸發了 I/O 或 gh：{e}", False, "")
+    finally:
+        builtins.open, topic.gh, topic.api, archive.api = orig
+
+
+@case("#310 AC-9(iii)／(iv) 落點：API 在 _marker.py、文件載用法、import 集合封閉")
+def _p310_ac9_placement():
+    check("#310 AC-9(iii) compare_state_lines 是 `_marker.py` 的公開函式",
+          bool(re.search(r"^def compare_state_lines\(", MARKER_SRC, re.M))
+          and callable(getattr(marker, "compare_state_lines", None)), "")
+    check("#310 AC-9(iii) preserve_state 是 `_marker.py` 的公開函式",
+          bool(re.search(r"^def preserve_state\(", MARKER_SRC, re.M))
+          and callable(getattr(marker, "preserve_state", None)), "")
+    check("#310 AC-9(iii) StateIntroduced 是 `_marker.py` 的公開例外類別",
+          isinstance(getattr(marker, "StateIntroduced", None), type)
+          and issubclass(marker.StateIntroduced, Exception), "")
+    # `edit-body` 的讀回走同一處實作（一處實作，不另寫一份比較邏輯）
+    check("#310 AC-9(iv) edit_body 的讀回呼叫 compare_state_lines（同一處實作）",
+          "compare_state_lines" in _p310_calls_in(TOPIC_SRC, "edit_body"),
+          f"呼叫集合 {sorted(_p310_calls_in(TOPIC_SRC, 'edit_body'))!r}")
+    # (iv) 不得新增鎖、監控、掃描或背景程序：以 import 集合的**封閉**正向斷言之
+    # （鎖／執行緒／排程／監控都得先 import 得到東西；集合封閉即無處可來）。
+    import ast
+
+    def imports(src: str) -> set:
+        out = set()
+        for node in ast.walk(ast.parse(src)):
+            if isinstance(node, ast.Import):
+                out |= {a.name.split(".")[0] for a in node.names}
+            elif isinstance(node, ast.ImportFrom):
+                out.add((node.module or "").split(".")[0])
+        return out
+
+    check("#310 AC-9(iv) `_marker.py` 的 import 集合封閉於 {__future__, re}",
+          imports(MARKER_SRC) <= {"__future__", "re"},
+          f"實得 {sorted(imports(MARKER_SRC))!r}")
+    # `tempfile` 是 `#310` 第 2 輪為 `C5` 的落點加的（`mkdtemp` 在該單專屬子目錄下
+    # 開本次執行的目錄，使清除只針對本次產物）——它是建暫存目錄的標準庫，不是鎖、
+    # 監控、排程或背景程序，故列入允許集合而非放棄這條斷言。
+    allowed = {"json", "os", "re", "subprocess", "sys", "tempfile", "urllib",
+               "pathlib", "_marker", "__future__"}
+    check("#310 AC-9(iv) `devflow_topic.py` 的 import 集合封閉於既有的允許集合"
+          "（本單未引入鎖／執行緒／排程）",
+          imports(TOPIC_SRC) <= allowed,
+          f"實得 {sorted(imports(TOPIC_SRC))!r} 允許 {sorted(allowed)!r}")
+    check("#310 AC-9(iii) telegram.md 的新格載 compare_state_lines 的唯讀宣稱",
+          all(f in (_p310_md_rows(TG_MD.read_text()) or [""])[0]
+              for f in ("compare_state_lines", "唯讀", "不自動修復")), "")
+
+
+# ── 反例矩陣的覆蓋自檢（18 列逐列須有具名斷言）─────────────────────────────
+P310_MATRIX_ROWS = ("1", "2", "3", "4", "5", "6", "7", "7b", "8", "9", "10",
+                    "11", "12", "13", "14", "15", "15b", "15c")
+
+
+@case("#310 反例矩陣 18 列逐列在本檔有具名斷言（以 check 標題的字面核）")
+def _p310_matrix_coverage():
+    titles = [t for _ln, t, _e in _p308_checks((HERE / "test_marker.py").read_text())]
+    missing = [n for n in P310_MATRIX_ROWS
+               if not any(f"矩陣第 {n} 列" in t for t in titles)]
+    check("#310 矩陣 18 列逐列都有具名斷言（缺列清單為空）",
+          missing == [], f"缺 {missing!r}")
+    check("#310 矩陣覆蓋自檢的受掃集合非空（判準不是空掃）",
+          len(titles) > 600, f"受掃 check 標題={len(titles)}")
 
 # ── 收尾 ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
