@@ -238,6 +238,49 @@ def prompt_of(cmd: list[str]) -> str:
     return cmd[cmd.index("-q") + 1] if "-q" in cmd else ""
 
 
+# ── log 路徑與單號的判定（`#312` `AC-8`）─────────────────────────────────────
+# 這兩個純函式是本檔對「log 在不在某個目錄下」與「這個 log 是哪一張單的」的**唯一**判定
+# （`I5`）：三條既有 check 與下方 `#312 AC-8` 一節的固定情境正反測試共用它們——正例與
+# 反例跑同一支判定，對照才算對照。純運算，不碰檔案系統、不讀環境。
+def _under(root, path) -> bool:
+    """`path` 是否位於 `root` 這個目錄**階層**之下（含 root 自身）。
+
+    為什麼不能用字串（`AC-8(a)`；`#312` 第 3 輪 `R1` `BLOCK 1` 的實測）：審查位的丟棄式
+    checkout 是 `…/agent-devflow.review/312-r3`、其暫存根是**兄弟目錄**
+    `…/agent-devflow.review/312-r3-tmp`，於是 `str(REPO) in str(log)` 為 **True**
+    （子字串命中）、`str(log).startswith(str(REPO))` 也為 **True**（前綴命中），
+    而那個 log 根本不在 repo 內。「在不在某個目錄下」是階層關係，只有逐段比對
+    （`is_relative_to`／`parents`）答得對；前綴與子字串都會被「名字剛好以它起首的
+    兄弟目錄」騙過去。
+
+    兩側都先 `resolve()`：symlink 與 `..` 不正規化的話，同一個位置有多種寫法。
+    """
+    try:
+        return Path(path).resolve().is_relative_to(Path(root).resolve())
+    except ValueError:            # 不同磁碟根等無法比較的情形 ＝ 不在其下
+        return False
+
+
+# log 檔名的 grammar ＝ `_log_path` 的 f-string：
+#     relay-<issue>-<profile>-<stamp>-<pid>-<seq>.log
+# `stamp` 自己含一個 `-`（`%Y%m%d-%H%M%S`），故以固定寬度的數字欄位錨住，後面的
+# `pid`／`seq` 才切得開。
+_LOG_NAME_RE = re.compile(
+    r"^relay-(?P<issue>[^-]+)-(?P<profile>[^-]+)-"
+    r"(?P<stamp>\d{8}-\d{6}|FIXED)-(?P<pid>\d+)-(?P<seq>\d+)\.log$")
+
+
+def _issue_of(logname: str) -> str:
+    """log 檔名的 `issue` **欄位**（只看檔名，不管前面的目錄）；不合 grammar 回空字串。
+
+    為什麼不能搜尋整個檔名（`AC-8(b)`）：單號是第一欄，而 `pid` 與 `stamp` 也是數字——
+    第 3 輪實測的 PID `2528717` 含 `287`，使「`287` 不在檔名裡」那個鑑別力條假 FAIL
+    （`relay-999-dfmgr-20261015-051730-2528717-1.log`，單號其實是 `999`）。
+    """
+    m = _LOG_NAME_RE.match(Path(logname).name)
+    return m.group("issue") if m else ""
+
+
 def _only_pipe_probe() -> tuple[str, str]:
     """`AC-7` 的反測：只定義 `PIPE` 的假類，期望在 `Popen` 的 kwargs 求值時掛掉。
 
@@ -347,8 +390,9 @@ check("AC-2 log 路徑是絕對路徑",
 if log_paths:
     lp = Path(log_paths[0])
     check("AC-2 log 落在 $TMPDIR 下，不寫進 repo",
-          str(lp).startswith(tempfile.gettempdir()) and str(REPO) not in str(lp),
-          f"log={lp} tmp={tempfile.gettempdir()} repo={REPO}")
+          _under(tempfile.gettempdir(), lp) and not _under(REPO, lp),
+          f"log={lp} tmp={tempfile.gettempdir()} repo={REPO} "
+          f"（判定為路徑階層，見 `_under`：子字串／前綴會被同名前綴的兄弟目錄騙過）")
     check("AC-2 log 檔真的存在，且內容是子程序的原始 stream-json 行（不是摘要）",
           lp.exists() and '"type":"tool_use"' in lp.read_text()
           and '"type":"result"' in lp.read_text(),
@@ -370,8 +414,10 @@ wake_c = prompt_of(f2c.spawned[1]) if len(f2c.spawned) == 2 else ""
 logs_c = re.findall(r"relay-[^`\s]+\.log", wake_c)
 check("AC-2 鑑別力：`--issue 999` → prompt 寫 `#999`、log 檔名含 999（非寫死 287）",
       "#999" in wake_c and "#287" not in wake_c
-      and len(logs_c) == 1 and "999" in logs_c[0] and "287" not in logs_c[0],
-      f"prompt={wake_c[:200]!r} logs={logs_c}")
+      and len(logs_c) == 1 and _issue_of(logs_c[0]) == "999",
+      f"prompt={wake_c[:200]!r} logs={logs_c} "
+      f"issue 欄位={_issue_of(logs_c[0]) if logs_c else None!r}"
+      f"（單號取 grammar 的第一欄，見 `_issue_of`：pid／stamp 也是數字）")
 check("AC-2 鑑別力：兩輪的 log 路徑互不相同（不會覆寫彼此的現場）",
       bool(logs) and bool(logs_c) and logs[0] != logs_c[0],
       f"{logs} vs {logs_c}")
@@ -430,8 +476,10 @@ check("BLOCK 1 檔名仍含 issue 與 profile（AC-2 的可讀性不因去碰撞
 check("BLOCK 1 檔名含 pid（並行的多個 relay 互不碰撞）",
       all(f"-{os.getpid()}-" in p.name for p in (_p1, _p2, _p3)), f"{_p1.name}")
 check("BLOCK 1 仍落在 $TMPDIR 下，不寫進 repo",
-      all(str(p).startswith(tempfile.gettempdir()) and str(REPO) not in str(p)
-          for p in (_p1, _p2, _p3)), f"{_p1}")
+      all(_under(tempfile.gettempdir(), p) and not _under(REPO, p)
+          for p in (_p1, _p2, _p3)),
+      f"{_p1} tmp={tempfile.gettempdir()} repo={REPO} "
+      f"（判定為路徑階層，見 `_under`）")
 
 wake_b1 = prompt_of(fb1.spawned[1]) if len(fb1.spawned) == 2 else ""
 _lp_b1 = re.findall(r"`(/[^`]+\.log)`", wake_b1)
@@ -1797,6 +1845,149 @@ check("#312 矩陣 11（文件側）：刪掉該說明後，同一支判定報�
 check("#312 AC-7 VERSION 為 `V2` 的 c 位進位（嚴格大於 0.18.0.0，整數元組比較）",
       tuple(int(x) for x in VERSION_FILE.read_text().strip().split(".")) > (0, 18, 0, 0),
       f"raw={VERSION_FILE.read_text().strip()!r}")
+
+
+# ── AC-8：三條測試判準的修正（固定情境的正反測試）──────────────────────────────
+# 第 3 輪 `R1` `BLOCK 1`：三條 check 以**字串**判斷路徑與單號，於是
+#   * 審查位的暫存根取名為 repo 的兄弟目錄 `…/312-r3-tmp`（含 checkout 目錄名
+#     `312-r3` 這個子字串）→ 兩條路徑判準誤判 log 寫進了 repo；
+#   * 當次 PID `2528717` 含 `287` → 單號的鑑別力條誤判「檔名裡有 287」。
+# 兩者都是**合法輸入**，缺陷在判準而不在 relay；修法是把判定換成路徑階層與 grammar
+# 欄位（`_under`／`_issue_of`，見上方定義），三條 check 的標題與要驗的語意不動。
+#
+# 本節的情境**全部是固定字串／固定路徑**（`AC-8(c)`）：不呼叫 `os.getpid()`、不碰檔案
+# 系統，故「修前必失敗、修後必通過」與當次的 PID 和暫存根名稱無關——第 3 輪的
+# `234/237` 與 manager 重跑的 `235/237` 差在當次 PID，那種 flake 在這裡不存在。
+print("\n── #312 AC-8：log 路徑用階層判定、單號取 issue 欄位（固定情境）")
+
+# 固定情境（形狀照第 3 輪的現場：暫存根是 repo 的**兄弟目錄**，名字以 repo 目錄名起首）。
+# 路徑刻意落在一個不存在的根下——不碰檔案系統，結果只取決於判定本身。
+P312_FX_ROOT = Path("/fixture-312/agent-devflow.review")
+P312_FX_REPO = P312_FX_ROOT / "312-r3"
+P312_FX_TMP = P312_FX_ROOT / "312-r3-tmp"            # 兄弟目錄，名字含 `312-r3`
+P312_FX_TMP2 = P312_FX_ROOT / "relay-scratch"        # 名字**不**含 repo 名的另一個暫存根
+P312_FX_NAME_999 = "relay-999-dfmgr-20261015-051730-2528717-1.log"   # PID 含 `287`
+P312_FX_NAME_287 = "relay-287-dfmgr-20261015-051730-2999999-1.log"   # PID 含 `999`
+P312_FX_NAME_PLAIN = "relay-999-dfmgr-20261015-051730-1234561-1.log"  # PID 兩者皆不含
+P312_FX_LOG = P312_FX_TMP / "devflow-test_relay.fixture" / P312_FX_NAME_999
+P312_FX_LOG2 = P312_FX_TMP2 / "devflow-test_relay.fixture" / P312_FX_NAME_999
+P312_FX_IN_REPO = P312_FX_REPO / "tests" / P312_FX_NAME_287      # 真的在 repo 內
+P312_FX_OUTSIDE = Path("/fixture-312/elsewhere") / P312_FX_NAME_287  # 在暫存根外
+
+
+def p312_old_path_ok(root, repo, path) -> bool:
+    """修前的判定（字串前綴 ＋ 子字串），**只**在反例對照裡呼叫（矩陣 12）。
+
+    逐字對應 head `43bb5a4` 的
+    `str(lp).startswith(tempfile.gettempdir()) and str(REPO) not in str(lp)`。
+    """
+    return str(path).startswith(str(root)) and str(repo) not in str(path)
+
+
+def p312_old_issue_ok(logname: str, want: str, other: str) -> bool:
+    """修前的判定（對整個檔名做子字串搜尋），只在反例對照裡呼叫（矩陣 13／14）。
+
+    逐字對應 head `43bb5a4` 的 `"999" in logs_c[0] and "287" not in logs_c[0]`。
+    """
+    return want in logname and other not in logname
+
+
+# ── (a) 路徑：階層判定的三個固定情境 ─────────────────────────────────────────
+check("#312 AC-8(a) 正例：log 落在 repo 的兄弟目錄（目錄名含 repo 名）→ 在暫存根下且不在 repo 內",
+      _under(P312_FX_TMP, P312_FX_LOG) and not _under(P312_FX_REPO, P312_FX_LOG),
+      f"log={P312_FX_LOG} tmp={P312_FX_TMP} repo={P312_FX_REPO}")
+check("#312 AC-8(a) 反例：log 真正位於 repo 內 → 階層判定認得出來（該被擋）",
+      _under(P312_FX_REPO, P312_FX_IN_REPO)
+      and not (_under(P312_FX_TMP, P312_FX_IN_REPO)
+               and not _under(P312_FX_REPO, P312_FX_IN_REPO)),
+      f"log={P312_FX_IN_REPO}")
+check("#312 AC-8(a) 反例：log 位於暫存根外 → 判定為不在暫存根下（該被擋）",
+      not _under(P312_FX_TMP, P312_FX_OUTSIDE)
+      and not _under(P312_FX_REPO, P312_FX_OUTSIDE),
+      f"log={P312_FX_OUTSIDE}")
+check("#312 AC-8(a) 判準是階層不是字串：同一組固定輸入下字串命中為真、階層判定為假",
+      str(P312_FX_REPO) in str(P312_FX_LOG)
+      and str(P312_FX_LOG).startswith(str(P312_FX_REPO))
+      and not _under(P312_FX_REPO, P312_FX_LOG),
+      f"子字串命中={str(P312_FX_REPO) in str(P312_FX_LOG)} "
+      f"前綴命中={str(P312_FX_LOG).startswith(str(P312_FX_REPO))} "
+      f"階層={_under(P312_FX_REPO, P312_FX_LOG)}")
+check("#312 AC-8(a) `_under` 的邊界：root 自身算在其下、父目錄不算在子目錄下",
+      _under(P312_FX_TMP, P312_FX_TMP) and not _under(P312_FX_LOG, P312_FX_TMP),
+      "is_relative_to 的語意（含自身）")
+
+# 矩陣 12：保留字串判定 → 同一組固定正例轉為不成立。
+check("#312 矩陣 12：保留字串判定（startswith ＋ 子字串）→ 同一組固定正例轉為不成立（實跑對照）",
+      p312_old_path_ok(P312_FX_TMP, P312_FX_REPO, P312_FX_LOG) is False
+      and (_under(P312_FX_TMP, P312_FX_LOG)
+           and not _under(P312_FX_REPO, P312_FX_LOG)) is True,
+      f"舊判定={p312_old_path_ok(P312_FX_TMP, P312_FX_REPO, P312_FX_LOG)} "
+      f"新判定={_under(P312_FX_TMP, P312_FX_LOG) and not _under(P312_FX_REPO, P312_FX_LOG)}")
+
+# ── (b) 單號：只看 grammar 的 issue 欄位 ────────────────────────────────────
+check("#312 AC-8(b) 正例：issue=999 而 PID 含 287 → issue 欄位取出 '999'",
+      _issue_of(P312_FX_NAME_999) == "999", f"檔名={P312_FX_NAME_999}")
+check("#312 AC-8(b) 鑑別力：單號寫死 287 的檔名（PID 含 999）→ 期望 issue=='999' 不成立",
+      _issue_of(P312_FX_NAME_287) == "287" and _issue_of(P312_FX_NAME_287) != "999",
+      f"檔名={P312_FX_NAME_287} issue 欄位={_issue_of(P312_FX_NAME_287)!r}")
+_p312_fields = _LOG_NAME_RE.match(P312_FX_NAME_999)
+check("#312 AC-8(b) 其餘欄位也切得開（profile／stamp／pid／seq 各就各位）",
+      _p312_fields is not None and _p312_fields.groupdict()
+      == {"issue": "999", "profile": "dfmgr", "stamp": "20261015-051730",
+          "pid": "2528717", "seq": "1"},
+      f"欄位={_p312_fields.groupdict() if _p312_fields else None}")
+check("#312 AC-8(b) 帶目錄的路徑只看檔名那一段（目錄名裡的數字不影響單號）",
+      _issue_of(str(P312_FX_LOG)) == "999" and _issue_of(str(P312_FX_IN_REPO)) == "287",
+      f"{P312_FX_LOG} → {_issue_of(str(P312_FX_LOG))!r}")
+check("#312 AC-8(b) 不合 grammar 的檔名回空字串（取不到欄位就不假裝取到）",
+      _issue_of("relay-oops.log") == "" and _issue_of("whatever.txt") == "",
+      "grammar 不合時不得猜")
+# grammar 與 `_log_path` 的實際產出必須相符，否則上面那些固定情境只是自說自話：
+# 真實檔名（AC-2 那一輪的 `--issue 287`，真時間戳）與 `BLOCK 1` 那一節（時鐘凍成
+# `FIXED`）兩種形狀都要切得開——這也是 `_LOG_NAME_RE` 的 stamp 欄位容許 `FIXED` 的理由。
+check("#312 AC-8(b) grammar 與 `_log_path` 的實際產出相符（真時間戳與凍結時鐘兩種形狀）",
+      bool(log_paths) and _issue_of(Path(log_paths[0]).name) == "287"
+      and isinstance(_p1, Path) and _issue_of(_p1.name) == "287",
+      f"真實={Path(log_paths[0]).name if log_paths else None} "
+      f"凍結={_p1.name if isinstance(_p1, Path) else _p1!r}")
+
+# 矩陣 13：保留整個檔名的子字串搜尋 → 同一組固定正例轉為不成立。
+check("#312 矩陣 13：保留整個檔名的子字串搜尋 → issue=999 而 PID 含 287 的正例轉為不成立（實跑對照）",
+      p312_old_issue_ok(P312_FX_NAME_999, "999", "287") is False
+      and _issue_of(P312_FX_NAME_999) == "999",
+      f"舊判定={p312_old_issue_ok(P312_FX_NAME_999, '999', '287')} "
+      f"新判定={_issue_of(P312_FX_NAME_999)!r}")
+
+# ── (c) 回歸不依賴碰巧的 PID 與暫存根名稱 ──────────────────────────────────
+# 矩陣 14：把固定情境換回「當次真實的 PID」→ 結果隨 PID 變動（flake 可被觀測）。
+check("#312 矩陣 14：舊判定對兩個只差 PID 的固定檔名給出不同結果（flake 的來源）",
+      p312_old_issue_ok(P312_FX_NAME_999, "999", "287") is False
+      and p312_old_issue_ok(P312_FX_NAME_PLAIN, "999", "287") is True,
+      f"PID 含 287={p312_old_issue_ok(P312_FX_NAME_999, '999', '287')} "
+      f"PID 不含={p312_old_issue_ok(P312_FX_NAME_PLAIN, '999', '287')}")
+check("#312 AC-8(c) 新判定對同兩個固定檔名給出相同結果（與當次 PID 無關）",
+      _issue_of(P312_FX_NAME_999) == _issue_of(P312_FX_NAME_PLAIN) == "999",
+      f"{_issue_of(P312_FX_NAME_999)!r} vs {_issue_of(P312_FX_NAME_PLAIN)!r}")
+check("#312 AC-8(c) 新判定對兩個暫存根（名字含 repo 名／不含）給出相同結果",
+      (_under(P312_FX_TMP, P312_FX_LOG) and not _under(P312_FX_REPO, P312_FX_LOG))
+      == (_under(P312_FX_TMP2, P312_FX_LOG2) and not _under(P312_FX_REPO, P312_FX_LOG2))
+      is True,
+      f"含 repo 名的暫存根={P312_FX_TMP} 另一個={P312_FX_TMP2}")
+check("#312 矩陣 14 對照：舊判定對那兩個暫存根給出不同結果（名字取得好不好決定成敗）",
+      p312_old_path_ok(P312_FX_TMP, P312_FX_REPO, P312_FX_LOG) is False
+      and p312_old_path_ok(P312_FX_TMP2, P312_FX_REPO, P312_FX_LOG2) is True,
+      f"含 repo 名={p312_old_path_ok(P312_FX_TMP, P312_FX_REPO, P312_FX_LOG)} "
+      f"不含={p312_old_path_ok(P312_FX_TMP2, P312_FX_REPO, P312_FX_LOG2)}")
+check("#312 AC-8(c) 本節情境全為固定值：判定與當次 PID、暫存根、檔案系統狀態無關",
+      P312_FX_NAME_999.endswith("-2528717-1.log")
+      and str(os.getpid()) not in P312_FX_NAME_999 + P312_FX_NAME_287 + P312_FX_NAME_PLAIN
+      and not P312_FX_LOG.exists() and not P312_FX_REPO.exists(),
+      f"當次 pid={os.getpid()}（不出現在任一固定檔名裡）")
+
+# 三條標的 check 在實機上的同一組判定（路徑來自真實的 `_log_path`，判定共用 `_under`）：
+# 上方 `AC-2 log 落在 $TMPDIR 下，不寫進 repo`、`AC-2 鑑別力：--issue 999 …`、
+# `BLOCK 1 仍落在 $TMPDIR 下，不寫進 repo` 已改用這兩個純函式，故本節的固定情境與
+# 它們是同一支判定——AC-8 的驗證命令（`TMPDIR=<含 repo 目錄名的兄弟目錄>`）即其端到端證據。
 
 
 # ── 收尾 ────────────────────────────────────────────────────────────────────
