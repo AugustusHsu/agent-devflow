@@ -1246,6 +1246,8 @@ print("\n── #312 AC-1／AC-2：primary 與 continuation 的深度與鏈（�
 
 P312_MAX = mod_consts.MAX_RELAY_DEPTH
 P312_LIMIT_SENTENCE = "純 continuation 的平層循環不增深，本機制不保證擋住它"
+# 空 chain 的 continuation 以 `>` 起首（`R1` 第 1 輪 `BLOCK 1`）：訊息與文件共用同一字面。
+P312_LEADING_SENTENCE = "鏈以 `>` 起首 ＝ 最外層那一層即為續接"
 
 
 def p312_mutate(src: str, old: str, new: str) -> str:
@@ -1275,6 +1277,8 @@ def load_mutant(src: str, name: str, fake):
 # 突變的錨點（都是受測檔裡恰一處的字面；錨點漂移由「突變確實套上」那幾條報出）
 P312_DEPTH_LINE = "    env[DEPTH_ENV] = str(depth if continuation else depth + 1)\n"
 P312_LIMIT_LINE = "    if depth >= MAX_RELAY_DEPTH:\n"
+P312_CHAIN_LINE = ('    env[CHAIN_ENV] = f"{chain}{sep}{profile}"'
+                   " if chain or continuation else profile\n")
 
 # 矩陣 1：維持 `#312` 之前的行為（對每個子程序都 +1）→ AC-1(b) 的期望值不成立。
 P312_MUT_ALWAYS = p312_mutate(RELAY_SRC, P312_DEPTH_LINE,
@@ -1311,11 +1315,16 @@ P312_MUT_NOSCOPE = p312_mutate(
     RELAY_SRC,
     '              f"純 continuation 的平層循環不增深，本機制不保證擋住它。",\n',
     '              f"（射程說明已被刪除）",\n')
+# `R1` 第 1 輪 `BLOCK 1` 的破壞對照：還原成 `if chain else profile`——空 chain 時
+# 丟掉起首的 `>`，於是同一 profile 的 primary 與 continuation 得到相同的 chain。
+P312_MUT_DROPSEP = p312_mutate(
+    RELAY_SRC, P312_CHAIN_LINE,
+    '    env[CHAIN_ENV] = f"{chain}{sep}{profile}" if chain else profile\n')
 
-check("#312 突變確實套上（八種 source 突變都與受測原文不同）",
+check("#312 突變確實套上（九種 source 突變都與受測原文不同）",
       all(m != RELAY_SRC for m in (P312_MUT_ALWAYS, P312_MUT_NEVER, P312_MUT_DEDUP,
                                    P312_MUT_CROSS, P312_MUT_SETSIZE, P312_MUT_BIGGER,
-                                   P312_MUT_BYPASS, P312_MUT_NOSCOPE)),
+                                   P312_MUT_BYPASS, P312_MUT_NOSCOPE, P312_MUT_DROPSEP)),
       "錨點漂移：某個突變沒有套上去（no-op 的反例會假 PASS）")
 
 # ── AC-1：深度語意（純函式層，零子程序、零網路）───────────────────────────────
@@ -1360,6 +1369,49 @@ check("#312 AC-2 兩個分隔符各寫成模組常數（`,` 巢狀、`>` 續接�
       m312.CHAIN_NEST_SEP == "," and m312.CHAIN_CONT_SEP == ">",
       f"nest={m312.CHAIN_NEST_SEP!r} cont={m312.CHAIN_CONT_SEP!r}")
 
+# ── AC-2 的合法邊界：呼叫者的 chain 未設（relay 自身在最外層）──────────────────
+# `R1` 第 1 輪 `BLOCK 1`：`_child_env` 原寫 `… if chain else profile`，空 chain 時把
+# 分隔符整個丟掉，於是同一 profile 的 primary 與 continuation 都得到 `dfmgr`——
+# AC-2 的「可機械區分」在這個**合法輸入**下不成立，而既有回歸（上方 `f4` 那組，relay
+# 自身未設深度／鏈）走的正是這條路徑。修正：空 chain 的 continuation 保留起首的 `>`，
+# primary 維持裸 profile（既有 primary 斷言的字面因此一字不變）。
+P312_EMPTY = {DEPTH_KEY: None, CHAIN_KEY: None}
+p312_e_prim = with_env(P312_EMPTY, lambda: m312._child_env("dfmgr"))[CHAIN_KEY]
+p312_e_cont = with_env(P312_EMPTY, lambda: m312._child_env("dfmgr", continuation=True))[CHAIN_KEY]
+check("#312 AC-2 空 chain 的 primary 仍是裸 profile（'dfmgr'，既有字面不變）",
+      p312_e_prim == "dfmgr", f"primary={p312_e_prim!r}")
+check("#312 AC-2 空 chain 的 continuation 保留起首的 `>`（'>dfmgr'）",
+      p312_e_cont == ">dfmgr", f"continuation={p312_e_cont!r}")
+check("#312 AC-2 空 chain 下同一 profile 的兩類 chain 相異（可機械區分）",
+      p312_e_prim != p312_e_cont, f"primary={p312_e_prim!r} continuation={p312_e_cont!r}")
+check("#312 AC-2 空 chain 的 continuation 可機械辨識（以 `>` 起首、切分後首段為空；primary 不是）",
+      p312_e_cont.startswith(m312.CHAIN_CONT_SEP)
+      and p312_e_cont.split(m312.CHAIN_CONT_SEP)[0] == ""
+      and not p312_e_prim.startswith(m312.CHAIN_CONT_SEP),
+      f"primary={p312_e_prim!r} continuation={p312_e_cont!r}")
+# 同一組的既有 AC-6(b) 案例（`f4`，relay 自身未設）：喚醒者深度 `"0"`、鏈 `'>dfmgr'`。
+check("#312 AC-2／AC-6(b) `f4` 那組的喚醒者鏈為 '>dfmgr'（與其 primary 的 'dfmgr' 分得開）",
+      len(f4.kwargs) == 2
+      and f4.kwargs[1].get("env", {}).get(CHAIN_KEY) == ">dfmgr"
+      and f4.kwargs[0].get("env", {}).get(CHAIN_KEY) == "dfmgr",
+      f"primary={f4.kwargs[0].get('env', {}).get(CHAIN_KEY)!r} "
+      f"continuation={f4.kwargs[1].get('env', {}).get(CHAIN_KEY) if len(f4.kwargs) > 1 else None!r}")
+
+# `BLOCK 1` 的破壞對照（實跑）：還原 `if chain else profile` → 空 chain 下兩類相等。
+_f12 = FakeSub(LINES)
+_m12 = load_mutant(P312_MUT_DROPSEP, "devflow_relay_mut_dropsep", _f12)
+_m12_prim = with_env(P312_EMPTY, lambda: _m12._child_env("dfmgr"))[CHAIN_KEY]
+_m12_cont = with_env(P312_EMPTY, lambda: _m12._child_env("dfmgr", continuation=True))[CHAIN_KEY]
+check("#312 AC-2 BLOCK 1 反例：還原 `if chain else profile` → 空 chain 下兩類 chain 相等（實跑對照）",
+      _m12_prim == _m12_cont == "dfmgr" and p312_e_prim != p312_e_cont,
+      f"突變 primary={_m12_prim!r} continuation={_m12_cont!r}；"
+      f"受測 primary={p312_e_prim!r} continuation={p312_e_cont!r}")
+check("#312 AC-2 BLOCK 1 反例：突變只動到空 chain 那一支（非空 chain 的兩類字面不受影響）",
+      with_env(P312_CALLER, lambda: _m12._child_env("dfimpl"))[CHAIN_KEY] == "dfmgr,dfimpl"
+      and with_env(P312_CALLER,
+                   lambda: _m12._child_env("dfmgr", continuation=True))[CHAIN_KEY] == "dfmgr>dfmgr",
+      "非空 chain 下突變與受測實作的 chain 應相同（故上一條分得開的是空 chain 那一支）")
+
 f312_over = FakeSub(LINES)
 P312_MIXED_CHAIN = "dfcoord,dfmgr>dfmgr,dfimpl"
 rc312_over, _, err312_over = with_env(
@@ -1371,6 +1423,8 @@ check("#312 AC-2 超限訊息解釋 `,`／`>` 的意義（讀訊息就看得出�
       "`,` ＝巢狀一層" in err312_over and "`>` ＝同一流程的續接" in err312_over
       and "continuation" in err312_over and "primary" in err312_over,
       repr(err312_over[:600]))
+check("#312 AC-2 超限訊息也載明空 chain 那一支的讀法（`>` 起首 ＝ 最外層即續接）",
+      P312_LEADING_SENTENCE in err312_over, repr(err312_over[:700]))
 
 # ── AC-3：同一張單連續 6 輪（每輪 primary ＋ then-wake 續接）──────────────────
 print("\n── #312 AC-3：同一張單連續 6 輪不累加")
@@ -1700,6 +1754,7 @@ P312_DOC_NEEDLES = (
     "呼叫者自身",
     "`,` ＝巢狀一層",
     "`>` ＝同一流程的續接",
+    P312_LEADING_SENTENCE,
     P312_LIMIT_SENTENCE,
     "只覆蓋「該 `if` 的條件式裡多了環境讀取或布林旁路」這一形狀",
     "不保證抓到別處的旁路",

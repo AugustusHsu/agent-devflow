@@ -84,6 +84,8 @@ DEPTH_ENV = "DEVFLOW_RELAY_DEPTH"
 # 選配的可讀鏈：每層把自己的 profile 接在後面，超限時印出來才看得出是誰疊誰。
 # 兩個分隔符使 primary 與 continuation 在鏈上**機械可區分**（`#312` `AC-2`）：
 # `,` ＝巢狀一層（primary，深度 +1）、`>` ＝同一流程的續接（continuation，不增深）。
+# 鏈空（最外層）時 primary 寫裸 profile、continuation 仍保留起首的 `>`——即
+# 「鏈以 `>` 起首 ＝ 最外層那一層即為續接」，見 `_child_env`。
 CHAIN_ENV = "DEVFLOW_RELAY_CHAIN"
 CHAIN_NEST_SEP = ","
 CHAIN_CONT_SEP = ">"
@@ -147,7 +149,11 @@ def _child_env(profile: str, *, continuation: bool = False) -> dict[str, str]:
     env[DEPTH_ENV] = str(depth if continuation else depth + 1)
     chain = os.environ.get(CHAIN_ENV, "")
     sep = CHAIN_CONT_SEP if continuation else CHAIN_NEST_SEP
-    env[CHAIN_ENV] = f"{chain}{sep}{profile}" if chain else profile
+    # 空 chain（relay 自身在最外層、`CHAIN` 未設）：primary 維持裸 profile，
+    # continuation **保留起首的 `>`**。丟掉它的話同一 profile 的兩類會得到相同的 chain
+    # （`dfmgr` vs `dfmgr`），「可機械區分」在這個**合法輸入**下就不成立
+    # （`#312` 第 1 輪 `R1` `BLOCK 1` 實測；既有回歸走的正是 `CHAIN` 未設這條路徑）。
+    env[CHAIN_ENV] = f"{chain}{sep}{profile}" if chain or continuation else profile
     return env
 
 
@@ -583,7 +589,8 @@ def main() -> int:
               f"[relay] 已有的鏈：{chain} → (本次想派) {args.profile}"
               + (f" → (then-wake) {args.then_wake}" if args.then_wake else "") + "\n"
               f"[relay] 鏈的讀法（`#312`）：`{CHAIN_NEST_SEP}` ＝巢狀一層（primary，深度 +1）、"
-              f"`{CHAIN_CONT_SEP}` ＝同一流程的續接（continuation，不增深）。"
+              f"`{CHAIN_CONT_SEP}` ＝同一流程的續接（continuation，不增深）；"
+              f"鏈以 `{CHAIN_CONT_SEP}` 起首 ＝ 最外層那一層即為續接。"
               f"撞上限表示 `{CHAIN_NEST_SEP}` 接起來的那幾層疊太深——有 relay 在 relay 裡遞迴，"
               f"請改由最外層派工；同一張單的多輪續接不會累加深度。\n"
               f"[relay] 本上限的射程：只計 primary 方向的巢狀；"
