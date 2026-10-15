@@ -20,10 +20,17 @@
 的持久 ack；前者為真而後者為假是**正常狀態**（投遞已發出、還沒人確認），不是已接收。
 ❌ **層1 失敗不得進層2**：`deliver()` 在層1 未成立時**連 `spawn` 都不呼叫**。
 
-**縫**（同 `devflow_relay.py:179` 的「縫只有一處」原則）：本模組**自己不 import
-`subprocess`、不 import `urllib`**，forge 與送訊一律走呼叫者傳進來的 `forge`／`send`
-物件，檔案 I/O 走可注入的 `home`。故測試零真 API、零真子程序、零 forge 寫入——
-那是**測試方式**，**不代表運行依賴不存在**（實際運行沿用 `gh` 與 `hermes send`）。
+**縫**（同 `devflow_relay.py:179` 的「縫只有一處」原則）：協定判定（`emit_handback`、
+`landed`／`received`／`processed`、`recover`、`failure_exit` …）**一律吃注入的 `forge`／
+`send`**，自己不碰 `subprocess`；真正打 `gh`／`hermes` 的只有**單一處** `_capture()`，
+它只被 adapter（`GhForge`／`hermes_sender`）與本檔的 CLI 用，而且連那一處都可以注入
+（relay 呼叫本檔時傳自己的 `_capture`，故整條產品路徑上仍只有 relay 那一個 `run`）。
+檔案 I/O 走可注入的 `home`。故測試零真 API、零真子程序、零 forge 寫入——那是**測試
+方式**，**不代表運行依賴不存在**（實際運行沿用 `gh` 與 `hermes send`）。
+
+**接收端入口**：`_handback.py ack｜done｜recover｜pending`（見檔末 CLI）。relay 以
+`--handback-event <EID>` 投遞時，把 EID 同時放進 `DEVFLOW_HANDBACK_EVENT` 與 prompt 的
+前置通知裡，接收端因此拿得到**同一個**事件識別（`#313` 第 1 輪 `R1` `BLOCK 4`）。
 
 落點為什麼是新檔、**不塞 `_marker.py`**：`_marker.py` 的自述逐字是「`CH3` 分區標記
 grammar 的單一實作…`channels/README.md` 分區三態判定式的**實作**」——它整個存在理由是
@@ -36,8 +43,11 @@ grammar（那是 relay 記自己行為的行，`#300`，零程式讀者）。
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import re
+import subprocess
+import sys
 import time
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, NamedTuple
@@ -155,6 +165,38 @@ def event_id_for(issue: str | int, stage: str, outcome: str, triggers: dict[str,
     return event_id(issue, stage, basis_of(outcome, triggers))
 
 
+def event_fields(eid: str) -> tuple[str, str, str]:
+    """把 EID 切回 `(issue, stage, basis)`。不合形狀即 raise。
+
+    切得開是 `EID_RE` 封死「三欄皆不得含 `-`」的用處（`#313` `AC-3`）：有了這個，行內
+    **重複出現**的 `issue`／`stage` 就能與 EID **逐欄核對**，而不是各說各話。
+    `#313` 第 1 輪 `R1` `BLOCK 3` 的現場：正確 EID 放在 `event=`、`issue=999`
+    `stage=merge.done` 放在別的欄位，整行仍被判 `landed`——那正是 `R4` 的「正確值出現在
+    錯誤位置」。
+    """
+    if not re.fullmatch(EID_RE, eid):
+        raise HandbackError(f"EID 不合形狀，無法切欄：{eid!r}")
+    issue, stage, basis = eid.split("-")
+    return issue, stage, basis
+
+
+def fields_match_event(event: str, issue: str | int, stage: str) -> tuple[bool, str]:
+    """行內 `issue`／`stage` 是否與 EID 的對應欄相符。回 `(相符, 理由)`。
+
+    `seat` **不在這裡核**：它不是 EID 的組成欄位，其約束是「宣告者恆為完成後處理的 mgr」
+    ——那一條由 `declare_or_raise()`／`may_declare()` 在**寫入邊界**強制（`AC-1`）。
+    """
+    want_issue, want_stage, _ = event_fields(event)
+    got_issue, got_stage = str(issue).strip().lower(), str(stage).strip().lower()
+    if got_issue != want_issue:
+        return False, (f"行內 issue={got_issue!r} 與 EID 的 issue={want_issue!r} 矛盾"
+                       f"（event={event}）")
+    if got_stage != want_stage:
+        return False, (f"行內 stage={got_stage!r} 與 EID 的 stage={want_stage!r} 矛盾"
+                       f"（event={event}）")
+    return True, "ok"
+
+
 # ── AC-1：宣告判準 ────────────────────────────────────────────────────────────
 def may_declare(*, outstanding_children: int, kind: str, issue_closable: bool,
                 seat: str = DECLARER_SEAT, postprocess_done: bool = True) -> tuple[bool, str]:
@@ -187,6 +229,40 @@ def may_declare(*, outstanding_children: int, kind: str, issue_closable: bool,
     return True, "ok"
 
 
+def declare_or_raise(*, seat: str, kind: str, issue_closable: bool | None,
+                     outstanding_children: int | None,
+                     postprocess_done: bool | None) -> None:
+    """寫 forge **之前**的宣告閘門。不成立即 raise，呼叫者因此不可能「寫了才發現不該寫」。
+
+    為什麼要有這一層、而不是讓呼叫者自己先問 `may_declare()`（`#313` 第 1 輪 `R1`
+    `BLOCK 1`）：第 1 輪的 `may_declare()` 判準正確、突變測試也過，但**真正寫 forge 的
+    `emit_handback()` 根本不呼叫它**，於是 `seat=dfimpl` 照樣寫得出宣告行——「正確判準
+    出現在錯誤位置」（`R4`）。判準必須長在**寫入邊界**上，否則它只是一個沒人問的意見。
+
+    **宣告事實不得省略**：三項（`outstanding_children`／`issue_closable`／
+    `postprocess_done`）皆為 `None` 時一律 raise，**不預設成樂觀值**——「不知道下游收完了
+    沒」與「下游已收完」是兩件事，後者要有人負責說出來。
+    """
+    missing = [name for name, value in (("outstanding_children", outstanding_children),
+                                        ("issue_closable", issue_closable),
+                                        ("postprocess_done", postprocess_done))
+               if value is None]
+    if missing:
+        raise HandbackError(
+            f"宣告事實不得省略（`AC-1`）：缺 {missing}。"
+            f"不知道下游收完了沒、本單可不可結、後處理做完了沒，就不得宣告交回"
+            f"——這三項沒有樂觀預設值。")
+    ok, reason = may_declare(outstanding_children=int(outstanding_children),
+                             kind=kind, issue_closable=bool(issue_closable),
+                             seat=seat, postprocess_done=bool(postprocess_done))
+    if not ok:
+        raise HandbackError(
+            f"不得宣告交回（`AC-1`：{reason}）：seat={seat!r} kind={kind!r} "
+            f"outstanding_children={outstanding_children!r} "
+            f"issue_closable={issue_closable!r} postprocess_done={postprocess_done!r}。"
+            f"宣告者恆為完成後處理的 `{DECLARER_SEAT}`；本次未寫任何東西。")
+
+
 # ── 三行的組裝 ────────────────────────────────────────────────────────────────
 def _now(at: str | None) -> str:
     return at if at else time.strftime(AT_FMT)
@@ -194,11 +270,19 @@ def _now(at: str | None) -> str:
 
 def handback_line(*, event: str, issue: str | int, seat: str, stage: str,
                   kind: str, outcome: str, at: str | None = None) -> str:
-    """組層1 的 `handback` 行。組完**自己驗一次** grammar——寫出去才發現讀不回已經太晚。"""
+    """組層1 的 `handback` 行。組完**自己驗一次** grammar 與**欄位一致性**。
+
+    一致性（`AC-3`，第 1 輪 `R1` `BLOCK 3`）：行內的 `issue`／`stage` 與 `event=` 的
+    EID **逐欄核對**，矛盾即 raise。行內重複這兩欄是為了人讀，但重複的值如果可以和 EID
+    各說各話，讀的人就無從知道哪一個才是真的——而機器只比 EID，於是矛盾的行照樣「成立」。
+    """
     if kind not in KINDS:
         raise HandbackError(f"kind 須為 {KINDS} 之一，得到 {kind!r}")
     if outcome not in OUTCOMES:
         raise HandbackError(f"outcome 須為 {OUTCOMES} 之一，得到 {outcome!r}")
+    same, why = fields_match_event(event, issue, stage)
+    if not same:
+        raise HandbackError(f"handback 行的欄位與 EID 矛盾，拒絕組出該行：{why}")
     line = HANDBACK_FMT.format(event=event, issue=issue, seat=seat, stage=stage,
                                kind=kind, outcome=outcome, at=_now(at))
     if not HANDBACK_RE.fullmatch(line):
@@ -225,12 +309,17 @@ def done_line(*, event: str, result: str, by: str = RECEIVER_PROFILE,
 
 # ── AC-2：四層判準 ────────────────────────────────────────────────────────────
 def handback_rows(body: str, eid: str) -> list[re.Match]:
-    """body 內屬於**這個事件**的 `handback` 行。**射程限定當前事件**（`AC-3`）。"""
+    """body 內屬於**這個事件**的 `handback` 行。**射程限定當前事件**（`AC-3`）。
+
+    ⚠️ 只按 `event=` 選列，**不判**該列自身是否自相一致——一致性由 `landed()` 判，
+    因為「有一列但它矛盾」與「沒有那一列」是兩個不同的理由，合併成一個布林會讓人看不出
+    是哪一種（第 1 輪 `R1` `BLOCK 3`）。
+    """
     return [m for m in HANDBACK_RE.finditer(body) if m.group("event") == eid]
 
 
 def landed(body: str, eid: str) -> tuple[bool, str]:
-    """層1：該 EID 的 `handback` 行在**讀回的** body 內**恰一行**。
+    """層1：該 EID 的 `handback` 行在**讀回的** body 內**恰一行**，且該行**自相一致**。
 
     為什麼判準是「讀回且恰一行」而不是「`write→read` 呼叫序」（`#313` §2.1 的更正）：
     呼叫序只在**同一程序內的首發**可觀測；重送與接收端是**另一個程序**，它看不到別人的
@@ -240,27 +329,46 @@ def landed(body: str, eid: str) -> tuple[bool, str]:
 
     「恰一行」**不對整張 issue 的全歷史計數**：同一 issue 的**不同階段**可以合法交回多次
     （`r1.approve`、`merge.done` 各一行），全歷史計數會把第二次合法交回誤判成重複。
+
+    **自相一致**（`AC-3`，第 1 輪 `R1` `BLOCK 3`）：行內 `issue`／`stage` 須與 EID 的對應
+    欄相符。寫入端已經擋了（`handback_line()`），但讀回端**不能依賴寫入端**——`gh` 誰都能
+    打，手寫或別的版本寫出來的矛盾行同樣會被讀到，判定端自己核才算判準。
     """
     hits = handback_rows(body, eid)
-    if len(hits) == 1:
-        return True, "ok"
-    return False, f"該事件的 handback 行數={len(hits)}（須恰 1，event={eid}）"
+    if len(hits) != 1:
+        return False, f"該事件的 handback 行數={len(hits)}（須恰 1，event={eid}）"
+    row = hits[0]
+    same, why = fields_match_event(eid, row.group("issue"), row.group("stage"))
+    if not same:
+        return False, f"該事件的 handback 行自相矛盾，不算落地：{why}"
+    return True, "ok"
 
 
-def received(body: str, eid: str) -> bool:
-    """層3：**接收端的持久 ack**。界線在這裡——交接完成 ＝ 對方確認收到，不是我送出了。"""
-    return any(m.group("event") == eid for m in ACK_RE.finditer(body))
+def received(body: str, eid: str, *, by: str = RECEIVER_PROFILE) -> bool:
+    """層3：**指定接收端**寫下的持久 ack。界線在這裡——交接完成 ＝ 對方確認收到。
+
+    `by` 必須是**指定的接收端**（`AC-2`，第 1 輪 `R1` `BLOCK 2`）：只比 EID 的版本會把
+    任何人寫的 ack 都算成「對方收到了」——實跑 `by=dfimpl` 的 ack 曾讓 `received` 與
+    `handoff_complete` 同時回 `True`。交接的完成界線是**那個指定的人**確認收到，不是
+    「有人說了一聲」；誰都能算的話，執行位可以自己替協調位簽收。
+    """
+    return any(m.group("event") == eid and m.group("by") == by
+               for m in ACK_RE.finditer(body))
 
 
-def processed(body: str, eid: str) -> bool:
-    """層4：處理結果。與層3 **分開**記；有 ack 無 done ＝ 收到了、還沒處理完。"""
-    return any(m.group("event") == eid for m in DONE_RE.finditer(body))
+def processed(body: str, eid: str, *, by: str = RECEIVER_PROFILE) -> bool:
+    """層4：**指定接收端**寫下的處理結果。與層3 **分開**記；有 ack 無 done ＝ 還沒處理完。
+
+    `by` 的理由同 `received()`：處理結果要由**負責處理的人**記，別人代記不算。
+    """
+    return any(m.group("event") == eid and m.group("by") == by
+               for m in DONE_RE.finditer(body))
 
 
-def done_result(body: str, eid: str) -> str | None:
-    """該事件 `done` 行的 `result`（無則 `None`）。"""
+def done_result(body: str, eid: str, *, by: str = RECEIVER_PROFILE) -> str | None:
+    """該事件 `done` 行的 `result`（無則 `None`）。同樣限定寫者為指定接收端。"""
     for m in DONE_RE.finditer(body):
-        if m.group("event") == eid:
+        if m.group("event") == eid and m.group("by") == by:
             return m.group("result")
     return None
 
@@ -282,18 +390,30 @@ class Delivery(NamedTuple):
 
 def emit_handback(forge: Any, *, event: str, issue: str | int, seat: str, stage: str,
                   kind: str, outcome: str, at: str | None = None,
-                  body_text: str = "") -> Landing:
-    """層1 首發：**先讀**（去重）→ 寫 → **讀回**驗「恰一行」。
+                  body_text: str = "", outstanding_children: int | None = None,
+                  issue_closable: bool | None = None,
+                  postprocess_done: bool | None = None) -> Landing:
+    """層1 首發：**宣告閘門** → 先讀（去重）→ 寫 → **讀回**驗「恰一行且自相一致」。
+
+    **這是本模組唯一寫 `handback` 行的函式**，所以 `AC-1` 的宣告判準長在這裡（第 1 輪
+    `R1` `BLOCK 1`）：`declare_or_raise()` 在**任何 forge 呼叫之前**執行，不成立即 raise，
+    因此「非 mgr／尚有下游／後處理未完／`final` 不可結」四類**連 `forge.read()` 都不會
+    發生**，更不可能 `forge.comment()`。宣告事實（`outstanding_children`／
+    `issue_closable`／`postprocess_done`）**不得省略**——省略即 raise。
 
     `forge` 是注入的縫，只需兩個方法：`read() -> str`（該單目前所有可讀文字）與
-    `comment(body)`（留一則）。本模組不碰 `subprocess`，故測試零真 API。
+    `comment(body)`（留一則）。協定判定不碰 `subprocess`；真 `gh` 的 adapter 是
+    `GhForge`，它把兩個方法接到**單一處** `_capture()` 上。
 
     去重（`AC-3`）：寫入前先讀，該事件的行已存在就回 `skipped_exists`——**重試不產生
-    第二行**，也**不重寫**已落地的行（`#313` §1.3：已落地事件的不可變內容不因重試改動）。
-    `attempt` 不進行內，它只進待處理紀錄。
+    第二行**，也**不重寫**已落地的行（`#313` §1.3）。`attempt` 不進行內，只進待處理紀錄。
 
     寫入失敗或讀回看不到 ＝ **層1 不成立**，回傳的 `landed` 為假，`deliver()` 會拒絕投遞。
     """
+    # 宣告閘門在最前面：它不成立時，本函式**不得產生任何對外效果**。
+    declare_or_raise(seat=seat, kind=kind, issue_closable=issue_closable,
+                     outstanding_children=outstanding_children,
+                     postprocess_done=postprocess_done)
     line = handback_line(event=event, issue=issue, seat=seat, stage=stage,
                          kind=kind, outcome=outcome, at=at)
     try:
@@ -336,29 +456,33 @@ def deliver(landing: Landing, spawn: Callable[[], Any]) -> Delivery:
     return Delivery("sent", True, True, f"spawn={out!r}")
 
 
-def layers(body: str, eid: str, *, delivery: Delivery | None = None) -> dict[int, bool]:
-    """四層的當下狀態。層2 沒有 forge 上的對應物，故由 `delivery` 供給（缺 ＝ 未知為假）。"""
+def layers(body: str, eid: str, *, delivery: Delivery | None = None,
+           by: str = RECEIVER_PROFILE) -> dict[int, bool]:
+    """四層的當下狀態。層2 沒有 forge 上的對應物，故由 `delivery` 供給（缺 ＝ 未知為假）。
+
+    層3／層4 限定寫者為 `by`（指定接收端，`AC-2`）。
+    """
     return {
         1: landed(body, eid)[0],
         2: bool(delivery and delivery.sent),
-        3: received(body, eid),
-        4: processed(body, eid),
+        3: received(body, eid, by=by),
+        4: processed(body, eid, by=by),
     }
 
 
-def handoff_complete(body: str, eid: str) -> bool:
+def handoff_complete(body: str, eid: str, *, by: str = RECEIVER_PROFILE) -> bool:
     """**交接完成 ＝ 層1 ＋ 層3**。層4 另記，層2 不足以宣稱完成（`Popen` 不冒充接收）。"""
-    return landed(body, eid)[0] and received(body, eid)
+    return landed(body, eid)[0] and received(body, eid, by=by)
 
 
-def pending_events(body: str) -> list[str]:
+def pending_events(body: str, *, by: str = RECEIVER_PROFILE) -> list[str]:
     """尚未處理完的事件（有 `handback` 行而無 `done` 行）。已處理判準是 `done`，不是 `ack`。"""
     seen: list[str] = []
     for m in HANDBACK_RE.finditer(body):
         eid = m.group("event")
         if eid not in seen:
             seen.append(eid)
-    return [e for e in seen if not processed(body, e)]
+    return [e for e in seen if not processed(body, e, by=by)]
 
 
 # ── AC-4：恢復三態 ────────────────────────────────────────────────────────────
@@ -425,12 +549,22 @@ class Recovery(NamedTuple):
     detail: str
 
 
+PRECONDITION_UNMET = "precondition_unmet"
+
+
 def recover(forge: Any, eid: str, steps: Sequence[tuple[str, Callable[[str], Any]]],
             run: Callable[[str, str], Any], *, result: str = "recovered",
             by: str = RECEIVER_PROFILE, at: str | None = None) -> Recovery:
-    """中斷後的恢復：先對帳，再**只跑讀回為未做的步驟**，每一步**執行後再讀回**才算完成。
+    """中斷後的恢復：**先核前置層次**，再對帳，再只跑讀回為未做的步驟，每一步執行後再讀回。
 
-    三條硬界線（`AC-4`）：
+    四條硬界線：
+      0. **前置層次（`AC-2`，第 1 輪 `R1` `BLOCK 2`）**：`done` 是層4，它只能記在層1～3
+         之後。故 (i) **進場**先讀 forge，該 EID 的 `handback` 行不可讀回且唯一 → 判
+         `precondition_unmet`、**一步都不跑**（替一個不存在的事件補步驟是在無中生有）；
+         (ii) 寫 `done` **之前**再讀一次，要求層1 仍成立**且**層3（指定接收端的 ack）已
+         成立，否則不寫。第 1 輪的實跑現場：空 forge 上 `recover()` 直接寫出層4，
+         `layers` 為 `{1: False, 2: False, 3: False, 4: True}`。
+         層2 沒有 forge 上的對應物，其成立由層3 **蘊含**——對方寫得出 ack，投遞必然發生過。
       1. `indeterminate` → `escalate_human`，**一步都不重播**（不得把讀不到當未做，也不得
          盲目重播整段 handler——那會重做已完成的步驟）。
       2. **失敗或未核實的動作不得產生 `done`**：`run()` 沒拋例外**不等於**做成了（裁決位
@@ -440,6 +574,21 @@ def recover(forge: Any, eid: str, steps: Sequence[tuple[str, Callable[[str], Any
 
     `run(name, eid)` 吃事件 id，理由同 `read_state` 的 probe。
     """
+    def _snapshot() -> tuple[str | None, str]:
+        try:
+            return forge.read(), ""
+        except Exception as exc:  # noqa: BLE001 — 讀不到就不假設，交人
+            return None, f"forge 讀取失敗（{exc}）"
+
+    body, why = _snapshot()
+    if body is None:
+        return Recovery(PRECONDITION_UNMET, {}, [], False,
+                        f"前置層次無法核實：{why} → 一步都不跑、不寫 done")
+    ok1, why1 = landed(body, eid)
+    if not ok1:
+        return Recovery(PRECONDITION_UNMET, {}, [], False,
+                        f"層1 未成立（{why1}）→ 不得恢復、不得寫 done；一步都不跑")
+
     verdict, report = reconcile(steps, eid)
     if verdict == INDETERMINATE:
         unknown = [n for n, s in report.items() if s is UNKNOWN]
@@ -462,6 +611,22 @@ def recover(forge: Any, eid: str, steps: Sequence[tuple[str, Callable[[str], Any
             return Recovery("escalate_human", {**report, name: after}, ran, False,
                             f"步驟 {name} 執行後讀回為 {after!r}（非 True）→ 不寫 done，交人")
         report[name] = True
+
+    # 寫 done 前**再讀一次**：步驟可能剛改變了層3（例如本次才補寫 ack），而層1 也可能
+    # 在這段時間被別人動過。以寫入當下的狀態為準，不以進場時的快照為準。
+    body, why = _snapshot()
+    if body is None:
+        return Recovery(PRECONDITION_UNMET, report, ran, False,
+                        f"寫 done 前無法核實前置層次：{why} → 不寫 done，交人")
+    pre = layers(body, eid, by=by)
+    if not (pre[1] and pre[3]):
+        return Recovery(PRECONDITION_UNMET, report, ran, False,
+                        f"前置層次未齊備（層1={pre[1]}、層3={pre[3]}，層3 須為 by={by} 的 ack）"
+                        f"→ **不得寫 done**")
+    if processed(body, eid, by=by):
+        # 去重同 `emit_handback`：以**事件**為鍵，重跑不產生第二行（`AC-3`）。恢復本來就
+        # 可能被跑很多次，每次都補一行 `done` 會讓同一個事件的處理結果出現 N 份。
+        return Recovery(verdict, report, ran, True, "done 已存在，不寫第二行（以事件為鍵）")
     try:
         forge.comment(done_line(event=eid, result=result, by=by, at=at) + "\n")
     except Exception as exc:  # noqa: BLE001
@@ -604,6 +769,328 @@ def busy_message(issue: str | int, *, receiver: str = RECEIVER_PROFILE) -> str:
     return BUSY_CMD_FMT.format(profile=receiver, issue=issue)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 產品路徑（`#313` 第 1 輪 `R1` `BLOCK 4`）
+# ══════════════════════════════════════════════════════════════════════════════
+# 第 1 輪的缺口不是判準錯，是**沒有人呼叫這些判準**：`--handback-event` 的 EID 只當布林
+# 開關、接收端拿不到它；`failure_exit()`／ack／done 在 repo 內只有測試會呼叫；深度拒絕
+# 只留 stderr。以下三段把路徑接起來——
+#   relay 側（`devflow_relay.py` 的 `--handback-event` 分支）：把 EID 機械可讀地交給
+#       接收端（環境變數 ＋ prompt 前置通知）、派子程序**之前**核層1、各失敗出口呼叫
+#       `failure_exit()`。
+#   接收端側（本檔的 CLI）：`ack`／`done`／`recover`／`pending` 四個子命令。
+#   adapter：`GhForge`／`hermes_sender`，把 forge 與送訊接到**單一處** `_capture()`。
+# ⚠️ 接收端 seat **是否真的呼叫** `ack` 屬操作層（`I7`），不在本單；本單只保證那條路
+#    存在、可執行、且失敗時有可查的出口。**不新增**排程器、輪詢、watchdog 或鎖。
+
+# 交付 EID 的兩條路（兩條都要，理由不同）：
+#   環境變數——給程式讀（接收端的工具或下一支腳本可以直接取，不必解析自然語言）。
+#   prompt 前置通知——給**模型**讀（oneshot 的 seat 只看得到 prompt；EID 不在 prompt 裡
+#     就等於沒收到，第 1 輪的 `eid_in_child_cmd False` 即此）。
+EVENT_ENV = "DEVFLOW_HANDBACK_EVENT"
+# CLI 的腳本名：通知裡要給接收端**可照抄**的指令，故寫成 kit 內的相對路徑。
+CLI_PATH = "devflow/channels/scripts/telegram/_handback.py"
+
+
+def ack_command(issue: str | int, eid: str, *, thread: str | int,
+                profile: str = RECEIVER_PROFILE, python: str = "/usr/bin/python3") -> str:
+    """接收端寫 ack 的可照抄指令（層3）。"""
+    return (f"{python} {CLI_PATH} ack --issue {issue} --event {eid} "
+            f"--thread {thread} --by {profile}")
+
+
+def done_command(issue: str | int, eid: str, *, thread: str | int, result: str = "handled",
+                 profile: str = RECEIVER_PROFILE, python: str = "/usr/bin/python3") -> str:
+    """接收端寫處理結果的可照抄指令（層4）。"""
+    return (f"{python} {CLI_PATH} done --issue {issue} --event {eid} "
+            f"--thread {thread} --result {result} --by {profile}")
+
+
+def receiver_notice(issue: str | int, eid: str, *, thread: str | int,
+                    profile: str = RECEIVER_PROFILE) -> str:
+    """prompt 的前置通知：含 EID、ack／done 的指令、以及「它不代表整張單完成」的射程。
+
+    一行以上但只有一個事實來源（`eid`），故 prompt 與環境變數**不可能**不一致：relay 由
+    同一個值生成兩者，並在派子程序前以 `conflicting_event()` 核對呼叫者自帶的 prompt。
+    """
+    return (
+        f"relay 終態投遞（`#313`）：本棒是交接事件 `{eid}`（`#{issue}`）的**最後一棒**，"
+        f"之後沒有下一棒。\n"
+        f"收到後**先**寫並讀回 ack（層3 ＝ 交接完成界線）：`{ack_command(issue, eid, thread=thread, profile=profile)}`\n"
+        f"處理完再記結果（層4，**不代表整張 issue 完成、不授權合併**）："
+        f"`{done_command(issue, eid, thread=thread, profile=profile)}`\n"
+        f"事件識別同時放在環境變數 `{EVENT_ENV}`。"
+    )
+
+
+# prompt／環境裡出現的事件識別：`handback` 系三行的 `event=`，以及 `DEVFLOW_HANDBACK_EVENT=`。
+_EVENT_TOKEN_RE = re.compile(rf"(?:event=|{EVENT_ENV}=)(?P<eid>{EID_RE})")
+
+
+def event_tokens(text: str) -> list[str]:
+    """文字裡出現過的事件識別（去重、保序）。"""
+    out: list[str] = []
+    for m in _EVENT_TOKEN_RE.finditer(text or ""):
+        if m.group("eid") not in out:
+            out.append(m.group("eid"))
+    return out
+
+
+def conflicting_event(text: str, eid: str) -> str | None:
+    """文字裡**另一個**事件識別（有則回第一個，無則 `None`）。
+
+    `--handback-event` 說這是事件 A 的最後一棒，而呼叫者給的 prompt 裡寫著事件 B：
+    兩者必有一個是錯的，而**猜哪一個**會讓接收端替錯誤的事件簽收。故 relay 拒絕。
+    """
+    return next((t for t in event_tokens(text) if t != eid), None)
+
+
+# ── adapter：forge 與送訊的**單一處**出口 ──────────────────────────────────────
+# 本模組的協定判定一律吃注入的 `forge`／`send`（故測試零真 API、零真子程序）；真正打
+# `gh`／`hermes` 的只有下面這一處 `_capture()`，與 `devflow_relay.py:179` 的「縫只有一處」
+# 同一個理由與同一種寫法。relay 呼叫本檔時**傳自己的 `_capture`**，所以整條產品路徑上
+# 仍然只有 relay 那一個 `subprocess.run` 呼叫點。
+# 具名 instance（群組 id）可由環境覆寫，寫法同 `devflow_topic.py:23`。
+CHAT = os.environ.get("DEVFLOW_CHAT", "-1003546152597")
+# `gh issue view` 的 jq：body **＋全部留言**——三行 grammar 住留言，只讀 body 讀不到。
+GH_VIEW_JQ = ".body, (.comments[].body)"
+
+
+def _capture(cmd: list[str], *, timeout: int = 60) -> Any:
+    """跑一條短命指令並收回 stdout／stderr／rc。**本模組唯一的 `run` 呼叫點。**"""
+    return subprocess.run(cmd, capture_output=True, stdin=subprocess.DEVNULL,
+                          timeout=timeout, text=True)
+
+
+class GhForge:
+    """真 forge 的 adapter：`gh issue view --json body,comments` 讀、`gh issue comment` 寫。
+
+    **不帶 `-R`**：repo 依 cwd 的 git remote 判定（同 `devflow_relay.py` 的
+    `_write_handoff`——轉播器與本模組都不持有 repo 名）。`capture` 可注入，測試給假的。
+    """
+
+    def __init__(self, issue: str | int, *, capture: Callable[..., Any] | None = None) -> None:
+        self.issue = str(issue)
+        self._capture = capture or _capture
+        self.calls: list[str] = []
+
+    def read(self) -> str:
+        self.calls.append("read")
+        res = self._capture(["gh", "issue", "view", self.issue,
+                             "--json", "body,comments", "-q", GH_VIEW_JQ])
+        if getattr(res, "returncode", 0):
+            raise HandbackError(
+                f"讀不回 `#{self.issue}`：{(getattr(res, 'stderr', '') or '')[:200]}")
+        return getattr(res, "stdout", "") or ""
+
+    def comment(self, body: str) -> bool:
+        self.calls.append("write")
+        res = self._capture(["gh", "issue", "comment", self.issue, "--body", body])
+        if getattr(res, "returncode", 0):
+            raise HandbackError(
+                f"寫不進 `#{self.issue}`：{(getattr(res, 'stderr', '') or '')[:200]}")
+        return True
+
+
+def hermes_sender(profile: str, *, chat: str = CHAT,
+                  capture: Callable[..., Any] | None = None) -> Callable[[str, str], bool]:
+    """送訊 adapter：`hermes -p <profile> send -t telegram:<chat>:<thread> --json <text>`。"""
+    cap = capture or _capture
+
+    def send(thread: str, text: str) -> bool:
+        res = cap(["hermes", "-p", profile, "send",
+                   "-t", f"telegram:{chat}:{thread}", "--json", text])
+        return '"success": true' in (getattr(res, "stdout", "") or "")
+
+    return send
+
+
+# ── 接收端的入口（CLI）──────────────────────────────────────────────────────────
+def ack_steps(forge: Any, *, eid: str, by: str, at: str | None = None
+              ) -> tuple[list[tuple[str, Callable[[str], Any]]], Callable[[str, str], Any]]:
+    """`recover` 用的協定步驟：唯一一步是「該事件的 ack 已由 `by` 寫下」。
+
+    probe **向 forge 讀回**（不是讀記憶體裡的旗標），action 寫 ack；`recover()` 會在執行
+    後再讀回同一個 probe，故「寫了但讀不回」不會被記成完成（`AC-4`）。
+    """
+    def probe(event: str) -> Any:
+        return received(forge.read(), event, by=by)
+
+    def run(name: str, event: str) -> Any:
+        return forge.comment(ack_line(event=event, by=by, at=at) + "\n")
+
+    return [("ack", probe)], run
+
+
+def _fail(args, reason: str, detail: str = "") -> FailureExit:
+    """CLI 的失敗出口：topic ＋ General ＋ 待處理紀錄（`AC-6`）。"""
+    return failure_exit(issue=args.issue, eid=args.event, reason=reason,
+                        topic_thread=str(args.thread),
+                        send=hermes_sender(args.by, capture=_capture),
+                        home=pathlib.Path(args.home), profile=args.by,
+                        attempt=args.attempt, detail=detail)
+
+
+def cmd_ack(args) -> int:
+    """層3：依**收到的同一個 EID** 寫 ack 並**讀回**。層1 不成立即拒絕並走失敗出口。"""
+    forge = GhForge(args.issue, capture=_capture)
+    try:
+        body = forge.read()
+    except HandbackError as exc:
+        print(f"[handback] 讀不回該單，層1 無法核實：{exc}", file=sys.stderr)
+        print(_fail(args, "land_failed", str(exc)).text)
+        return 2
+    ok1, why1 = landed(body, args.event)
+    if not ok1:
+        print(f"[handback] 層1 未成立，拒絕寫 ack：{why1}", file=sys.stderr)
+        print(_fail(args, "land_failed", why1).text)
+        return 2
+    if received(body, args.event, by=args.by):
+        print(f"[handback] ack 已存在，不寫第二行：{args.event}")
+        return 0
+    try:
+        forge.comment(ack_line(event=args.event, by=args.by, at=args.at) + "\n")
+    except HandbackError as exc:
+        print(f"[handback] ack 寫入失敗：{exc}", file=sys.stderr)
+        print(_fail(args, "no_ack", str(exc)).text)
+        return 1
+    try:
+        after = forge.read()
+    except HandbackError as exc:
+        print(f"[handback] ack 寫了但讀不回，結果未定：{exc}", file=sys.stderr)
+        print(_fail(args, "indeterminate", str(exc)).text)
+        return 1
+    if not received(after, args.event, by=args.by):
+        print("[handback] ack 寫了但讀回看不到（層3 未成立）", file=sys.stderr)
+        print(_fail(args, "no_ack", "寫入後讀回看不到 ack").text)
+        return 1
+    print(f"[handback] 層3 成立（交接完成界線）：event={args.event} by={args.by}")
+    return 0
+
+
+def cmd_done(args) -> int:
+    """層4：前置層次（層1 ＋ 層3）齊備才寫 done，寫後讀回。"""
+    forge = GhForge(args.issue, capture=_capture)
+    try:
+        body = forge.read()
+    except HandbackError as exc:
+        print(f"[handback] 讀不回該單：{exc}", file=sys.stderr)
+        print(_fail(args, "indeterminate", str(exc)).text)
+        return 2
+    pre = layers(body, args.event, by=args.by)
+    if not (pre[1] and pre[3]):
+        why = f"前置層次未齊備（層1={pre[1]}、層3={pre[3]}）→ 不得寫 done"
+        print(f"[handback] {why}", file=sys.stderr)
+        print(_fail(args, "no_ack" if pre[1] else "land_failed", why).text)
+        return 2
+    if processed(body, args.event, by=args.by):
+        print(f"[handback] done 已存在，不寫第二行：{args.event}")
+        return 0
+    try:
+        forge.comment(done_line(event=args.event, result=args.result,
+                                by=args.by, at=args.at) + "\n")
+        after = forge.read()
+    except HandbackError as exc:
+        print(f"[handback] done 寫入或讀回失敗，結果未定：{exc}", file=sys.stderr)
+        print(_fail(args, "indeterminate", str(exc)).text)
+        return 1
+    if not processed(after, args.event, by=args.by):
+        print("[handback] done 寫了但讀回看不到，結果未定", file=sys.stderr)
+        print(_fail(args, "indeterminate", "寫入後讀回看不到 done").text)
+        return 1
+    print(f"[handback] 層4 已記（本交接事件的處理結果，不代表整張 issue 完成）："
+          f"result={args.result}")
+    return 0
+
+
+def cmd_recover(args) -> int:
+    """中斷後的恢復：對帳 → 只補未做的步驟（ack）→ 前置齊備才寫 done。結果未定一律交人。"""
+    forge = GhForge(args.issue, capture=_capture)
+    steps, run = ack_steps(forge, eid=args.event, by=args.by, at=args.at)
+    rec = recover(forge, args.event, steps, run, result=args.result,
+                  by=args.by, at=args.at)
+    print(f"[handback] verdict={rec.verdict} ran={rec.ran} "
+          f"done_written={rec.done_written} detail={rec.detail}")
+    if rec.verdict in (RESUME_SAFE, RECORD_ONLY) and rec.done_written:
+        ok, why = clear_pending(args.by, args.issue, args.event,
+                                home=pathlib.Path(args.home), result=rec.verdict)
+        print(f"[handback] 待處理紀錄：{'已清除' if ok else why}")
+        return 0
+    reason = "indeterminate" if rec.verdict in ("escalate_human", INDETERMINATE) else "land_failed"
+    print(_fail(args, reason, rec.detail).text)
+    return 1
+
+
+def cmd_pending(args) -> int:
+    """唯讀：列該 profile 的待處理紀錄，以及（給了 `--issue` 時）該單未處理完的事件。"""
+    root = pending_dir(args.by, home=pathlib.Path(args.home))
+    files = sorted(root.glob("*.json")) if root.exists() else []
+    print(f"[handback] 待處理紀錄 {len(files)} 筆（{root}）")
+    for path in files:
+        try:
+            rec = json.loads(path.read_text())
+        except (OSError, ValueError) as exc:
+            print(f"  ⚠️ {path.name}：讀不出來（{exc}）")
+            continue
+        print(f"  {path.name}：reason={rec.get('reason')} result={rec.get('result')} "
+              f"attempt={rec.get('attempt')} at={rec.get('at')}")
+    if args.issue:
+        try:
+            body = GhForge(args.issue, capture=_capture).read()
+        except HandbackError as exc:
+            print(f"[handback] 該單讀不回：{exc}", file=sys.stderr)
+            return 2
+        print(f"[handback] `#{args.issue}` 未處理完的事件："
+              f"{pending_events(body, by=args.by) or '（無）'}")
+    return 0
+
+
+def build_parser():
+    """CLI。`--home` 顯式可注入（測試不碰真的 `~/.hermes/profiles/`）。"""
+    import argparse  # noqa: PLC0415 — 只有 CLI 需要它，import 進函式讓 library 用法不付代價
+
+    ap = argparse.ArgumentParser(
+        prog=CLI_PATH, description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    def common(p, *, need_thread: bool = True):
+        p.add_argument("--issue", required=True, help="單號")
+        p.add_argument("--event", required=True, help="交接事件識別（EID）")
+        p.add_argument("--thread", required=need_thread, default="",
+                       help="該單 topic 的 thread id（失敗出口要送進去）")
+        p.add_argument("--by", default=RECEIVER_PROFILE, help="接收端 profile（層3／層4 的寫者）")
+        p.add_argument("--at", default=None, help="時刻（預設取本機時鐘）")
+        p.add_argument("--attempt", type=int, default=1, help="第幾次嘗試（只進待處理紀錄）")
+        p.add_argument("--home", default=str(pathlib.Path.home()),
+                       help="待處理紀錄的 HOME（預設本機 HOME）")
+
+    common(sub.add_parser("ack", help="寫並讀回 ack（層3 ＝ 交接完成界線）"))
+    p_done = sub.add_parser("done", help="記本交接事件的處理結果（層4）")
+    common(p_done)
+    p_done.add_argument("--result", default="handled", help="處理結果（小寫英數與 `_`）")
+    p_rec = sub.add_parser("recover", help="中斷後對帳並補未做的步驟（三態）")
+    common(p_rec)
+    p_rec.add_argument("--result", default="recovered", help="恢復後記的處理結果")
+    p_pending = sub.add_parser("pending", help="唯讀：列待處理紀錄與未處理完的事件")
+    p_pending.add_argument("--issue", default="", help="單號（給了才讀 forge）")
+    p_pending.add_argument("--event", default="", help="（未用，與其餘子命令同形）")
+    p_pending.add_argument("--thread", default="", help="（未用）")
+    p_pending.add_argument("--by", default=RECEIVER_PROFILE, help="profile")
+    p_pending.add_argument("--at", default=None, help="（未用）")
+    p_pending.add_argument("--attempt", type=int, default=1, help="（未用）")
+    p_pending.add_argument("--home", default=str(pathlib.Path.home()), help="HOME")
+    return ap
+
+
+COMMANDS = {"ack": cmd_ack, "done": cmd_done, "recover": cmd_recover, "pending": cmd_pending}
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    return COMMANDS[args.cmd](args)
+
+
 def describe() -> Iterable[str]:
     """一行一項的自述，給讀 log 的人。沒有副作用、不碰 forge。"""
     return (
@@ -614,4 +1101,10 @@ def describe() -> Iterable[str]:
         f"EID：<issue>-<stage>-<basis>，basis 取既存觸發紀錄的 comment ID（{BASIS_FIELD}）",
         f"恢復三態：{RESUME_SAFE}／{RECORD_ONLY}／{INDETERMINATE}（未定一步都不重播）",
         f"待處理紀錄：~/.hermes/profiles/<profile>/{PENDING_DIRNAME}/<issue>-<EID>.json",
+        f"EID 交付：環境變數 {EVENT_ENV} ＋ prompt 前置通知（兩者由同一個值生成）",
+        f"接收端入口：{CLI_PATH} ack｜done｜recover｜pending",
     )
+
+
+if __name__ == "__main__":
+    sys.exit(main())
