@@ -52,6 +52,7 @@ from _handback import (  # noqa: E402 — 同目錄；終態交回協定的單�
     landed as handback_landed,
     received as handback_received,
     receiver_notice as handback_receiver_notice,
+    validate_pending_key as handback_validate_key,
 )
 
 CHAT = "-1003546152597"
@@ -580,15 +581,23 @@ def _handback_failure(issue: str | None, eid: str, reason: str, *,
     仍然印（給當場盯著看的人），但**不是唯一出口**。
 
     `home` 取 `pathlib.Path.home()`（即 `$HOME`）：待處理紀錄落該 profile 自己的目錄，
-    有 profile 與本單歸屬。失敗出口自己失敗時只警告——它已經是最後一道，不再往上拋。
+    有 profile 與本單歸屬。
+
+    第 2 輪 `R1` `BLOCK 1`：本函式原本把 `failure_exit()` 整段包在一個 `try` 裡，於是
+    pending 寫不成時（`$HOME` 不是目錄、權限不足、磁碟滿）**連兩則告警都沒送**就落到
+    `except` 印一行 stderr——那正是「只留 stderr」的那個形狀。現在三處出口各自嘗試由
+    `failure_exit()` 自己負責，本函式只負責把**三處的成敗各自**印出來；真的連 `send`
+    都湊不出來（例如 import 掛掉）才走最後那個 `except`。
     """
     try:
         fx = handback_failure_exit(
             issue=issue or "?", eid=eid, reason=reason, topic_thread=thread,
             send=lambda t, text: _send(profile, t, text),
             home=pathlib.Path.home(), profile=profile, detail=detail)
+        pending_state = (f"待處理紀錄 {fx.pending_file}" if fx.pending_written
+                         else f"⚠️ 待處理紀錄未落地（{fx.pending_error}）")
         print(f"[relay] ⚠️ 終態投遞失敗（{reason}）：告警已送 thread {fx.threads}"
-              f"（嘗試 {fx.attempted}）、待處理紀錄 {fx.pending_file}", file=sys.stderr)
+              f"（嘗試 {fx.attempted}）、{pending_state}", file=sys.stderr)
     except Exception as exc:  # noqa: BLE001 — 失敗出口自己掛掉不得再往上炸
         print(f"[relay] ⚠️ 終態投遞的失敗出口自己也失敗了（{reason}）：{exc}",
               file=sys.stderr)
@@ -645,6 +654,18 @@ def main() -> int:
               "終態投遞要在派子程序之前核實該事件的 handback 行已落地（層1），"
               "沒有單號讀不到 forge", file=sys.stderr)
         return 2
+
+    if args.handback_event:
+        # `#313` 第 2 輪 `R1` `BLOCK 2`：EID／單號／profile 會被拼進待處理紀錄的路徑
+        # （`~/.hermes/profiles/<profile>/handback-pending/<issue>-<EID>.json`）。
+        # `../../../escaped` 這種值會讓那個檔落到 `handback-pending` 外面——沒有歸屬、
+        # `pending` 子命令也列不到，等於把「結果未定」靜悄悄丟掉。公開入口先擋。
+        try:
+            handback_validate_key(args.profile, args.issue, args.handback_event)
+        except Exception as exc:  # noqa: BLE001 — HandbackError，入口拒絕不往上炸
+            print(f"[relay] --handback-event 的值不合法，拒絕終態投遞：{exc}",
+                  file=sys.stderr)
+            return 2
 
     if args.issue and not args.then_wake and not args.handback_event:
         # 判準用 `--issue` 而不是 profile 名：後者要 relay 硬編碼 seat 的角色名，

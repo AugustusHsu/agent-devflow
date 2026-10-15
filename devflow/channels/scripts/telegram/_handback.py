@@ -644,6 +644,9 @@ BUSY_CMD_FMT = "hermes -p {profile} chat -c issue-{issue}"
 # 失敗出口**不自動續接**。宣稱自動續接會讓人以為有東西在兜底而不去看——那正是 `#310`
 # 「以為已經交回」的同形。這句字面進每一則告警，測試對它有斷言。
 NO_AUTO_RESUME = "本出口不自動續接、不自動重試：需人介入"
+# 待處理紀錄沒落地時，兩則告警裡要出現的字面（第 2 輪 `R1` `BLOCK 1`）。三處出口少了一處
+# 這件事本身就是要被看見的訊息，不能只在回傳值裡。
+PENDING_NOT_WRITTEN = "⚠️ 待處理紀錄**未落地**"
 
 FAIL_REASONS = {
     "busy": "接收端的同名 session 已有 chat 在跑（具名到 session，見指令）",
@@ -664,10 +667,49 @@ def pending_dir(profile: str, *, home: pathlib.Path) -> pathlib.Path:
     return pathlib.Path(home) / ".hermes" / "profiles" / profile / PENDING_DIRNAME
 
 
+# 檔名三欄的合法字元（`#313` 第 2 輪 `R1` `BLOCK 2`）：`profile` 只收 ASCII 單字字元、
+# `.` 與 `-`；路徑分隔符、`..`、空白一律不收。issue 只收數字、EID 須合 `EID_RE` **整串**。
+_PROFILE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+_ISSUE_RE = re.compile(r"[0-9]+")
+
+
+def validate_pending_key(profile: str, issue: str | int, eid: str) -> tuple[str, str, str]:
+    """把要拼進檔名的三欄驗過再回傳，不合即 raise（`AC-6`／`BLOCK 2`）。
+
+    為什麼在這裡擋而不是只靠最後一道 `is_relative_to`：EID 來自**公開入口**
+    （`devflow_relay.py --handback-event`、本檔 CLI 的 `--event`），`../../../escaped`
+    這種值會讓待處理紀錄落在 `handback-pending` 外面——那個檔從此沒有 profile 歸屬、
+    `pending` 子命令也列不到它，等於「結果未定」這件事被靜悄悄地丟掉（`AC-6` 正是在防
+    這件事）。路徑拼接前先驗，比事後發現檔案在奇怪的地方好查。
+    """
+    bad: list[str] = []
+    if not _PROFILE_RE.fullmatch(str(profile)):
+        bad.append(f"profile={profile!r}（只收 ASCII 單字字元、`.`、`-`，不得含路徑分隔符）")
+    if not _ISSUE_RE.fullmatch(str(issue)):
+        bad.append(f"issue={issue!r}（只收數字）")
+    if not re.fullmatch(EID_RE, str(eid)):
+        bad.append(f"event={eid!r}（須合 EID grammar `<issue>-<stage>-<basis>` 整串）")
+    if bad:
+        raise HandbackError("待處理紀錄的鍵不合法，拒絕拼出路徑（`AC-6`）："
+                            + "；".join(bad))
+    return str(profile), str(issue), str(eid)
+
+
 def pending_path(profile: str, issue: str | int, eid: str, *,
                  home: pathlib.Path) -> pathlib.Path:
-    """`<…>/handback-pending/<issue>-<EID>.json`——**有 profile 與本單歸屬**。"""
-    return pending_dir(profile, home=home) / f"{issue}-{eid}.json"
+    """`<…>/handback-pending/<issue>-<EID>.json`——**有 profile 與本單歸屬**。
+
+    三欄先過 `validate_pending_key()`，拼完再加一道 `is_relative_to(root)` 的最後防線：
+    驗證規則可能有人日後放寬，但「不得解析到 `handback-pending` 外」這條不該靠規則的
+    周全度來保證（`#312` 的 `startswith` 教訓：前綴相同的**兄弟**目錄也會被誤判為在其下，
+    故一律用 `resolve()` ＋ `is_relative_to`，不比字串）。
+    """
+    profile, issue, eid = validate_pending_key(profile, issue, eid)
+    root = pending_dir(profile, home=home)
+    path = root / f"{issue}-{eid}.json"
+    if not path.resolve().is_relative_to(root.resolve()):
+        raise HandbackError(f"待處理紀錄的路徑逃出 {PENDING_DIRNAME}，拒絕：{path}")
+    return path
 
 
 def write_pending(profile: str, issue: str | int, eid: str, *, home: pathlib.Path,
@@ -712,8 +754,14 @@ def clear_pending(profile: str, issue: str | int, eid: str, *, home: pathlib.Pat
 
 def failure_text(*, issue: str | int, eid: str, reason: str, detail: str = "",
                  pending_file: pathlib.Path | str = "",
-                 receiver: str = RECEIVER_PROFILE) -> str:
-    """告警文字。一則同時送 topic 與 General，故字面只有一份、兩邊不會漂移。"""
+                 receiver: str = RECEIVER_PROFILE,
+                 pending_error: str = "") -> str:
+    """告警文字。一則同時送 topic 與 General，故字面只有一份、兩邊不會漂移。
+
+    `pending_error`（第 2 輪 `R1` `BLOCK 1`）：待處理紀錄沒落地時，**告警自己要說出來**。
+    否則收到告警的人會去翻一個不存在的檔，而「本機還有一份可查的紀錄」這個預設也就靜悄悄
+    地失效了——三處出口裡少了一處，必須在剩下兩處的文字裡看得到。
+    """
     lines = [f"⚠️ **終態交回失敗**：`#{issue}`　事件 `{eid}`",
              f"原因（`{reason}`）：{FAIL_REASONS.get(reason, reason)}"]
     if reason == "busy":
@@ -721,7 +769,10 @@ def failure_text(*, issue: str | int, eid: str, reason: str, detail: str = "",
                      + "` 的同名 session 已有 chat 在跑")
     if detail:
         lines.append(f"現場：{detail}")
-    if pending_file:
+    if pending_error:
+        lines.append(f"{PENDING_NOT_WRITTEN}：{pending_error}"
+                     f"（本機沒有可查的那一份，只剩這則告警——請直接處置本事件）")
+    elif pending_file:
         lines.append(f"待處理紀錄：`{pending_file}`")
     lines.append(NO_AUTO_RESUME)
     return "\n".join(lines)
@@ -731,7 +782,12 @@ class FailureExit(NamedTuple):
     text: str
     threads: list[str]                 # 實際送達（`send` 回真）的 thread
     attempted: list[str]               # 嘗試送出的 thread（含失敗者）
-    pending_file: pathlib.Path
+    pending_file: pathlib.Path | None   # 落地的待處理紀錄；`None` ＝ 沒寫成
+    pending_error: str = ""             # 沒寫成的原因（空字串 ＝ 寫成了）
+
+    @property
+    def pending_written(self) -> bool:
+        return self.pending_file is not None and not self.pending_error
 
 
 def failure_exit(*, issue: str | int, eid: str, reason: str,
@@ -743,15 +799,26 @@ def failure_exit(*, issue: str | int, eid: str, reason: str,
 
     三件事都要，缺一不可（`AC-6`）：**不得只留 stderr**（oneshot 下 stderr 沒有讀者，
     那正是本族缺陷的形狀，`#287` 的 5-byte log）、**不得只留 headless 最終回覆**
-    （`#310` 的現場：寫得完整、沒有人收到）。送訊失敗**不中斷**——紀錄仍要落地，否則
-    通道掛掉時連「有一件事沒收尾」都查不到；哪幾個 thread 送成功在回傳值裡。
+    （`#310` 的現場：寫得完整、沒有人收到）。
 
-    待處理紀錄先寫、後送訊：送訊會失敗，寫檔是本機的，先把可查的那一份固定下來。
+    **三處各自嘗試、各自記錄成敗，任何一處失敗都不短路**（第 2 輪 `R1` `BLOCK 1`）：
+    先寫 pending 的版本有一個致命形狀——`home` 不是目錄、磁碟滿、權限不足時 `write_pending`
+    會拋，於是 topic 與 General **連嘗試都沒有**，整個出口退化成只剩 stderr，正是本 AC
+    要防的那件事。現在 pending 寫入失敗只是**一個獨立的壞消息**：它會寫進告警文字裡
+    （讓收到告警的人知道「本機那份紀錄沒落地」），而兩則告警照送。
+    反過來也一樣：送訊失敗不影響已落地的 pending。
     """
-    pending = write_pending(profile, issue, eid, home=home, reason=reason,
-                            attempt=attempt, detail=detail, result=INDETERMINATE, at=at)
+    pending: pathlib.Path | None = None
+    pending_error = ""
+    try:
+        pending = write_pending(profile, issue, eid, home=home, reason=reason,
+                                attempt=attempt, detail=detail,
+                                result=INDETERMINATE, at=at)
+    except Exception as exc:  # noqa: BLE001 — 寫不成就寫不成，不得吃掉另外兩處
+        pending_error = f"{type(exc).__name__}: {exc}"
     text = failure_text(issue=issue, eid=eid, reason=reason, detail=detail,
-                        pending_file=pending, receiver=profile)
+                        pending_file=pending or "", receiver=profile,
+                        pending_error=pending_error)
     attempted: list[str] = []
     delivered_to: list[str] = []
     for thread in (str(topic_thread), str(general_thread)):
@@ -759,9 +826,9 @@ def failure_exit(*, issue: str | int, eid: str, reason: str,
         try:
             if send(thread, text):
                 delivered_to.append(thread)
-        except Exception:  # noqa: BLE001 — 送訊失敗不中斷，紀錄已落地
+        except Exception:  # noqa: BLE001 — 一處送訊失敗不影響另一處與 pending
             continue
-    return FailureExit(text, delivered_to, attempted, pending)
+    return FailureExit(text, delivered_to, attempted, pending, pending_error)
 
 
 def busy_message(issue: str | int, *, receiver: str = RECEIVER_PROFILE) -> str:
@@ -823,12 +890,19 @@ def receiver_notice(issue: str | int, eid: str, *, thread: str | int,
     )
 
 
-# prompt／環境裡出現的事件識別：`handback` 系三行的 `event=`，以及 `DEVFLOW_HANDBACK_EVENT=`。
+# prompt／環境裡出現的事件識別：**只認約定的結構化欄位**——`handback` 系三行的 `event=`
+# 與 `DEVFLOW_HANDBACK_EVENT=`。**不掃散文裡裸寫的 EID**（第 2 輪 `R1` `BLOCK 3`，manager
+# 取 (b)）：那會誤殺合法的 prompt——交接稿本來就常引用別單的事件識別當材料（「`#312` 的
+# `312-…` 那次」），把任意提及當衝突會讓正當投遞被擋下。射程寫在 `telegram.md` 的值欄，
+# 兩邊必須一致（`R7`）。
 _EVENT_TOKEN_RE = re.compile(rf"(?:event=|{EVENT_ENV}=)(?P<eid>{EID_RE})")
 
 
 def event_tokens(text: str) -> list[str]:
-    """文字裡出現過的事件識別（去重、保序）。"""
+    """文字裡以 `event=`／`DEVFLOW_HANDBACK_EVENT=` 標示的事件識別（去重、保序）。
+
+    ⚠️ **射程**：只認上面兩個前綴。散文裡裸寫的 ``313-r1.approve-…`` 不算（見上方註解）。
+    """
     out: list[str] = []
     for m in _EVENT_TOKEN_RE.finditer(text or ""):
         if m.group("eid") not in out:
@@ -837,10 +911,13 @@ def event_tokens(text: str) -> list[str]:
 
 
 def conflicting_event(text: str, eid: str) -> str | None:
-    """文字裡**另一個**事件識別（有則回第一個，無則 `None`）。
+    """文字裡以約定欄位標示的**另一個**事件識別（有則回第一個，無則 `None`）。
 
-    `--handback-event` 說這是事件 A 的最後一棒，而呼叫者給的 prompt 裡寫著事件 B：
-    兩者必有一個是錯的，而**猜哪一個**會讓接收端替錯誤的事件簽收。故 relay 拒絕。
+    `--handback-event` 說這是事件 A 的最後一棒，而呼叫者給的 prompt 裡用 `event=` 標著
+    事件 B：兩者必有一個是錯的，而**猜哪一個**會讓接收端替錯誤的事件簽收。故 relay 拒絕。
+
+    ⚠️ **不是 EID 的全文搜尋**：散文裡提到另一個 EID 回 `None`（刻意，見上方註解）。
+    這條防護擋的是「機械可讀的兩個值互相矛盾」，不是「文字裡有別的單號」。
     """
     return next((t for t in event_tokens(text) if t != eid), None)
 
@@ -1088,6 +1165,18 @@ COMMANDS = {"ack": cmd_ack, "done": cmd_done, "recover": cmd_recover, "pending":
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    # 公開入口的鍵驗證（第 2 輪 `R1` `BLOCK 2`）：`--event`／`--issue`／`--by` 會被拼進
+    # 待處理紀錄的路徑，`../../../escaped` 這種值在進任何一條程式路徑之前就要被擋掉。
+    # `pending` 子命令只列目錄、不吃 EID，故只驗 profile（其 `--event` 是同形佔位）。
+    try:
+        if args.cmd == "pending":
+            # `pending` 只列目錄、不吃 EID：拿一個固定的合法樣本填另兩欄，驗的是 profile。
+            validate_pending_key(args.by, "0", "0-x-x")
+        else:
+            validate_pending_key(args.by, args.issue, args.event)
+    except HandbackError as exc:
+        print(f"[handback] 入口拒絕：{exc}", file=sys.stderr)
+        return 2
     return COMMANDS[args.cmd](args)
 
 

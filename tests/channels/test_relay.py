@@ -2415,6 +2415,50 @@ check("#313 BLOCK 4(1) prompt 與旗標的事件不一致 → rc 2、零子程�
       rc4b == 2 and len(f4b.spawned) == 0 and _other in err4b,
       f"rc={rc4b} spawned={len(f4b.spawned)} err={err4b[:200]!r}")
 
+# (2b) 第 3 輪 `BLOCK 3`：衝突偵測的**射程**——只認約定的結構化欄位。
+# manager 取 (b)（收窄宣稱、不擴成掃散文），故這裡要有**正反兩條**：結構化欄位衝突要擋、
+# 散文裡裸寫的別單 EID **不**擋。後者是宣稱射程的反向斷言，不是漏洞——交接稿常引用別單的
+# 事件識別當材料，把任意提及當衝突會讓正當的終態投遞被擋下。`telegram.md` 值欄同此說法。
+f4b2 = FakeSub(LINES)
+rc4b2, _, _err4b2 = with_env(hb_env(), lambda: run(
+    ["4149", f"請處理交接事件 `{_other}`，不要處理其他事件", "-p", "dfcoord",
+     "--issue", "313", "--handback-event", P313_EID], f4b2))
+check("#313 BLOCK 3 散文裡裸寫的別單 EID **不**拒絕（宣稱射程的反向斷言）",
+      rc4b2 == 0 and len(f4b2.spawned) == 1,
+      f"rc={rc4b2} spawned={len(f4b2.spawned)} err={_err4b2[:200]!r}")
+check("#313 BLOCK 3 那一棒仍以本旗標的事件投遞（散文裡的別單 EID 不會頂替它）",
+      P313_EID in f4b2.spawned[0][f4b2.spawned[0].index("-q") + 1]
+      and f4b2.kwargs[0].get("env", {}).get("DEVFLOW_HANDBACK_EVENT") == P313_EID,
+      f"env={f4b2.kwargs[0].get('env', {}).get('DEVFLOW_HANDBACK_EVENT')!r}")
+f4b3 = FakeSub(LINES)
+rc4b3, _, err4b3 = with_env(hb_env(), lambda: run(
+    ["4149", f"環境裡另一個：{hbm.EVENT_ENV}={_other}", "-p", "dfcoord",
+     "--issue", "313", "--handback-event", P313_EID], f4b3))
+check("#313 BLOCK 3 `DEVFLOW_HANDBACK_EVENT=` 標示的衝突同樣擋（兩個約定欄位都算）",
+      rc4b3 == 2 and len(f4b3.spawned) == 0 and _other in err4b3,
+      f"rc={rc4b3} spawned={len(f4b3.spawned)}")
+
+# (2c) 第 3 輪 `BLOCK 2`：`--handback-event` 的值會被拼進待處理紀錄的路徑 → 入口先驗。
+for _lbl, _ev in [("逃出目錄", "../../../escaped"),
+                  ("不合 grammar", "X"),
+                  ("帶路徑分隔符", "313-r1.approve-/etc/passwd")]:
+    hb_reset_pending()
+    _f4k = FakeSub(LINES)
+    _rc4k, _, _err4k = with_env(hb_env(), lambda f=_f4k, e=_ev: run(
+        ["4149", "hi", "-p", "dfcoord", "--issue", "313", "--handback-event", e], f))
+    check(f"#313 BLOCK 2 relay 入口拒絕不合法的 EID（{_lbl}）→ rc 2、零子程序、零 gh",
+          _rc4k == 2 and len(_f4k.spawned) == 0 and _f4k.gh_calls == []
+          and hb_pending_files() == [],
+          f"rc={_rc4k} spawned={len(_f4k.spawned)} gh={len(_f4k.gh_calls)} "
+          f"pending={hb_pending_files()!r}")
+_f4k2 = FakeSub(LINES)
+_rc4k2, _, _err4k2 = with_env(hb_env(), lambda: run(
+    ["4149", "hi", "-p", "dfcoord", "--issue", "../../x",
+     "--handback-event", P313_EID], _f4k2))
+check("#313 BLOCK 2 relay 入口同樣驗單號（會進檔名的另一欄）→ rc 2、零子程序",
+      _rc4k2 == 2 and len(_f4k2.spawned) == 0 and "issue=" in _err4k2,
+      f"rc={_rc4k2} err={_err4k2[:200]!r}")
+
 # (3) 層1 前置：讀不到該 EID 的 handback 行 → 不派子程序，走失敗出口。
 hb_reset_pending()
 f4c = FakeSub(LINES, issue_body="這張單上沒有任何 handback 行。")
@@ -2457,6 +2501,34 @@ check("#313 BLOCK 4(4) `DEPTH=3` 的終態投遞：rc 2、零子程序**且**top
 check("#313 BLOCK 4(4) 深度拒絕的既有 stderr 訊息一字未動（新出口是**加上去**的）",
       P312_LIMIT_SENTENCE in err4d and P312_LEADING_SENTENCE in err4d,
       f"err={err4d[-200:]!r}")
+
+# (4b) 第 3 輪 `BLOCK 1`：pending 寫不成時，relay 仍要把兩則告警送出去。
+# 第 2 輪的現場是兩層短路：`failure_exit()` 先寫 pending、失敗即拋，而 relay 的
+# `_handback_failure()` 把整段包在一個 `try` 裡——於是 `$HOME` 不是目錄時，topic 與
+# General **連嘗試都沒有**，只剩一行 stderr。這裡用「HOME 指向一個普通檔案」重現那個
+# 條件（`mkdir(parents=True)` 必拋），要求兩則告警照送、且 stderr 明說紀錄沒落地。
+# 鑑別力：產品修好後 relay 已**結構上**無法短路（`failure_exit()` 自己不拋了），故同述詞
+# 的突變對照放在 `tests/channels/test_handback.py` 的「第 3 輪 BLOCK 1」一節（舊實作
+# ＝ 先寫 pending、失敗即拋 → `send_attempts []`）。
+hb_reset_pending()
+P313_HOME_FILE = TESTTMP / "home-is-a-file"
+P313_HOME_FILE.write_text("x")
+f4i = FakeSub(LINES, issue_body="這張單上沒有任何 handback 行。")
+rc4i, _, err4i = with_env({DEPTH_KEY: None, CHAIN_KEY: None, "HOME": str(P313_HOME_FILE)},
+                          lambda: run(["4149", "hi", "-p", "dfcoord", "--issue", "313",
+                                       "--handback-event", P313_EID], f4i))
+check("#313 BLOCK 1 pending 寫不成（HOME 是檔案）→ 兩則告警仍落 topic ＋ General",
+      rc4i == 2 and len(f4i.spawned) == 0
+      and hb_alert_threads(f4i) == ["4149", "1"] and len(hb_alerts(f4i)) == 2,
+      f"rc={rc4i} 告警={hb_alert_threads(f4i)!r}")
+check("#313 BLOCK 1 告警文字自己說得出「待處理紀錄未落地」（不叫人去翻不存在的檔）",
+      all(hbm.PENDING_NOT_WRITTEN in t for t in hb_alerts(f4i))
+      and all("NotADirectoryError" in t for t in hb_alerts(f4i)),
+      f"text={hb_alerts(f4i)[0][:300] if hb_alerts(f4i) else None!r}")
+check("#313 BLOCK 1 relay 的 stderr 也分得出是「三處少一處」而不是整個出口沒跑",
+      "待處理紀錄未落地" in err4i and "告警已送 thread ['4149', '1']" in err4i
+      and "失敗出口自己也失敗了" not in err4i,
+      f"err={err4i[-300:]!r}")
 
 # (5) 子程序 rc 非 0：忙碌（`SESSION_NOT_OWNED`）與其他失敗分流，都走失敗出口。
 hb_reset_pending()

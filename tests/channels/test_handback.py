@@ -1347,6 +1347,208 @@ check("BLOCK 4 事件一致性：`conflicting_event` 找得出**另一個**事�
 shutil.rmtree(B4_HOME, ignore_errors=True)
 
 
+
+# ══════════════════════════════════════════════════════════════════════════
+print("\n── 第 3 輪 BLOCK 1：三處出口各自嘗試，一處失敗不得短路另外兩處")
+# ══════════════════════════════════════════════════════════════════════════
+# 第 2 輪 `R1` 的現場：`failure_exit()` **先寫 pending**，而 `write_pending` 在 `home`
+# 不是目錄（磁碟滿、權限不足同形）時會拋——於是 topic 與 General **連嘗試都沒有**，
+# 整個出口退化成只剩 stderr，正是 `AC-6` 要防的那件事。
+B1R3_HOME_FILE = TESTTMP / "home-is-a-file"
+B1R3_HOME_FILE.write_text("x")   # 不是目錄：`mkdir(parents=True)` 必拋
+_b1r3_send = FakeSend()
+_b1r3 = hb.failure_exit(issue=313, eid=EID, reason="no_ack", topic_thread="6667",
+                        send=_b1r3_send, home=B1R3_HOME_FILE, profile="dfcoord")
+check("BLOCK 1 pending 寫不成時**仍嘗試** topic ＋ General（`send_attempts ['6667', '1']`）",
+      _b1r3.attempted == ["6667", "1"] and _b1r3_send.threads == ["6667", "1"],
+      f"attempted={_b1r3.attempted!r} sent={_b1r3_send.threads!r}")
+check("BLOCK 1 兩則告警都實際送達（pending 的失敗不影響送訊這一處）",
+      _b1r3.threads == ["6667", "1"], f"threads={_b1r3.threads!r}")
+check("BLOCK 1 回傳值說得出「pending 未落地」（`pending_file is None` ＋ `pending_error` 有內容）",
+      _b1r3.pending_file is None and _b1r3.pending_error
+      and _b1r3.pending_written is False
+      and "NotADirectoryError" in _b1r3.pending_error,
+      f"pending_file={_b1r3.pending_file!r} err={_b1r3.pending_error!r}")
+check("BLOCK 1 **告警文字自己**也說得出來（收到告警的人不會去翻一個不存在的檔）",
+      hb.PENDING_NOT_WRITTEN in _b1r3.text and "NotADirectoryError" in _b1r3.text
+      and hb.NO_AUTO_RESUME in _b1r3.text
+      and "待處理紀錄：`" not in _b1r3.text,   # 不得同時宣稱有檔
+      f"text={_b1r3.text!r}")
+check("BLOCK 1 失敗出口不再把 pending 的例外往上拋（呼叫端不必自己包 try）",
+      isinstance(_b1r3, hb.FailureExit), f"type={type(_b1r3)!r}")
+# 反方向同樣成立：送訊全掛時 pending 仍落地（第 1 輪即有，這裡確認沒被改壞）。
+_b1r3_dead = FakeSend(dead=("6667", "1"))
+_b1r3_rev = hb.failure_exit(issue=313, eid=EID, reason="no_ack", topic_thread="6667",
+                            send=_b1r3_dead, home=FAKE_HOME, profile="dfcoord")
+check("BLOCK 1 反方向：兩則告警都送不出去時 pending 仍落地（三處互不短路）",
+      _b1r3_rev.threads == [] and _b1r3_rev.attempted == ["6667", "1"]
+      and _b1r3_rev.pending_written is True and _b1r3_rev.pending_file.exists(),
+      f"fx={_b1r3_rev!r}")
+
+# 反例（實跑）：回到「先寫 pending、失敗即拋」的舊實作。
+B1R3_NEW = """    pending: pathlib.Path | None = None
+    pending_error = ""
+    try:
+        pending = write_pending(profile, issue, eid, home=home, reason=reason,
+                                attempt=attempt, detail=detail,
+                                result=INDETERMINATE, at=at)
+    except Exception as exc:  # noqa: BLE001 — 寫不成就寫不成，不得吃掉另外兩處
+        pending_error = f"{type(exc).__name__}: {exc}"
+"""
+B1R3_OLD = """    pending = write_pending(profile, issue, eid, home=home, reason=reason,
+                            attempt=attempt, detail=detail, result=INDETERMINATE, at=at)
+    pending_error = ""
+"""
+MUT_B1R3 = mutate(HB_SRC, B1R3_NEW, B1R3_OLD)
+check("BLOCK 1 突變確實套上（錨點恰一處命中）", MUT_B1R3 != HB_SRC, "錨點漂移")
+_m_b1r3 = load_mutant(MUT_B1R3, "_hb_mut_pending_first")
+
+
+def b1r3_predicate(mod) -> tuple[bool, str]:
+    """述詞：**pending 寫不成時，兩則告警仍要被嘗試**。產品 True、舊實作 False。"""
+    send = FakeSend()
+    try:
+        mod.failure_exit(issue=313, eid=EID, reason="no_ack", topic_thread="6667",
+                         send=send, home=B1R3_HOME_FILE, profile="dfcoord")
+    except Exception as exc:  # noqa: BLE001
+        return send.threads == ["6667", "1"], f"raise {type(exc).__name__}；sent={send.threads!r}"
+    return send.threads == ["6667", "1"], f"sent={send.threads!r}"
+
+
+_b1r3p, _b1r3pd = b1r3_predicate(hb)
+_b1r3m, _b1r3md = b1r3_predicate(_m_b1r3)
+check("BLOCK 1 反例「先寫 pending、失敗即拋」→ 同一述詞在舊實作下轉 FAIL（實跑對照）",
+      _b1r3p is True and _b1r3m is False, f"產品：{_b1r3pd}｜舊實作：{_b1r3md}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+print("\n── 第 3 輪 BLOCK 2：待處理紀錄的路徑不得被輸入帶出 handback-pending")
+# ══════════════════════════════════════════════════════════════════════════
+B2R3_HOME = TESTTMP / "path-probe"
+B2R3_ROOT = (B2R3_HOME / ".hermes/profiles/dfcoord/handback-pending")
+B2R3_BAD = [
+    ("EID 逃出目錄", ("dfcoord", 313, "../../../escaped")),
+    ("EID 帶路徑分隔符", ("dfcoord", 313, "313-r1.approve-/etc/passwd")),
+    ("EID 不合 grammar（少一欄）", ("dfcoord", 313, "313-r1.approve")),
+    ("EID 含空白", ("dfcoord", 313, "313-r1.approve-606 7812345")),
+    ("issue 不是數字", ("dfcoord", "../../x", EID)),
+    ("profile 逃出目錄", ("../../../tmp", 313, EID)),
+    ("profile 帶分隔符", ("dfcoord/../dfmgr", 313, EID)),
+    ("profile 是 ..", ("..", 313, EID)),
+    ("profile 空字串", ("", 313, EID)),
+]
+for _label, _args in B2R3_BAD:
+    check(f"BLOCK 2 {_label} → `pending_path` raise `HandbackError`（不回路徑）",
+          raises(lambda a=_args: hb.pending_path(a[0], a[1], a[2], home=B2R3_HOME),
+                 hb.HandbackError),
+          f"args={_args!r} → {hb.pending_path(*_args, home=B2R3_HOME) if not raises(lambda: hb.pending_path(*_args, home=B2R3_HOME)) else 'raised'}")
+check("BLOCK 2 不合法的輸入一律**沒有**對應路徑（任何輸入都不得解析到 handback-pending 外）",
+      all(raises(lambda a=a: hb.pending_path(a[0], a[1], a[2], home=B2R3_HOME))
+          for _, a in B2R3_BAD), "有輸入拿到了路徑")
+# 正例必須仍然過：`313-313-r1.approve-….json`（`<issue>-<EID>` 是 `AC-6` 的字面）。
+_b2r3_ok = hb.pending_path("dfcoord", 313, EID, home=B2R3_HOME)
+check("BLOCK 2 正例：合法 EID 仍得到 `<issue>-<EID>.json`，且解析後在 handback-pending 內",
+      _b2r3_ok.name == f"313-{EID}.json"
+      and _b2r3_ok.resolve().is_relative_to(B2R3_ROOT.resolve())
+      and _b2r3_ok.relative_to(B2R3_HOME).parts[:4]
+      == (".hermes", "profiles", "dfcoord", "handback-pending"),
+      f"path={_b2r3_ok!r}")
+check("BLOCK 2 正例：`write_pending`／`read_pending`／`clear_pending` 仍走得通（擋的不是合法值）",
+      hb.write_pending("dfcoord", 313, EID, home=B2R3_HOME, reason="no_ack").exists()
+      and (hb.read_pending("dfcoord", 313, EID, home=B2R3_HOME) or {}).get("event") == EID
+      and hb.clear_pending("dfcoord", 313, EID, home=B2R3_HOME, result="handled")[0] is True,
+      "合法路徑被擋或讀寫不一致")
+check("BLOCK 2 `validate_pending_key` 回傳驗過的三欄（字串化，供呼叫端直接用）",
+      hb.validate_pending_key("dfcoord", 313, EID) == ("dfcoord", "313", EID),
+      f"out={hb.validate_pending_key('dfcoord', 313, EID)!r}")
+# 公開入口（CLI）同樣要擋，而且擋在任何 forge 讀寫之前。
+_b2r3_home = TESTTMP / "cli-escape-home"
+shutil.rmtree(_b2r3_home, ignore_errors=True)
+
+
+def b2r3_cli(argv_extra: list[str]) -> tuple[int, int]:
+    """跑 CLI 並回傳 (rc, 假 HOME 底下被建立的檔案數)。`_capture` 給會炸的假物件。"""
+    mod = load_file(HB_SRC_PATH, "_handback_cli_escape")
+
+    def boom(cmd, **kw):  # 入口若沒擋住，第一件事就是讀 forge → 會走到這裡
+        raise AssertionError(f"入口沒擋住就去碰外部世界了：{cmd!r}")
+
+    mod._capture = boom
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        rc = mod.main(argv_extra)
+    files = [q for q in _b2r3_home.rglob("*") if q.is_file()] if _b2r3_home.exists() else []
+    return rc, len(files)
+
+
+for _label, _ev, _is, _by in [
+        ("EID 逃出目錄", "../../../escaped", "313", "dfcoord"),
+        ("EID 不合 grammar", "X", "313", "dfcoord"),
+        ("issue 不是數字", EID, "../../x", "dfcoord"),
+        ("profile 帶分隔符", EID, "313", "../../tmp")]:
+    _rc, _nfiles = b2r3_cli(["ack", "--issue", _is, "--event", _ev, "--thread", "6667",
+                             "--home", str(_b2r3_home), "--by", _by])
+    check(f"BLOCK 2 CLI 入口拒絕（{_label}）→ rc 2、零檔案、連 forge 都沒碰",
+          _rc == 2 and _nfiles == 0, f"rc={_rc} files={_nfiles}")
+_mod_err = load_file(HB_SRC_PATH, "_handback_cli_escape_msg")
+_mod_err._capture = lambda cmd, **kw: (_ for _ in ()).throw(AssertionError("不該碰"))
+_eout, _eerr = io.StringIO(), io.StringIO()
+with redirect_stdout(_eout), redirect_stderr(_eerr):
+    _mod_err.main(["done", "--issue", "313", "--event", "../../../escaped",
+                   "--thread", "6667", "--home", str(_b2r3_home)])
+check("BLOCK 2 CLI 入口的拒絕訊息指得出是哪一欄不合法（stderr 實文）",
+      "入口拒絕" in _eerr.getvalue() and "event=" in _eerr.getvalue()
+      and "EID grammar" in _eerr.getvalue(), f"stderr={_eerr.getvalue()!r}")
+
+# 反例（實跑）：把驗證拿掉 → 逃出目錄的路徑又回來了。
+B2R3_GATE = "    profile, issue, eid = validate_pending_key(profile, issue, eid)\n"
+B2R3_GUARD = """    if not path.resolve().is_relative_to(root.resolve()):
+        raise HandbackError(f"待處理紀錄的路徑逃出 {PENDING_DIRNAME}，拒絕：{path}")
+"""
+MUT_B2R3 = mutate(mutate(HB_SRC, B2R3_GATE, "    pass\n"), B2R3_GUARD, "    pass\n")
+check("BLOCK 2 突變確實套上（兩個錨點各恰一處命中）", MUT_B2R3 != HB_SRC, "錨點漂移")
+_m_b2r3 = load_mutant(MUT_B2R3, "_hb_mut_nopathcheck")
+
+
+def b2r3_predicate(mod) -> tuple[bool, str]:
+    """述詞：**`../../../escaped` 不得解析到 handback-pending 外**。產品 True、突變 False。"""
+    try:
+        q = mod.pending_path("dfcoord", 313, "../../../escaped", home=B2R3_HOME)
+    except mod.HandbackError as exc:
+        return True, f"raise：{str(exc)[:70]}"
+    inside = q.resolve().is_relative_to(B2R3_ROOT.resolve())
+    return inside, f"path={q.resolve()}｜under_pending={inside}"
+
+
+_b2r3p, _b2r3pd = b2r3_predicate(hb)
+_b2r3m, _b2r3md = b2r3_predicate(_m_b2r3)
+check("BLOCK 2 反例「不驗鍵、不擋逃逸」→ 同一述詞在突變下轉 FAIL（實跑對照）",
+      _b2r3p is True and _b2r3m is False, f"產品：{_b2r3pd}｜突變：{_b2r3md}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+print("\n── 第 3 輪 BLOCK 3：衝突偵測的射程，實作與文件一致（`R7`）")
+# ══════════════════════════════════════════════════════════════════════════
+# manager 取 (b)：**收窄宣稱**，不擴成掃散文。擴的代價是誤殺——交接稿本來就常引用別單的
+# 事件識別當材料，把任意提及當衝突會讓正當的終態投遞被擋下（而 T 未要求）。
+B3R3_GOOD = "313-r1.approve-6067812345"
+B3R3_WRONG = "999-merge.done-6067899999"
+check("BLOCK 3 結構化欄位衝突（`event=`）→ 抓得出另一個事件",
+      hb.conflicting_event(f"請處理 event={B3R3_WRONG}", B3R3_GOOD) == B3R3_WRONG, "")
+check("BLOCK 3 結構化欄位衝突（`DEVFLOW_HANDBACK_EVENT=`）→ 抓得出另一個事件",
+      hb.conflicting_event(f"{hb.EVENT_ENV}={B3R3_WRONG}", B3R3_GOOD) == B3R3_WRONG, "")
+check("BLOCK 3 同一個事件以約定欄位重複出現 → 不是衝突",
+      hb.conflicting_event(f"event={B3R3_GOOD} / {hb.EVENT_ENV}={B3R3_GOOD}",
+                           B3R3_GOOD) is None, "")
+check("BLOCK 3 **裸 EID 散文不算衝突**（宣稱射程的反向斷言，不是漏洞）",
+      hb.conflicting_event(f"請處理交接事件 `{B3R3_WRONG}`，不要處理其他事件",
+                           B3R3_GOOD) is None
+      and hb.event_tokens(f"交接事件 `{B3R3_WRONG}`") == [],
+      f"tokens={hb.event_tokens(f'交接事件 `{B3R3_WRONG}`')!r}")
+check("BLOCK 3 docstring／註解寫明射程（只認約定欄位、不掃散文），與 telegram.md 同一說法",
+      "不掃散文" in HB_SRC and "不是 EID 的全文搜尋" in HB_SRC,
+      "實作端沒有寫明射程")
+
 # ══════════════════════════════════════════════════════════════════════════
 print("\n── 文件與版本：telegram.md 的格、kit 進位")
 # ══════════════════════════════════════════════════════════════════════════
@@ -1363,8 +1565,21 @@ if _row:
                   "handback-pending", "MAX_RELAY_DEPTH", "--then-wake",
                   # 第 2 輪 `BLOCK 4`：呼叫形狀（兩端）與產品路徑的關鍵點都要寫在格裡
                   "DEVFLOW_HANDBACK_EVENT", "_handback.py ack", "gh issue view",
-                  "declare_or_raise", "SESSION_NOT_OWNED", "precondition_unmet"):
+                  "declare_or_raise", "SESSION_NOT_OWNED", "precondition_unmet",
+                  # 第 3 輪：三處各自嘗試（`BLOCK 1`）、鍵的驗證（`BLOCK 2`）
+                  "任何一處失敗都不短路", "pending_error", "pending_path()",
+                  "is_relative_to"):
         check(f"該格載明 `{_must}`", _must in _row[0], f"缺字面 {_must}")
+    # 第 3 輪 `BLOCK 3`（`R7`）：值欄的宣稱必須與 `conflicting_event()` 的射程一致。
+    # manager 取 (b)：收窄宣稱。故值欄要寫得出「只到兩個約定欄位」，**也要寫明不含散文**。
+    check("該格的衝突偵測宣稱已收窄到約定欄位（與實作一致，`R7`）",
+          "`event=` 或 `DEVFLOW_HANDBACK_EVENT=` 標示" in _row[0]
+          and "射程只到這兩個約定欄位" in _row[0]
+          and "**不**宣稱偵測散文裡任意提及的 EID" in _row[0],
+          "值欄沒有把射程寫清楚")
+    check("該格**不**殘留過廣的舊宣稱（「prompt 若提到另一個事件識別即拒絕」）",
+          "prompt 若提到**另一個**事件識別即拒絕" not in _row[0],
+          "舊的過廣宣稱還在")
 check("`devflow/VERSION` 已進位到 0.18.2.0（`V7`：動到 `devflow/**` 須進位）",
       VERSION_FILE.read_text().strip() == "0.18.2.0",
       f"VERSION={VERSION_FILE.read_text().strip()!r}")
