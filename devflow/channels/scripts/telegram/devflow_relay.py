@@ -555,6 +555,10 @@ def main() -> int:
     ap.add_argument("--then-wake", dest="then_wake", metavar="PROFILE",
                     help="子程序退出後，由 relay 自己以同一 thread／issue 再喚醒這個 profile。"
                          "帶 --issue 時為必給（那一輪屬於某張單的執行流程，需要銜接）")
+    ap.add_argument("--handback-event", dest="handback_event", metavar="EID",
+                    help="終態投遞（`#313`）：這一棒是某個交接事件的**最後一棒**，之後沒有"
+                         "下一棒，故 --issue 不強制 --then-wake（兩者同時出現即拒絕）。"
+                         "EID ＝ 該交接事件的識別，relay 只轉述不解析（grammar 住 _handback.py）")
     ap.add_argument("--pace", choices=sorted(PACE), default=DEFAULT_PACE,
                     help=f"轉播節奏（預設 {DEFAULT_PACE}）：instant 3則/8秒、normal 6則/15秒、quiet 10則/30秒")
     ap.add_argument("--session", metavar="NAME",
@@ -570,14 +574,31 @@ def main() -> int:
                     help="覆寫 provider。半價備援用 or_flex_proxy（需 or-flex-proxy.py 在跑）")
     args = ap.parse_args()
 
-    # ── 兩個拒絕條件：都必須在派子程序之前（`AC-3`／`AC-4`），否則 coder 已經跑起來才報錯 ──
-    if args.issue and not args.then_wake:
+    # ── 三個拒絕條件：都必須在派子程序之前（`AC-3`／`AC-4`、`#313` `AC-5`），否則 coder
+    # 已經跑起來才報錯 ──
+    if args.handback_event and args.then_wake:
+        # `#313` `AC-5`：終態投遞是**最後一棒**，它之後沒有下一棒；`--then-wake` 的語意是
+        # 「這一棒結束後還有人要接」。兩者同時出現時我們無從知道呼叫者要的是哪一種，
+        # 猜任一邊都會在「最後一棒」這件事上說謊，故**拒絕**。位置與下面兩條同在
+        # `main()` 派子程序之前——先派再報錯等於那一棒已經跑起來了。
+        print("[relay] --handback-event 與 --then-wake 互斥：終態投遞是最後一棒，"
+              "它之後沒有下一棒；要續接就不要帶 --handback-event，"
+              f"要終態投遞就不要帶 --then-wake（本次：--handback-event {args.handback_event} "
+              f"--then-wake {args.then_wake}）",
+              file=sys.stderr)
+        return 2
+
+    if args.issue and not args.then_wake and not args.handback_event:
         # 判準用 `--issue` 而不是 profile 名：後者要 relay 硬編碼 seat 的角色名，
         # 比 `--then-wake` 本身更接近「懂 workflow」（裁決位 2026-10-07 的否決理由）。
         # 不帶 `--issue` ＝ 一次性操作，不需鏈結——那一列必須照舊能跑。
+        # `#313`：`--handback-event` 是**唯一**的例外入口（顯式旗標，**不依 profile 名猜
+        # 意圖**）——那一棒之後結構上沒有下一棒，要求它 `--then-wake` 等於要求它說謊。
+        # 普通 `--issue` 呼叫**仍須** `--then-wake`，本條的既有行為一字不改。
         print("[relay] --issue 需同時帶 --then-wake <profile>；"
               f"例：devflow_relay.py {args.thread} --file x.md "
-              f"-p {args.profile} --issue {args.issue} --then-wake dfmgr",
+              f"-p {args.profile} --issue {args.issue} --then-wake dfmgr"
+              "（終態投遞例外：改帶 --handback-event <EID>，不得與 --then-wake 併用）",
               file=sys.stderr)
         return 2
 
@@ -607,9 +628,16 @@ def main() -> int:
         fresh=args.fresh, workdir=args.workdir, model=args.model, provider=args.provider)
 
     log = _log_path(args.issue, args.profile)
+    # `continuation`（`#312` 的判準，本單沿用不改）：判的是「這個子程序是怎麼被派出的」。
+    # 終態投遞（`#313`）是**同一流程的最後一棒**——它取代呼叫者繼續跑、之後沒有下一棒，
+    # 與 `--then-wake` 喚醒者同類，故承襲呼叫者自身的深度、鏈以 `>` 接。普通的受託子程序
+    # 仍是 primary（`depth + 1`、鏈以 `,` 接），`_child_env` 的語意一字不動。
+    # ⚠️ 不增深**不代表任何深度都能啟動**：上方的 `DEPTH >= MAX_RELAY_DEPTH` 一律 `rc 2`，
+    # 終態投遞不例外（檢查在這之前，見該區塊）。
     rc = _run_child(cmd, profile=args.profile, thread=args.thread,
                     title=f"`#{args.issue}`" if args.issue else f"thread {args.thread}",
-                    pace=args.pace, session_label=session_label, log=log)
+                    pace=args.pace, session_label=session_label, log=log,
+                    continuation=bool(args.handback_event))
 
     if args.then_wake:
         # 銜接在 relay 這一層，不在任何 seat 的 turn 裡——故不需要等待（`#287` 證明等不住）。
