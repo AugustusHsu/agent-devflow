@@ -239,12 +239,12 @@ def prompt_of(cmd: list[str]) -> str:
 
 
 # ── log 路徑與單號的判定（`#312` `AC-8`）─────────────────────────────────────
-# 這兩個純函式是本檔對「log 在不在某個目錄下」與「這個 log 是哪一張單的」的**唯一**判定
-# （`I5`）：三條既有 check 與下方 `#312 AC-8` 一節的固定情境正反測試共用它們——正例與
+# 這兩個共用判定函式是本檔對「log 在不在某個目錄下」與「這個 log 是哪一張單的」的**唯一**
+# 判定（`I5`）：三條既有 check 與下方 `#312 AC-8` 一節的固定情境正反測試共用它們——正例與
 # 反例跑同一支判定，對照才算對照。兩者都不讀環境；`_issue_of` 是純字串運算，`_under`
 # 則以 `resolve()` 正規化兩側之後比階層——`resolve()` 會跟 symlink，故它**不是**純字串
 # 運算，本檔也不對它的 I/O 面下任何更強的宣稱（`AC-8(g)`）：正規化是判定正確的前提，
-# 理由見 `_under` 的 docstring。
+# 理由見 `_under` 的 docstring。（`AC-9(c)`：故這一段不寫「純函式」——那與下兩句牴觸。）
 def _under(root, path) -> bool:
     """`path` 是否位於 `root` 這個目錄**階層**之下（含 root 自身）。
 
@@ -266,10 +266,18 @@ def _under(root, path) -> bool:
 
 # log 檔名的 grammar ＝ `_log_path` 的 f-string：
 #     relay-<issue>-<profile>-<stamp>-<pid>-<seq>.log
-# `stamp` 自己含一個 `-`（`%Y%m%d-%H%M%S`），故以固定寬度的數字欄位錨住，後面的
-# `pid`／`seq` 才切得開。
+# 右邊三欄的形狀是固定的（`stamp` ＝ `%Y%m%d-%H%M%S`，本檔凍結時鐘時為 `FIXED`；
+# `pid`／`seq` ＝ 純數字）且整串錨到 `$`，故 **profile 欄可以含 `-`**：以非貪婪比對從右
+# 側切欄，右邊三欄先各就各位，剩下的就是 profile。`issue` 欄維持不含 `-`（單號是數字）。
+#
+# profile 為何必須容許 `-`（`AC-9(a)`，第 5 輪 `R1` 指出）：**產品**產生得出這種檔名——
+# `_log_path` 對 profile 不設限，`HANDOFF_RE` 更明文允許 `[A-Za-z0-9_.\-]+`。原本寫成
+# `[^-]+` 的 profile 欄比產品的 grammar **窄**，於是 `_issue_of` 對一個**合法**的 log
+# （例 `-p df-review` 產生的 `relay-999-df-review-…`）回空字串而不是 `'999'`。
+# ⚠️ 那是**這個測試 helper 的問題，不是正式 relay 派工失敗**：`_log_path`／`HANDOFF_RE`
+# 的行為正確，該缺陷不影響任何實際派工（裁決位 2026-10-15 的定性）。
 _LOG_NAME_RE = re.compile(
-    r"^relay-(?P<issue>[^-]+)-(?P<profile>[^-]+)-"
+    r"^relay-(?P<issue>[^-]+)-(?P<profile>.+?)-"
     r"(?P<stamp>\d{8}-\d{6}|FIXED)-(?P<pid>\d+)-(?P<seq>\d+)\.log$")
 
 
@@ -1958,6 +1966,64 @@ check("#312 AC-8(b) grammar 與 `_log_path` 的實際產出相符（真時間戳
       and isinstance(_p1, Path) and _issue_of(_p1.name) == "287",
       f"真實={Path(log_paths[0]).name if log_paths else None} "
       f"凍結={_p1.name if isinstance(_p1, Path) else _p1!r}")
+
+# ── AC-9(a)(b)：profile 欄含連字號的合法 log ─────────────────────────────────
+# 第 5 輪 `R1`：grammar 的 profile 欄原寫 `[^-]+`，比**產品**窄（`_log_path` 不禁
+# profile 含 `-`、`HANDOFF_RE` 明文允許 `[A-Za-z0-9_.\-]+`），於是 `-p df-review` 這種
+# **合法**派工產生的 log 被 `_issue_of` 判為「不合 grammar」而回 `''`。
+# ⚠️ 定性（裁決位 2026-10-15）：那是**這個測試 helper 的問題，不是正式 relay 派工失敗**
+# ——relay 的 `_log_path`／`HANDOFF_RE` 行為正確，缺陷不影響任何實際派工。
+# 下面先以**手寫固定 fixture** 驗欄位，再以**產品實際產出的檔名**複驗（只呼叫純函式
+# `_log_path`，不派任何子程序）。
+P312_FX_HYPHEN_999 = "relay-999-df-review-20261015-051730-2528717-1.log"
+P312_FX_HYPHEN_FIXED = "relay-999-df-review-FIXED-2528717-1.log"
+P312_FX_HYPHEN_287 = "relay-287-df-999-20261015-051730-2999999-1.log"
+_p312_hy = _LOG_NAME_RE.match(P312_FX_HYPHEN_999)
+
+check("#312 AC-9(b) 正例：profile 含連字號的合法 log 取出 issue='999'",
+      _issue_of(P312_FX_HYPHEN_999) == "999",
+      f"檔名={P312_FX_HYPHEN_999} issue 欄位={_issue_of(P312_FX_HYPHEN_999)!r}")
+check("#312 AC-9(b) 正例：該檔名的欄位逐項切對（profile 為 `df-review`，pid／seq 不被吃掉）",
+      _p312_hy is not None and _p312_hy.groupdict()
+      == {"issue": "999", "profile": "df-review", "stamp": "20261015-051730",
+          "pid": "2528717", "seq": "1"},
+      f"欄位={_p312_hy.groupdict() if _p312_hy else None}")
+check("#312 AC-9(b) 正例：凍結時鐘（stamp 為 FIXED）＋ 連字號 profile 同樣取出 '999'",
+      _issue_of(P312_FX_HYPHEN_FIXED) == "999",
+      f"檔名={P312_FX_HYPHEN_FIXED} issue 欄位={_issue_of(P312_FX_HYPHEN_FIXED)!r}")
+check("#312 AC-9(b) 反例：issue=287 而 profile 與 PID 都含 999 → 仍取出 '287'",
+      _issue_of(P312_FX_HYPHEN_287) == "287" and _issue_of(P312_FX_HYPHEN_287) != "999",
+      f"檔名={P312_FX_HYPHEN_287} issue 欄位={_issue_of(P312_FX_HYPHEN_287)!r}")
+_p312_hy287 = _LOG_NAME_RE.match(P312_FX_HYPHEN_287)
+check("#312 AC-9(b) 反例：該檔名的 `999` 落在 profile 與 pid 兩欄，不在 issue 欄",
+      _p312_hy287 is not None
+      and _p312_hy287.group("profile") == "df-999"
+      and _p312_hy287.group("pid") == "2999999"
+      and _p312_hy287.group("issue") == "287",
+      f"欄位={_p312_hy287.groupdict() if _p312_hy287 else None}")
+check("#312 AC-9(b) 不合 grammar 的輸入仍回空字串（缺欄位／副檔名錯／前綴缺）",
+      _issue_of("relay-999-df-review-20261015-051730-1.log") == ""
+      and _issue_of("relay-999-df-review-20261015-051730-2528717-1.txt") == ""
+      and _issue_of("999-df-review-20261015-051730-2528717-1.log") == ""
+      and _issue_of("relay-999-df-review-2026xx15-051730-2528717-1.log") == "",
+      "四種殘缺輸入都不得被當成合法 grammar")
+# 產品實際產出的檔名複驗（`_log_path` 是純函式：只組路徑，不建檔、不派子程序）。
+_p312_prod_hy = m312._log_path("999", "df-review")
+_p312_prod_287 = m312._log_path("287", "df-999")
+check("#312 AC-9(b) 產品輸出複驗：`_log_path('999','df-review')` 的檔名取出 '999'",
+      _issue_of(_p312_prod_hy.name) == "999",
+      f"產出={_p312_prod_hy.name} issue 欄位={_issue_of(_p312_prod_hy.name)!r}")
+check("#312 AC-9(b) 產品輸出複驗：`_log_path('287','df-999')` 的檔名取出 '287'",
+      _issue_of(_p312_prod_287.name) == "287"
+      and _issue_of(_p312_prod_287.name) != "999",
+      f"產出={_p312_prod_287.name} issue 欄位={_issue_of(_p312_prod_287.name)!r}")
+_p312_prod_m = _LOG_NAME_RE.match(_p312_prod_hy.name)
+_p312_prod_m287 = _LOG_NAME_RE.match(_p312_prod_287.name)
+check("#312 AC-9(b) 產品輸出複驗：連字號 profile 在 profile 欄被完整取回",
+      _p312_prod_m is not None and _p312_prod_m287 is not None
+      and _p312_prod_m.group("profile") == "df-review"
+      and _p312_prod_m287.group("profile") == "df-999",
+      f"{_p312_prod_hy.name} / {_p312_prod_287.name}")
 
 # 矩陣 13：保留整個檔名的子字串搜尋 → 同一組固定正例轉為不成立。
 check("#312 矩陣 13：保留整個檔名的子字串搜尋 → issue=999 而 PID 含 287 的正例轉為不成立（實跑對照）",
