@@ -93,6 +93,19 @@ def mutate(src: str, old: str, new: str) -> str:
     return src.replace(old, new, 1) if src.count(old) == 1 else src
 
 
+def why_of(fn) -> str:
+    """跑 `fn` 並回傳它 raise 的訊息（沒 raise 回空字串）。
+
+    用途：斷言「拒絕的理由指得出是哪一欄／哪兩個值」。只斷言「有 raise」會讓訊息寫成
+    「不合法」也過關，而那種訊息在現場讀 log 的人看不出要改什麼。
+    """
+    try:
+        fn()
+    except Exception as exc:  # noqa: BLE001 — 這裡就是要看訊息
+        return str(exc)
+    return ""
+
+
 hb = load_file(HB_SRC_PATH, "_handback")
 _marker = load_file(MARKER_SRC_PATH, "_marker_ro")
 
@@ -1548,6 +1561,161 @@ check("BLOCK 3 **裸 EID 散文不算衝突**（宣稱射程的反向斷言，�
 check("BLOCK 3 docstring／註解寫明射程（只認約定欄位、不掃散文），與 telegram.md 同一說法",
       "不掃散文" in HB_SRC and "不是 EID 的全文搜尋" in HB_SRC,
       "實作端沒有寫明射程")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+print("\n── 第 4 輪 BLOCK 1：同一個事件不得在**另一張單**上被判定落地或簽收（`AC-3`）")
+# ══════════════════════════════════════════════════════════════════════════
+# 第 3 輪 `R1` 的現場：`--issue 999 --handback-event 313-…` 會去讀 `#999`，而 `landed()`
+# 只收 body 與 EID——body 是哪張單來的它分不出來。於是 `#999` 上一行**自相一致**的
+# `313-…`（複製貼上、或引用材料時整行照抄）就讓層1「成立」，`#999` 的交回被 `#313` 的
+# 紀錄代簽，子程序還開在 `issue-999`。核對只能長在「決定去讀哪張單」的那個邊界上。
+B1R4_EID = hb.event_id(313, "r1.approve", "6067812345")
+check("BLOCK 1 `validate_pending_key` 核 EID 的 issue 欄 ＝ 目標單號（999 ≠ 313 → raise）",
+      raises(lambda: hb.validate_pending_key("dfcoord", 999, B1R4_EID), hb.HandbackError),
+      "跨單的鍵沒有被擋")
+check("BLOCK 1 正例：同一張單仍過（擋的是跨單，不是一律擋）",
+      hb.validate_pending_key("dfcoord", 313, B1R4_EID) == ("dfcoord", "313", B1R4_EID),
+      f"out={hb.validate_pending_key('dfcoord', 313, B1R4_EID)!r}")
+check("BLOCK 1 `assert_event_issue` 正反：相符回 None、不符 raise 且訊息指得出兩個值",
+      hb.assert_event_issue(B1R4_EID, 313) is None
+      and hb.assert_event_issue(B1R4_EID, "313") is None
+      and raises(lambda: hb.assert_event_issue(B1R4_EID, 999), hb.HandbackError)
+      and "999" in why_of(lambda: hb.assert_event_issue(B1R4_EID, 999))
+      and "313" in why_of(lambda: hb.assert_event_issue(B1R4_EID, 999)),
+      f"why={why_of(lambda: hb.assert_event_issue(B1R4_EID, 999))!r}")
+check("BLOCK 1 跨單的 `pending_path`／`write_pending` 都拿不到路徑（連檔名都不給拼）",
+      raises(lambda: hb.pending_path("dfcoord", 999, B1R4_EID, home=TESTTMP / "x4"),
+             hb.HandbackError)
+      and raises(lambda: hb.write_pending("dfcoord", 999, B1R4_EID,
+                                          home=TESTTMP / "x4", reason="no_ack"),
+                 hb.HandbackError)
+      and not (TESTTMP / "x4").exists(),
+      "跨單的待處理紀錄被寫出來了")
+
+# 第二道：貼在真正打 `gh` 的那個物件上。`capture` 給會炸的哨兵——建構時就該 raise，
+# 所以 `gh` 一次都不會跑（若只在 `read()` 裡才驗，這個哨兵會被觸發）。
+def _boom_capture(cmd, **kw):
+    raise AssertionError(f"跨單綁定沒擋住就去打 gh 了：{cmd!r}")
+
+
+check("BLOCK 1 `GhForge(999, event='313-…')` **建構時**就 raise，`gh` 一次都沒跑",
+      raises(lambda: hb.GhForge(999, event=B1R4_EID, capture=_boom_capture),
+             hb.HandbackError),
+      "forge 綁定沒有在建構時核")
+_f_gh_ok = hb.GhForge(313, event=B1R4_EID,
+                      capture=lambda cmd, **kw: types.SimpleNamespace(
+                          stdout="body", stderr="", returncode=0))
+check("BLOCK 1 正例：同一張單的 forge 照常建構並讀得回（第二道不擋合法呼叫）",
+      _f_gh_ok.read() == "body" and _f_gh_ok.event == B1R4_EID
+      and _f_gh_ok.issue == "313", f"forge={_f_gh_ok!r}")
+check("BLOCK 1 不給 `event` 時維持原行為（`event=None` ＝ 不綁，供不吃事件的呼叫者用）",
+      hb.GhForge(999, capture=_boom_capture).issue == "999", "預設值變了")
+check("BLOCK 1 `emit_handback` 的跨單寫入同樣擋（行內 `issue` 與 EID 核對那一道，第 2 輪）",
+      raises(lambda: emit(FakeForge(), eid=B1R4_EID, issue=999), hb.HandbackError),
+      "跨單的宣告寫得出來")
+
+# CLI 入口：`--issue 999 --event 313-…` 在任何 forge 動作之前就拒絕。
+B1R4_HOME = TESTTMP / "cross-issue-home"
+shutil.rmtree(B1R4_HOME, ignore_errors=True)
+for _cmd in ("ack", "done", "recover"):
+    _mod = load_file(HB_SRC_PATH, f"_handback_cli_x_{_cmd}")
+    _mod._capture = _boom_capture
+    _o, _e = io.StringIO(), io.StringIO()
+    with redirect_stdout(_o), redirect_stderr(_e):
+        _rc_x = _mod.main([_cmd, "--issue", "999", "--event", B1R4_EID,
+                           "--thread", "6667", "--home", str(B1R4_HOME)])
+    _files_x = [q for q in B1R4_HOME.rglob("*") if q.is_file()] if B1R4_HOME.exists() else []
+    check(f"BLOCK 1 CLI `{_cmd} --issue 999 --event 313-…` → rc 2、零 `gh`、零檔案",
+          _rc_x == 2 and _files_x == [] and "入口拒絕" in _e.getvalue(),
+          f"rc={_rc_x} files={_files_x!r} err={_e.getvalue()[:160]!r}")
+
+# 反例（實跑）：把兩道都拿掉 → 跨單又成立。
+B1R4_GATE = "    assert_event_issue(eid, issue)\n"
+B1R4_FORGE = """        if event is not None:
+            assert_event_issue(event, issue)
+"""
+MUT_B1R4 = mutate(mutate(HB_SRC, B1R4_GATE, "    pass\n"), B1R4_FORGE, "        pass\n")
+check("BLOCK 1 突變確實套上（兩個錨點各恰一處命中）", MUT_B1R4 != HB_SRC, "錨點漂移")
+_m_b1r4 = load_mutant(MUT_B1R4, "_hb_mut_crossissue")
+
+
+def b1r4_predicate(mod) -> tuple[bool, str]:
+    """述詞：**`313-…` 不得以 `#999` 為目標通過鍵驗證或綁上 forge**。產品 True、突變 False。"""
+    try:
+        key = mod.validate_pending_key("dfcoord", 999, B1R4_EID)
+    except mod.HandbackError as exc:
+        return True, f"raise：{str(exc)[:70]}"
+    try:
+        mod.GhForge(999, event=B1R4_EID, capture=lambda cmd, **kw: None)
+    except mod.HandbackError as exc:
+        return True, f"forge raise：{str(exc)[:70]}"
+    return False, f"key={key!r}；forge 也建得起來（#999 讀 313 的事件）"
+
+
+_b1r4p, _b1r4pd = b1r4_predicate(hb)
+_b1r4m, _b1r4md = b1r4_predicate(_m_b1r4)
+check("BLOCK 1 反例「不核 EID 的 issue 欄」→ 同一述詞在突變下轉 FAIL（實跑對照）",
+      _b1r4p is True and _b1r4m is False, f"產品：{_b1r4pd}｜突變：{_b1r4md}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+print("\n── 第 4 輪 BLOCK 2：profile 的宣稱與實作對齊——任意位置含 `..` 即拒絕（`R7`）")
+# ══════════════════════════════════════════════════════════════════════════
+# 第 3 輪的現場：值欄寫「不得含路徑分隔符或 `..`」，而字元集合版的 pattern 只擋得掉
+# **整段** `..`——`df..coord` 被接受。manager 取 (a)：實作對齊宣稱（pattern 改段式，
+# 使 `..` 結構上不可能出現），文件不改。
+B2R4_BAD = ["df..coord", "..", "...", "a..b", "..dfcoord", "dfcoord..",
+            "df...coord", "dfcoord/../dfmgr", "df/coord", "df\\coord",
+            ".dfcoord", "dfcoord.", "", "df coord", "df.."]
+for _bad in B2R4_BAD:
+    check(f"BLOCK 2 profile {_bad!r} → 拒絕（`HandbackError`）",
+          raises(lambda b=_bad: hb.validate_pending_key(b, 313, B1R4_EID),
+                 hb.HandbackError),
+          f"{_bad!r} 被接受了")
+B2R4_OK = ["dfcoord", "df-coord", "df_coord", "dfcoord2", "df.coord", "a", "A1.b-2_c"]
+for _ok in B2R4_OK:
+    check(f"BLOCK 2 profile {_ok!r} → 接受（擋的是 `..` 與分隔符，不是 `.` 本身）",
+          hb.validate_pending_key(_ok, 313, B1R4_EID)[0] == _ok,
+          f"{_ok!r} 被擋了")
+check("BLOCK 2 `..` 在 pattern 層就不可能出現（段式：`.` 只能在兩個非空段之間）",
+      all(".." not in _p for _p in B2R4_OK)
+      and hb._PROFILE_RE.fullmatch("df..coord") is None
+      and hb._PROFILE_RE.fullmatch("dfcoord") is not None,
+      f"pattern={hb._PROFILE_RE.pattern!r}")
+check("BLOCK 2 拒絕訊息與文件同一句話（`R7`：實作講的與值欄講的要對得上）",
+      "不得含路徑分隔符或 `..`" in why_of(
+          lambda: hb.validate_pending_key("df..coord", 313, B1R4_EID)),
+      f"why={why_of(lambda: hb.validate_pending_key('df..coord', 313, B1R4_EID))!r}")
+check("BLOCK 2 `telegram.md` 的那句宣稱仍在（文件不改，是實作對齊它）",
+      "profile 不得含路徑分隔符或 `..`" in TELEGRAM_MD.read_text(),
+      "值欄的宣稱不見了")
+
+# 反例（實跑）：pattern 退回字元集合版 → `df..coord` 又被接受。
+B2R4_PAT = '_PROFILE_RE = re.compile(r"[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*")'
+MUT_B2R4 = mutate(HB_SRC, B2R4_PAT,
+                  '_PROFILE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")')
+check("BLOCK 2 突變確實套上（錨點恰一處命中）", MUT_B2R4 != HB_SRC, "錨點漂移")
+_m_b2r4 = load_mutant(MUT_B2R4, "_hb_mut_charclass")
+
+
+def b2r4_predicate(mod) -> tuple[bool, str]:
+    """述詞：**`df..coord` 不得被接受**（文件宣稱「不得含 `..`」）。產品 True、突變 False。"""
+    try:
+        out = mod.validate_pending_key("df..coord", 313, B1R4_EID)
+    except mod.HandbackError as exc:
+        return True, f"rejected：{str(exc)[:60]}"
+    return False, f"accepted {out!r}"
+
+
+_b2r4p, _b2r4pd = b2r4_predicate(hb)
+_b2r4m, _b2r4md = b2r4_predicate(_m_b2r4)
+check("BLOCK 2 反例「字元集合版 pattern」→ 同一述詞在突變下轉 FAIL（實跑對照）",
+      _b2r4p is True and _b2r4m is False, f"產品：{_b2r4pd}｜突變：{_b2r4md}")
+check("BLOCK 2 突變下 `df..coord` 真的拼出路徑（說明這不是假設的風險）",
+      ".." in str(_m_b2r4.pending_path("df..coord", 313, B1R4_EID,
+                                       home=TESTTMP / "x5")),
+      "突變沒有重現原缺陷")
 
 # ══════════════════════════════════════════════════════════════════════════
 print("\n── 文件與版本：telegram.md 的格、kit 進位")

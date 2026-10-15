@@ -2530,6 +2530,58 @@ check("#313 BLOCK 1 relay 的 stderr 也分得出是「三處少一處」而不�
       and "失敗出口自己也失敗了" not in err4i,
       f"err={err4i[-300:]!r}")
 
+# (4c) 第 4 輪 `BLOCK 1`（`AC-3`）：合法且**自相一致**的 `313-…` 行放在假 `#999` 上，
+# 配 `--issue 999` → 必須拒絕。第 3 輪的現場是 `rc 0`、`spawned 1`、`gh_targets ['999',
+# '999']`、子程序開在 `issue-999`——`#999` 的交回被 `#313` 的紀錄代簽。
+# `landed()` 只收 body 與 EID，分不出 body 是哪張單來的，所以核對必須長在「決定去讀哪張
+# 單」的邊界上（relay 入口 ＋ forge 建構）。
+hb_reset_pending()
+f4j = FakeSub(LINES, issue_body=HB_BODY)   # 內含自相一致的 `313-…` handback ＋ ack
+rc4j, _, err4j = with_env(hb_env(), lambda: run(
+    ["4149", "hi", "-p", "dfcoord", "--issue", "999",
+     "--handback-event", P313_EID], f4j))
+check("#313 BLOCK 1 跨單投遞（`--issue 999` ＋ `313-…`）→ rc 2、**零子程序**",
+      rc4j == 2 and len(f4j.spawned) == 0,
+      f"rc={rc4j} spawned={len(f4j.spawned)} err={err4j[:200]!r}")
+check("#313 BLOCK 1 拒絕發生在**任何 `gh` 之前**（`gh_calls` 恰 0，含 view 與 comment）",
+      f4j.gh_calls == [] and f4j.gh_view_calls == [] and f4j.gh_comment_calls == [],
+      f"gh={f4j.gh_calls!r}")
+check("#313 BLOCK 1 零 ack／done／pending 寫入（沒有任何一處把這次當成有效事件）",
+      hb_pending_files() == [] and hb_alerts(f4j) == [],
+      f"pending={hb_pending_files()!r} 告警={len(hb_alerts(f4j))}")
+check("#313 BLOCK 1 拒絕訊息指得出兩個不一致的值（999 與 EID 的 313）",
+      "999" in err4j and P313_EID in err4j,
+      f"err={err4j[:300]!r}")
+check("#313 BLOCK 1 正例不受影響：`--issue 313` ＋ `313-…` 仍 rc 0、1 個子程序、session issue-313",
+      (lambda f: (with_env(hb_env(), lambda: run(
+          ["4149", "hi", "-p", "dfcoord", "--issue", "313",
+           "--handback-event", P313_EID], f))[0] == 0
+                  and len(f.spawned) == 1
+                  and f.spawned[0][f.spawned[0].index("-c") + 1] == "issue-313"))(
+          FakeSub(LINES)),
+      "同一張單的終態投遞被擋掉了")
+
+# 鑑別力：把兩道核對都從 relay 這一側拿掉 → 跨單投遞又成立（`spawned 1`、session issue-999）。
+P313_KEY_GATE = "            handback_validate_key(args.profile, args.issue, args.handback_event)\n"
+P313_FORGE_BIND = """            body = HandbackForge(args.issue, event=args.handback_event,
+                                 capture=_capture).read()
+"""
+MUT_CROSS = p312_mutate(
+    p312_mutate(RELAY_SRC, P313_KEY_GATE, "            pass\n"),
+    P313_FORGE_BIND,
+    "            body = HandbackForge(args.issue, capture=_capture).read()\n")
+check("#313 BLOCK 1 突變確實套上（兩個錨點各恰一處命中）", MUT_CROSS != RELAY_SRC, "錨點漂移")
+_f4j_mut = FakeSub(LINES, issue_body=HB_BODY)
+_m_cross = load_mutant(MUT_CROSS, "devflow_relay_mut_crossissue", _f4j_mut)
+_rc4j_mut, _, _ = with_env(hb_env(), lambda: run_mod(
+    _m_cross, ["4149", "hi", "-p", "dfcoord", "--issue", "999",
+               "--handback-event", P313_EID]))
+check("#313 BLOCK 1 反例「不核 EID 的 issue 欄」→ 跨單投遞成立（產品拒絕，實跑對照）",
+      _rc4j_mut == 0 and len(_f4j_mut.spawned) == 1
+      and _f4j_mut.spawned[0][_f4j_mut.spawned[0].index("-c") + 1] == "issue-999"
+      and rc4j == 2 and len(f4j.spawned) == 0,
+      f"突變 rc={_rc4j_mut} spawned={len(_f4j_mut.spawned)}；產品 rc={rc4j}")
+
 # (5) 子程序 rc 非 0：忙碌（`SESSION_NOT_OWNED`）與其他失敗分流，都走失敗出口。
 hb_reset_pending()
 f4e = FakeSub(LINES, rc=1, err_lines=["hermes: SESSION_NOT_OWNED issue-313\n"])

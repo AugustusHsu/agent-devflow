@@ -660,6 +660,11 @@ def main() -> int:
         # （`~/.hermes/profiles/<profile>/handback-pending/<issue>-<EID>.json`）。
         # `../../../escaped` 這種值會讓那個檔落到 `handback-pending` 外面——沒有歸屬、
         # `pending` 子命令也列不到，等於把「結果未定」靜悄悄丟掉。公開入口先擋。
+        # 同一處另核 **EID 的 issue 欄 ＝ `--issue`**（第 3 輪 `R1` `BLOCK 1`，`AC-3`）：
+        # 不核的話 `--issue 999 --handback-event 313-…` 會去讀 `#999`，而 `#999` 上若有
+        # 一行自相一致的 `313-…`（複製貼上、或引用材料時整行照抄），層1 就「成立」了，
+        # 於是 `#999` 的交回被 `#313` 的紀錄代簽、子程序還開在 `issue-999`。
+        # 這一關在**任何 `gh`、pending 寫入或子程序之前**。
         try:
             handback_validate_key(args.profile, args.issue, args.handback_event)
         except Exception as exc:  # noqa: BLE001 — HandbackError，入口拒絕不往上炸
@@ -721,7 +726,11 @@ def main() -> int:
                   file=sys.stderr)
             return 2
         try:
-            body = HandbackForge(args.issue, capture=_capture).read()
+            # `event=`（第 3 輪 `R1` `BLOCK 1`）：forge 建構時就核 EID 的 issue 欄
+            # ＝ `--issue`。`handback_landed()` 只看得到 body 與 EID，分不出 body 是
+            # 哪張單來的——跨單綁定只能由「決定去讀哪張單」的這一處負責。
+            body = HandbackForge(args.issue, event=args.handback_event,
+                                 capture=_capture).read()
             ok1, why1 = handback_landed(body, args.handback_event)
         except Exception as exc:  # noqa: BLE001 — 讀不到 ＝ 核不了，不猜
             ok1, why1 = False, f"讀不回該單，層1 無法核實（{exc}）"
@@ -772,7 +781,8 @@ def main() -> int:
                               detail=f"子程序 rc={rc}；stderr 末段：{err_text[-300:]}")
             return rc
         try:
-            after = HandbackForge(args.issue, capture=_capture).read()
+            after = HandbackForge(args.issue, event=args.handback_event,
+                                  capture=_capture).read()
             acked = handback_received(after, args.handback_event, by=args.profile)
         except Exception as exc:  # noqa: BLE001
             acked, err_text = False, f"{err_text}\n讀回失敗：{exc}"

@@ -667,9 +667,13 @@ def pending_dir(profile: str, *, home: pathlib.Path) -> pathlib.Path:
     return pathlib.Path(home) / ".hermes" / "profiles" / profile / PENDING_DIRNAME
 
 
-# 檔名三欄的合法字元（`#313` 第 2 輪 `R1` `BLOCK 2`）：`profile` 只收 ASCII 單字字元、
-# `.` 與 `-`；路徑分隔符、`..`、空白一律不收。issue 只收數字、EID 須合 `EID_RE` **整串**。
-_PROFILE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# 檔名三欄的合法字元（`#313` 第 2 輪 `R1` `BLOCK 2`）：issue 只收數字、EID 須合 `EID_RE`
+# **整串**、profile 只收以 `.` 分隔的 ASCII 單字段。
+# profile 的 pattern 刻意是「段 ＋ 分隔符」而不是字元集合（第 3 輪 `R1` `BLOCK 2`，manager
+# 取 (a)）：字元集合版（`[A-Za-z0-9._-]*`）只擋得掉**整段** `..`，`df..coord` 仍會過——而
+# 文件寫的是「不得含 `..`」。寫成段式之後 `.` 只能出現在兩個非空段之間，`..` 結構上不可能
+# 出現，實作與宣稱不必靠「再補一個 if」來對齊。
+_PROFILE_RE = re.compile(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*")
 _ISSUE_RE = re.compile(r"[0-9]+")
 
 
@@ -681,10 +685,17 @@ def validate_pending_key(profile: str, issue: str | int, eid: str) -> tuple[str,
     這種值會讓待處理紀錄落在 `handback-pending` 外面——那個檔從此沒有 profile 歸屬、
     `pending` 子命令也列不到它，等於「結果未定」這件事被靜悄悄地丟掉（`AC-6` 正是在防
     這件事）。路徑拼接前先驗，比事後發現檔案在奇怪的地方好查。
+
+    另核 **EID 的 issue 欄與傳入的 `issue` 相符**（第 3 輪 `R1` `BLOCK 1`，`AC-3`）：
+    `issue` 是用來定位 forge 與 pending 的那個值，EID 自己也帶著一個 issue。兩者不同時，
+    `313-…` 這個自相一致的事件會被拿去 `#999` 上判定落地、簽收、投遞——讀回的「恰一行」
+    算的是**別張單**的行。`landed()` 只看得到 body 與 EID，分不出 body 是哪張單來的，
+    所以這個核對只能長在**邊界**上：誰決定去讀哪張單，誰就要負責證明那是同一張。
     """
     bad: list[str] = []
     if not _PROFILE_RE.fullmatch(str(profile)):
-        bad.append(f"profile={profile!r}（只收 ASCII 單字字元、`.`、`-`，不得含路徑分隔符）")
+        bad.append(f"profile={profile!r}（只收以 `.` 分隔的 ASCII 單字段，"
+                   f"不得含路徑分隔符或 `..`）")
     if not _ISSUE_RE.fullmatch(str(issue)):
         bad.append(f"issue={issue!r}（只收數字）")
     if not re.fullmatch(EID_RE, str(eid)):
@@ -692,7 +703,22 @@ def validate_pending_key(profile: str, issue: str | int, eid: str) -> tuple[str,
     if bad:
         raise HandbackError("待處理紀錄的鍵不合法，拒絕拼出路徑（`AC-6`）："
                             + "；".join(bad))
+    assert_event_issue(eid, issue)
     return str(profile), str(issue), str(eid)
+
+
+def assert_event_issue(eid: str, issue: str | int) -> None:
+    """EID 的 issue 欄須等於用來定位 forge／pending 的 `issue`，否則 raise（`AC-3`）。
+
+    這是跨單綁定的那一道：拿 `#999` 的 body 去判定 `313-…` 是否落地，語法上每一條檢查
+    都會過（行自相一致、該事件恰一行），但那一行在**另一張單**上——`#999` 的交回就這樣
+    被 `#313` 的紀錄「代簽」了。故所有以 `issue` 取 forge 的公開入口都要先過這一關。
+    """
+    ev_issue = event_fields(eid)[0]
+    if ev_issue != str(issue):
+        raise HandbackError(
+            f"EID 的 issue 欄與目標單號不一致，拒絕（`AC-3`）：event={eid}（issue={ev_issue}）"
+            f"、目標 issue={issue}。同一個事件不得在另一張單上被判定落地或簽收")
 
 
 def pending_path(profile: str, issue: str | int, eid: str, *,
@@ -944,10 +970,19 @@ class GhForge:
 
     **不帶 `-R`**：repo 依 cwd 的 git remote 判定（同 `devflow_relay.py` 的
     `_write_handoff`——轉播器與本模組都不持有 repo 名）。`capture` 可注入，測試給假的。
+
+    `event`（第 3 輪 `R1` `BLOCK 1`，`AC-3`）：給了就在**建構時**核 EID 的 issue 欄等於
+    `issue`。這是跨單綁定的第二道——第一道在入口（`validate_pending_key`），這一道貼在
+    真正打 `gh` 的那個物件上，所以就算日後有人新增一條忘了驗的呼叫路徑，`#999` 的 body
+    也不會被拿去判定 `313-…` 的落地（`__init__` 就 raise，`gh` 連跑都不會跑）。
     """
 
-    def __init__(self, issue: str | int, *, capture: Callable[..., Any] | None = None) -> None:
+    def __init__(self, issue: str | int, *, event: str | None = None,
+                 capture: Callable[..., Any] | None = None) -> None:
+        if event is not None:
+            assert_event_issue(event, issue)
         self.issue = str(issue)
+        self.event = event
         self._capture = capture or _capture
         self.calls: list[str] = []
 
@@ -1010,7 +1045,7 @@ def _fail(args, reason: str, detail: str = "") -> FailureExit:
 
 def cmd_ack(args) -> int:
     """層3：依**收到的同一個 EID** 寫 ack 並**讀回**。層1 不成立即拒絕並走失敗出口。"""
-    forge = GhForge(args.issue, capture=_capture)
+    forge = GhForge(args.issue, event=args.event, capture=_capture)
     try:
         body = forge.read()
     except HandbackError as exc:
@@ -1047,7 +1082,7 @@ def cmd_ack(args) -> int:
 
 def cmd_done(args) -> int:
     """層4：前置層次（層1 ＋ 層3）齊備才寫 done，寫後讀回。"""
-    forge = GhForge(args.issue, capture=_capture)
+    forge = GhForge(args.issue, event=args.event, capture=_capture)
     try:
         body = forge.read()
     except HandbackError as exc:
@@ -1082,7 +1117,7 @@ def cmd_done(args) -> int:
 
 def cmd_recover(args) -> int:
     """中斷後的恢復：對帳 → 只補未做的步驟（ack）→ 前置齊備才寫 done。結果未定一律交人。"""
-    forge = GhForge(args.issue, capture=_capture)
+    forge = GhForge(args.issue, event=args.event, capture=_capture)
     steps, run = ack_steps(forge, eid=args.event, by=args.by, at=args.at)
     rec = recover(forge, args.event, steps, run, result=args.result,
                   by=args.by, at=args.at)
@@ -1113,7 +1148,8 @@ def cmd_pending(args) -> int:
               f"attempt={rec.get('attempt')} at={rec.get('at')}")
     if args.issue:
         try:
-            body = GhForge(args.issue, capture=_capture).read()
+            body = GhForge(args.issue, event=args.event or None,
+                           capture=_capture).read()
         except HandbackError as exc:
             print(f"[handback] 該單讀不回：{exc}", file=sys.stderr)
             return 2
