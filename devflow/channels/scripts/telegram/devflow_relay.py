@@ -63,17 +63,32 @@ OPENING_DELAY = 20
 # 分不出還在跑還是死了。超過這個秒數沒有任何事件就送一則心跳。
 HEARTBEAT_AFTER = 300
 
-# 鏈結深度上限（`#298` `AC-4`）。深度**只計巢狀**（relay 內的子程序再開 relay），
-# 不計同一 seat 的續接：relay 讀自身環境的 `DEVFLOW_RELAY_DEPTH`（未設 ＝ 0），對它派出的
-# **每個**子程序傳 `depth+1`——首個子程序與 `--then-wake` 喚醒者皆然。被喚醒的 seat 與呼叫
-# relay 的 seat 是同一 seat 的續接，深度相同，故多輪修正不累加。真實流程
-# `coord(0) → mgr(1) → coder／rev(2)`，最深 **2**，上限 3 留一層餘裕；真巢狀遞迴
-# （mgr 內 relay 再 then-wake mgr 再開 relay…）仍會被擋。
+# 鏈結深度上限（`#298` `AC-4`；深度語意由 `#312` 訂正）。深度**只計巢狀**，判準是
+# 「**這個子程序是怎麼被派出的**」，**不讀 profile 名**（讀名字會讓 `coder → coder` 的真
+# 遞迴被誤當成續接而放行，`#312` 以實際執行的突變對照過）：
+#   * 受託子程序（primary，`main()` 派出的第一個子程序）＝ 呼叫者的 `depth + 1`。
+#   * `--then-wake` 喚醒者（continuation）＝ **呼叫者自身的深度**（不 +1）。
+#     「呼叫者」指**啟動本次 relay 的那一層**（relay 自己的 `_current_depth()`）；
+#     它只是**不增深**——深度停在呼叫者那一層，跨 profile 也一樣：coder（`DEPTH=2`）的
+#     relay `--then-wake dfmgr` 產生的喚醒者是 `2`，不是祖先 manager 的 `1`。
+# `#312` 之前對**每個**子程序都寫 `depth+1`（含喚醒者），於是同一張單每輪 +1，第 3 輪即撞
+# 上限（`#310` 現場：鏈 `dfmgr,dfmgr,dfmgr` 不是遞迴，是三輪續接）。
+# 真實流程 `coord(0) → mgr(1) → coder／rev(2)`，最深 **2**，上限 3 留一層餘裕；primary
+# 疊 primary 的真巢狀／遞迴仍會被擋。
+# ⚠️ **射程（`#312` `AC-5(d)`）**：本機制只擋 **primary 方向**的巢狀與遞迴。
+# 純 continuation 的平層循環不增深，本機制不保證擋住它——那是 `#313` 的材料，
+# 本檔**不**為它加 `hops` 上限、也不宣稱它已修好；`CHAIN` 保留全部棒次供其判準使用。
 # 值只寫在這裡一處——散落的話下一個改上限的人會漏改。
 MAX_RELAY_DEPTH = 3
 DEPTH_ENV = "DEVFLOW_RELAY_DEPTH"
 # 選配的可讀鏈：每層把自己的 profile 接在後面，超限時印出來才看得出是誰疊誰。
+# 兩個分隔符使 primary 與 continuation 在鏈上**機械可區分**（`#312` `AC-2`）：
+# `,` ＝巢狀一層（primary，深度 +1）、`>` ＝同一流程的續接（continuation，不增深）。
+# 鏈空（最外層）時 primary 寫裸 profile、continuation 仍保留起首的 `>`——即
+# 「鏈以 `>` 起首 ＝ 最外層那一層即為續接」，見 `_child_env`。
 CHAIN_ENV = "DEVFLOW_RELAY_CHAIN"
+CHAIN_NEST_SEP = ","
+CHAIN_CONT_SEP = ">"
 
 # log 檔名的程序內序號。`itertools.count` 的 `next` 在 CPython 下是原子的，
 # 同一程序內（含將來若有多個執行緒各派子程序）不會發出重複值。
@@ -118,15 +133,27 @@ def _current_depth() -> int:
         return 0  # 外部亂塞值不該讓轉播掛掉；當最外層處理
 
 
-def _child_env(profile: str) -> dict[str, str]:
-    """子程序的環境 ＝ 本程序環境的複本 ＋ 深度覆寫。
+def _child_env(profile: str, *, continuation: bool = False) -> dict[str, str]:
+    """子程序的環境 ＝ 本程序環境的複本 ＋ 深度與鏈的覆寫。
 
     必須是複本：只給一個鍵的話子程序連 `PATH` 都沒有，`hermes` 找不到（實測必掛）。
+
+    `continuation`（`#312`）＝「這個子程序是怎麼被派出的」：`False` ＝受託子程序
+    （primary，巢狀一層，深度 +1、鏈以 `,` 接），`True` ＝ `--then-wake` 喚醒者
+    （同一流程的續接，承襲呼叫者自身的深度、鏈以 `>` 接）。判準是**派出方式**，
+    **不是** profile 名；語意與射程見 `MAX_RELAY_DEPTH` 上方的註解。
     """
     env = dict(os.environ)
-    env[DEPTH_ENV] = str(_current_depth() + 1)
+    depth = _current_depth()
+    # primary 加一層；continuation 承襲呼叫者自身那一層——深度停在那裡，不增深。
+    env[DEPTH_ENV] = str(depth if continuation else depth + 1)
     chain = os.environ.get(CHAIN_ENV, "")
-    env[CHAIN_ENV] = f"{chain},{profile}" if chain else profile
+    sep = CHAIN_CONT_SEP if continuation else CHAIN_NEST_SEP
+    # 空 chain（relay 自身在最外層、`CHAIN` 未設）：primary 維持裸 profile，
+    # continuation **保留起首的 `>`**。丟掉它的話同一 profile 的兩類會得到相同的 chain
+    # （`dfmgr` vs `dfmgr`），「可機械區分」在這個**合法輸入**下就不成立
+    # （`#312` 第 1 輪 `R1` `BLOCK 1` 實測；既有回歸走的正是 `CHAIN` 未設這條路徑）。
+    env[CHAIN_ENV] = f"{chain}{sep}{profile}" if chain or continuation else profile
     return env
 
 
@@ -421,7 +448,8 @@ def _build_cmd(profile: str, prompt: str, *, thread: str, issue: str | None,
 
 def _run_child(cmd: list[str], *, profile: str, thread: str, title: str, pace: str,
                session_label: str, log: pathlib.Path,
-               after_spawn: Callable[[], None] | None = None) -> int:
+               after_spawn: Callable[[], None] | None = None,
+               continuation: bool = False) -> int:
     """跑一個子程序、全程轉播，並把原始事件流與 stderr 寫進 `log`。回傳 rc。
 
     log 的用途（`AC-2`）：`--then-wake` 喚醒的是新的 oneshot，畫面已經不在；
@@ -432,6 +460,9 @@ def _run_child(cmd: list[str], *, profile: str, thread: str, title: str, pace: s
     而本函式接著要阻塞讀完整個 stdout 再 `wait()`——把寫 forge 掛在回傳之後就等於
     「等第二棒結束才寫」，那是 T 明列否決的做法。鉤子自己的失敗不得傳染給子程序，
     故在此吞掉例外（回報的責任在鉤子內，見 `_write_handoff`）。
+
+    `continuation`（`#312`）：唯一的用途是把「這個子程序是哪一類」傳進 `_child_env`
+    （primary 或 `--then-wake` 喚醒者）。轉播、log、rc 與 handoff 的時機一概不受它影響。
     """
     relay = Relay(profile, thread, title, pace, session_label)
 
@@ -448,7 +479,7 @@ def _run_child(cmd: list[str], *, profile: str, thread: str, title: str, pace: s
 
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             stdin=subprocess.DEVNULL, text=True, bufsize=1,
-                            env=_child_env(profile))
+                            env=_child_env(profile, continuation=continuation))
 
     if after_spawn is not None:
         try:
@@ -557,8 +588,13 @@ def main() -> int:
               f"{DEPTH_ENV}={depth} ≥ {MAX_RELAY_DEPTH}（MAX_RELAY_DEPTH={MAX_RELAY_DEPTH}）\n"
               f"[relay] 已有的鏈：{chain} → (本次想派) {args.profile}"
               + (f" → (then-wake) {args.then_wake}" if args.then_wake else "") + "\n"
-              f"[relay] 深度只計巢狀，不隨輪次累加；撞上限表示有 relay 在 relay 裡遞迴，"
-              f"請改由最外層派工。",
+              f"[relay] 鏈的讀法（`#312`）：`{CHAIN_NEST_SEP}` ＝巢狀一層（primary，深度 +1）、"
+              f"`{CHAIN_CONT_SEP}` ＝同一流程的續接（continuation，不增深）；"
+              f"鏈以 `{CHAIN_CONT_SEP}` 起首 ＝ 最外層那一層即為續接。"
+              f"撞上限表示 `{CHAIN_NEST_SEP}` 接起來的那幾層疊太深——有 relay 在 relay 裡遞迴，"
+              f"請改由最外層派工；同一張單的多輪續接不會累加深度。\n"
+              f"[relay] 本上限的射程：只計 primary 方向的巢狀；"
+              f"純 continuation 的平層循環不增深，本機制不保證擋住它。",
               file=sys.stderr)
         return 2
 
@@ -580,6 +616,9 @@ def main() -> int:
         # 喚醒者一律續接 `issue-<N>`（同一 seat 的續接，不給 `--fresh`）。**不對它再
         # then-wake**：那會無限鏈，深度上限只是兜底，不是正解。
         #
+        # 深度（`#312`）：喚醒者是 continuation，承襲**呼叫者自身**的深度（不 +1），
+        # 鏈以 `>` 接——故同一張單多輪續接不累加。巢狀仍由 primary 那條路徑計算。
+        #
         # 三項**不**承襲（`#298` 第 2 輪 `BLOCK 2`）：
         #   `--in`     worktree 是實作位的，被喚醒的管理位在主 checkout。
         #   `-m`／`--provider`  `I7`：覆寫只作用於該次子程序（配額耗盡時的一次性切換），
@@ -600,7 +639,8 @@ def main() -> int:
                           else f"thread {args.thread} · 續接"),
                    pace=args.pace, session_label=wake_label,
                    log=_log_path(args.issue, args.then_wake),
-                   after_spawn=_handoff_after_spawn if args.issue else None)
+                   after_spawn=_handoff_after_spawn if args.issue else None,
+                   continuation=True)
 
     # 回傳的仍是受託子程序的 rc：喚醒者的成敗是它自己那一輪的事，不該蓋掉這一輪的結果。
     return rc
