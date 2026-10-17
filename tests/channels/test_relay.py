@@ -34,6 +34,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import io
+import json
 import os
 import re
 import shutil
@@ -100,6 +101,9 @@ def load(fake, *, freeze_clock: bool = False):
     if "devflow_archive" not in sys.modules:
         _register("_marker", SCRIPTS / "_marker.py")          # devflow_archive 內 `import _marker`
         _register("devflow_archive", SCRIPTS / "devflow_archive.py")
+        # `#313`：relay 的終態投遞分支 `from _handback import …`（同目錄，同 devflow_archive
+        # 的做法）。登錄進 `sys.modules` 即可解析，仍然零 import-path 操作。
+        _register("_handback", SCRIPTS / "_handback.py")
     spec = importlib.util.spec_from_file_location("devflow_relay", RELAY_SRC_PATH)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -158,7 +162,8 @@ class FakeSub:
     DEVNULL = -3
     STDOUT = -2
 
-    def __init__(self, lines: list[str], rc: int = 0, *, gh_rc: int = 0) -> None:
+    def __init__(self, lines: list[str], rc: int = 0, *, gh_rc: int = 0,
+                 issue_body: str | None = None, err_lines: list[str] | None = None) -> None:
         self.sent: list[list[str]] = []        # 所有 run 的 cmd（送訊 ＋ gh）
         self.spawned: list[list[str]] = []     # 子程序的 Popen
         self.kwargs: list[dict] = []
@@ -167,10 +172,22 @@ class FakeSub:
         self._lines = lines
         self._rc = rc
         self._gh_rc = gh_rc
+        # `#313`：`gh issue view` 要回該單的可讀文字（body ＋ 留言）。預設給一份層1 ＋
+        # 層3 齊備的，讓終態投遞的正向路徑跑得完；要測未達成就傳 `issue_body=""` 等。
+        self.issue_body = HB_BODY if issue_body is None else issue_body
+        self._err_lines = err_lines or []
 
     @property
     def gh_calls(self) -> list[list[str]]:
         return [c for c in self.sent if c and c[0] == "gh"]
+
+    @property
+    def gh_view_calls(self) -> list[list[str]]:
+        return [c for c in self.gh_calls if c[1:3] == ["issue", "view"]]
+
+    @property
+    def gh_comment_calls(self) -> list[list[str]]:
+        return [c for c in self.gh_calls if c[1:3] == ["issue", "comment"]]
 
     @property
     def send_calls(self) -> list[list[str]]:
@@ -180,13 +197,17 @@ class FakeSub:
         self.sent.append(cmd)
         self.events.append(f"run:{cmd[0] if cmd else '?'}")
         rc = self._gh_rc if (cmd and cmd[0] == "gh") else 0
-        return types.SimpleNamespace(stdout='{"success": true}', stderr="", returncode=rc)
+        stdout = '{"success": true}'
+        if cmd[:3] == ["gh", "issue", "view"]:
+            stdout = self.issue_body            # `#313`：層1／層3 的讀回
+        return types.SimpleNamespace(stdout=stdout, stderr="", returncode=rc)
 
     def Popen(self, cmd, **kw):               # noqa: N802 — 對齊 subprocess 的名字
         self.kwargs.append(kw)
         self.spawned.append(cmd)
         self.events.append("popen")
         proc = FakeProc(self._lines, self._rc, self.events)
+        proc.stderr = iter(self._err_lines)   # `#313`：忙碌／失敗的分辨靠它
         self.procs.append(proc)
         return proc
 
@@ -197,6 +218,30 @@ LINES = [
     '{"type":"tool_result","tool_call_id":"c1","name":"terminal","output":"clean"}\n',
     '{"type":"result","text":"做完了","duration_ms":1234}\n',
 ]
+
+# ── `#313`：終態投遞的假 forge 內容 ─────────────────────────────────────────────
+# relay 在 `--handback-event` 模式下，**派子程序之前**會以 `gh issue view` 讀回層1
+# （該 EID 的 `handback` 行恰一行且自相一致），子程序退出後再讀一次核層3（ack）。
+# 兩次都經模組全域的 `subprocess`（`_capture`），所以假類照樣全部攔下，仍零真 API。
+# 三行字面**由產品模組生成**，不在本檔重打一份——grammar 漂移時這裡會跟著動，不會
+# 悄悄比對到一個過期的字面。
+HB_EID = "313-r1.approve-6067812345"
+HB_AT = "2026-10-16T12:00:00+0800"
+
+
+def _handback_mod():
+    """載入並登錄 `_handback`（relay 的終態投遞分支 import 它），回傳該模組。"""
+    if "_handback" not in sys.modules:
+        _register("_handback", SCRIPTS / "_handback.py")
+    return sys.modules["_handback"]
+
+
+HB_LINE = _handback_mod().handback_line(
+    event=HB_EID, issue=313, seat="dfmgr", stage="r1.approve",
+    kind="stage", outcome="done", at=HB_AT)
+HB_ACK = _handback_mod().ack_line(event=HB_EID, by="dfcoord", at=HB_AT)
+HB_BODY_NO_ACK = f"`#313` 的 r1.approve 階段交回。\n\n{HB_LINE}\n"
+HB_BODY = f"{HB_BODY_NO_ACK}\n{HB_ACK}\n"      # 層1 ＋ 層3 齊備（正向路徑）
 
 
 LAST_MOD: list = []            # run() 把最後一次載入的模組放這裡，供需要它的案例取用
@@ -2078,6 +2123,565 @@ check("#312 矩陣 14 對照：舊判定對那兩個暫存根給出不同結果�
 # 上方 `AC-2 log 落在 $TMPDIR 下，不寫進 repo`、`AC-2 鑑別力：--issue 999 …`、
 # `BLOCK 1 仍落在 $TMPDIR 下，不寫進 repo` 已改用這兩個純函式，故本節的固定情境與
 # 它們是同一支判定——AC-8 的驗證命令（`TMPDIR=<含 repo 目錄名的兄弟目錄>`）即其端到端證據。
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# `#313`／K4c-9 `AC-5`：終態投遞的入口邊界（`--handback-event`）
+# ════════════════════════════════════════════════════════════════════════════
+# 為什麼補在本檔而不是 `test_handback.py`：驗的是 `main()` 的入口行為，與既有三條拒絕
+# （`--issue` 缺 `--then-wake`、深度上限）同一支，正例與反例共用同一個驅動 `run_mod`
+# （`I5`——分檔會讓這四個入口組合各自長一套夾具）。協定本體的 `AC-1`～`AC-4`／`AC-6`
+# 在 `tests/channels/test_handback.py`。
+#
+# ⚠️ **既有普通模式的功能判準一律保留**：本節**只新增**，上方 `AC-3`／`AC-4` 與
+# `#312` 各節一字未動——`--handback-event` 是**新增的例外入口**，不是放寬既有防護。
+print("\n── #313 AC-5：`--handback-event` 是終態投遞的唯一例外入口")
+
+P313_EID = HB_EID
+# 終態投遞的失敗出口會寫待處理紀錄到 `pathlib.Path.home()`——測試一律把 `HOME` 指到本檔
+# 的暫存目錄，**不碰真的 `~/.hermes/profiles/`**（那是活體 profile，`C3`）。
+P313_HOME = TESTTMP / "home"
+
+
+def hb_env(depth=None, chain=None) -> dict[str, str | None]:
+    """終態投遞案例的環境：深度／鏈 ＋ 假 HOME。"""
+    return {DEPTH_KEY: depth, CHAIN_KEY: chain, "HOME": str(P313_HOME)}
+
+
+# (a) 普通 `--issue` 呼叫**仍須** `--then-wake`：不帶新旗標時，行為與 base 完全相同。
+f313a = FakeSub(LINES)
+rc313a, _, err313a = run(["4149", "hi", "--issue", "313"], f313a)
+check("#313 AC-5(a) 普通 `--issue` 仍須 --then-wake → rc 2、零子程序（新模式沒有放寬它）",
+      rc313a == 2 and len(f313a.spawned) == 0 and "--then-wake" in err313a,
+      f"rc={rc313a} spawned={len(f313a.spawned)} err={err313a[:200]!r}")
+check("#313 AC-5(a) 拒絕訊息同時指出終態投遞的例外形式（可照抄）",
+      "--handback-event" in err313a and "devflow_relay.py" in err313a,
+      f"err={err313a[:300]!r}")
+# 判準不是 profile 名：把 profile 換成接收端自己也**不**豁免（不依 profile 名猜意圖）。
+f313a2 = FakeSub(LINES)
+rc313a2, _, _ = run(["4149", "hi", "-p", "dfcoord", "--issue", "313"], f313a2)
+check("#313 AC-5(a) 判準不是 profile 名：`-p dfcoord --issue` 無旗標時同樣 rc 2、零子程序",
+      rc313a2 == 2 and len(f313a2.spawned) == 0,
+      f"rc={rc313a2} spawned={len(f313a2.spawned)}")
+
+# (b) `--issue --handback-event <EID>`：放行，派 1 個子程序，且它是 continuation。
+f313b = FakeSub(LINES)
+rc313b, _, err313b = with_env(
+    hb_env("1", "dfmgr"),
+    lambda: run(["4149", "hi", "-p", "dfcoord", "--issue", "313",
+                 "--handback-event", P313_EID], f313b))
+check("#313 AC-5(b) `--issue --handback-event` → 放行且恰派 1 個子程序（它之後沒有下一棒）",
+      rc313b == 0 and len(f313b.spawned) == 1,
+      f"rc={rc313b} spawned={len(f313b.spawned)} err={err313b[:200]!r}")
+check("#313 AC-5(b) 該子程序以 continuation 啟動：env 深度 ＝ **呼叫者自身**（1 → '1'，不 +1）",
+      bool(f313b.kwargs) and f313b.kwargs[0].get("env", {}).get(DEPTH_KEY) == "1",
+      f"depth={f313b.kwargs[0].get('env', {}).get(DEPTH_KEY) if f313b.kwargs else None!r}")
+check("#313 AC-5(b) 鏈以 `>` 接（續接，與 primary 的 `,` 機械可區分）",
+      bool(f313b.kwargs)
+      and f313b.kwargs[0].get("env", {}).get(CHAIN_KEY) == "dfmgr>dfcoord",
+      f"chain={f313b.kwargs[0].get('env', {}).get(CHAIN_KEY) if f313b.kwargs else None!r}")
+check("#313 AC-5(b) session 仍 `issue-313`（同一張單累積 context，不給 --fresh）",
+      len(f313b.spawned) == 1 and "-c" in f313b.spawned[0]
+      and f313b.spawned[0][f313b.spawned[0].index("-c") + 1] == "issue-313",
+      f"spawned[0]={f313b.spawned[0] if f313b.spawned else None}")
+check("#313 AC-5(b) handoff 行的時機不受影響：無 `--then-wake` ＝ **零 `gh issue comment`**"
+      "（`#300` 的條件不變；`gh issue view` 是 `#313` 新增的層1／層3 讀回，不是寫 forge）",
+      f313b.gh_comment_calls == [] and len(f313b.gh_view_calls) == 2
+      and all(c[1:3] == ["issue", "view"] for c in f313b.gh_calls),
+      f"comment={f313b.gh_comment_calls!r} view={len(f313b.gh_view_calls)}")
+# 最外層（呼叫者的 CHAIN 未設）：continuation 仍保留起首的 `>`（`#312` `BLOCK 1` 的邊界）。
+f313b2 = FakeSub(LINES)
+with_env(hb_env(),
+         lambda: run(["4149", "hi", "-p", "dfcoord", "--issue", "313",
+                      "--handback-event", P313_EID], f313b2))
+check("#313 AC-5(b) 最外層時深度 '0'、鏈 `>dfcoord`（起首的 `>` ＝ 最外層那一層即為續接）",
+      bool(f313b2.kwargs)
+      and f313b2.kwargs[0].get("env", {}).get(DEPTH_KEY) == "0"
+      and f313b2.kwargs[0].get("env", {}).get(CHAIN_KEY) == ">dfcoord",
+      f"env={{{DEPTH_KEY}: {f313b2.kwargs[0].get('env', {}).get(DEPTH_KEY)!r}, "
+      f"{CHAIN_KEY}: {f313b2.kwargs[0].get('env', {}).get(CHAIN_KEY)!r}}}"
+      if f313b2.kwargs else "kwargs 空")
+
+# (c) 互斥：與 `--then-wake` 同時出現須拒絕，**且不得先派出子程序**。
+f313c = FakeSub(LINES)
+rc313c, _, err313c = run(["4149", "hi", "--issue", "313",
+                          "--handback-event", P313_EID, "--then-wake", "dfmgr"], f313c)
+check("#313 AC-5(c) `--handback-event` ＋ `--then-wake` → rc 2",
+      rc313c == 2, f"rc={rc313c} err={err313c[:200]!r}")
+check("#313 AC-5(c) 且 `len(spawned) == 0`——拒絕在派子程序之前（哨兵反證 Popen 未被呼叫）",
+      len(f313c.spawned) == 0, f"spawned={f313c.spawned}")
+check("#313 AC-5(c) 拒絕訊息指出互斥的兩個旗標與其理由（最後一棒之後沒有下一棒）",
+      "--handback-event" in err313c and "--then-wake" in err313c
+      and "互斥" in err313c, f"err={err313c[:300]!r}")
+check("#313 AC-5(c) 拒絕是純本機的：連一則 Telegram 訊息、一個 gh 呼叫都沒有",
+      f313c.sent == [], f"sent={f313c.sent!r}")
+# 不帶 `--issue` 的互斥組合同樣拒絕（互斥不以 `--issue` 為前提）。
+f313c2 = FakeSub(LINES)
+rc313c2, _, _ = run(["4149", "hi", "--handback-event", P313_EID,
+                     "--then-wake", "dfmgr"], f313c2)
+check("#313 AC-5(c) 無 `--issue` 的互斥組合同樣 rc 2、零子程序",
+      rc313c2 == 2 and len(f313c2.spawned) == 0,
+      f"rc={rc313c2} spawned={len(f313c2.spawned)}")
+
+# (d) 深度防護沿用既有判準：continuation 不增深 ≠ 任何深度都能啟動。
+f313d = FakeSub(LINES)
+rc313d, _, err313d = with_env(
+    hb_env(str(P312_MAX), "dfmgr,dfimpl,dfmgr"),
+    lambda: run(["4149", "hi", "-p", "dfcoord", "--issue", "313",
+                 "--handback-event", P313_EID], f313d))
+check("#313 AC-5(d) `DEPTH=3 --handback-event` → rc 2、零子程序（終態投遞不例外）",
+      rc313d == 2 and len(f313d.spawned) == 0,
+      f"rc={rc313d} spawned={len(f313d.spawned)} err={err313d[:200]!r}")
+check("#313 AC-5(d) 超限訊息仍是既有那一份（鏈的讀法與射程說明都在，沒有為新模式刪弱）",
+      P312_LIMIT_SENTENCE in err313d and P312_LEADING_SENTENCE in err313d
+      and "dfmgr,dfimpl,dfmgr" in err313d and f"{DEPTH_KEY}={P312_MAX}" in err313d,
+      f"err={err313d[-300:]!r}")
+check("#313 AC-5(d) depth=2 的終態投遞仍放行（上限沒有被順手調嚴）",
+      with_env(hb_env("2", "dfmgr,dfimpl"),
+               lambda: run(["4149", "hi", "-p", "dfcoord", "--issue", "313",
+                            "--handback-event", P313_EID], FakeSub(LINES)))[0] == 0,
+      "depth=2 的終態投遞被擋掉")
+# (e) 終態投遞必須指向某張單：沒有 `--issue` 就核不了層1（讀不到 forge）。
+f313e = FakeSub(LINES)
+rc313e, _, err313e = with_env(
+    hb_env(), lambda: run(["4149", "hi", "-p", "dfcoord",
+                           "--handback-event", P313_EID], f313e))
+check("#313 AC-5(e) `--handback-event` 無 `--issue` → rc 2、零子程序（層1 無從核實）",
+      rc313e == 2 and len(f313e.spawned) == 0 and "--issue" in err313e,
+      f"rc={rc313e} spawned={len(f313e.spawned)} err={err313e[:200]!r}")
+
+# ── 鑑別力：三種未達成候選，各自實跑並得到不同輸出 ──
+P313_EXCL_IF = "    if args.handback_event and args.then_wake:\n"
+P313_ISSUE_IF = "    if args.issue and not args.then_wake and not args.handback_event:\n"
+P313_CONT_ARG = "                        continuation=bool(args.handback_event),\n"
+
+
+def p313_move_excl_check(src: str) -> str:
+    """把互斥檢查那一整塊搬到首棒 `_run_child` 之後（拒絕改為發生在派工之後）。
+
+    手法同 `p312_move_limit_check`：行號由 AST 取、不寫死。落點取 `main()` 內**最後一個**
+    `if args.handback_event:`（＝派子程序之後的層3 核對那塊）之前——搬到更前面的話它會落在
+    `_run_child` 之前，就不是「派工之後才拒絕」這個未達成候選了。
+    """
+    lines = src.splitlines(keepends=True)
+    main_fn = p312_main_fn(src)
+    blk = next(n for n in main_fn.body
+               if isinstance(n, ast.If)
+               and ast.unparse(n.test) == "args.handback_event and args.then_wake")
+    target = [n for n in main_fn.body
+              if isinstance(n, ast.If) and ast.unparse(n.test) == "args.handback_event"][-1]
+    block = lines[blk.lineno - 1:blk.end_lineno]
+    rest = lines[:blk.lineno - 1] + lines[blk.end_lineno:]
+    at = target.lineno - 1 - len(block)
+    return "".join(rest[:at] + block + rest[at:])
+
+
+P313_MUT_LATE = p313_move_excl_check(RELAY_SRC)
+# 候選②：終態投遞仍以 primary 啟動（深度 +1）——「continuation 不增深」不成立。
+P313_MUT_PRIMARY = p312_mutate(RELAY_SRC, P313_CONT_ARG,
+                               "                        continuation=False,\n")
+# 候選③：把例外擴及**任何** `--issue`（＝刪掉普通模式的 `--then-wake` 要求）。
+P313_MUT_ANYISSUE = p312_mutate(RELAY_SRC, P313_ISSUE_IF, "    if False:\n")
+check("#313 AC-5 三種突變確實套上（錨點各恰一處命中）",
+      P313_MUT_LATE != RELAY_SRC and P313_MUT_PRIMARY != RELAY_SRC
+      and P313_MUT_ANYISSUE != RELAY_SRC and P313_EXCL_IF in RELAY_SRC
+      and RELAY_SRC.count(P313_EXCL_IF) == 1,
+      "錨點漂移：某個突變沒有套上去（no-op 的反例會假 PASS）")
+
+_f313m1 = FakeSub(LINES)
+_m313a = load_mutant(P313_MUT_LATE, "devflow_relay_mut_hb_late", _f313m1)
+_rc313m1, _, _ = with_env(hb_env(), lambda: run_mod(
+    _m313a, ["4149", "hi", "--issue", "313",
+             "--handback-event", P313_EID, "--then-wake", "dfmgr"]))
+check("#313 AC-5(c) 反例①：互斥檢查搬到 Popen 之後 → spawned 轉非零（實跑對照）",
+      len(_f313m1.spawned) >= 1 and _rc313m1 == 2 and len(f313c.spawned) == 0,
+      f"突變 spawned={len(_f313m1.spawned)} rc={_rc313m1}；正確實作 spawned={len(f313c.spawned)}")
+
+_f313m2 = FakeSub(LINES)
+_m313b = load_mutant(P313_MUT_PRIMARY, "devflow_relay_mut_hb_primary", _f313m2)
+with_env(hb_env("1", "dfmgr"),
+         lambda: run_mod(_m313b, ["4149", "hi", "-p", "dfcoord", "--issue", "313",
+                                  "--handback-event", P313_EID]))
+check("#313 AC-5(b) 反例②：終態投遞仍以 primary 啟動 → 深度 '2'、鏈以 `,` 接（實跑對照）",
+      bool(_f313m2.kwargs)
+      and _f313m2.kwargs[0].get("env", {}).get(DEPTH_KEY) == "2"
+      and _f313m2.kwargs[0].get("env", {}).get(CHAIN_KEY) == "dfmgr,dfcoord"
+      and f313b.kwargs[0].get("env", {}).get(DEPTH_KEY) == "1",
+      f"突變 depth={_f313m2.kwargs[0].get('env', {}).get(DEPTH_KEY) if _f313m2.kwargs else None!r} "
+      f"chain={_f313m2.kwargs[0].get('env', {}).get(CHAIN_KEY) if _f313m2.kwargs else None!r}")
+
+_f313m3 = FakeSub(LINES)
+_m313c = load_mutant(P313_MUT_ANYISSUE, "devflow_relay_mut_hb_anyissue", _f313m3)
+_rc313m3, _, _ = run_mod(_m313c, ["4149", "hi", "--issue", "313"])
+check("#313 AC-5(a) 反例③：例外擴及任何 `--issue` → 普通模式缺 `--then-wake` 轉為放行（實跑對照）",
+      _rc313m3 == 0 and len(_f313m3.spawned) == 1
+      and rc313a == 2 and len(f313a.spawned) == 0,
+      f"突變 rc={_rc313m3} spawned={len(_f313m3.spawned)}；正確實作 rc={rc313a}")
+
+# 唯一入口：`--handback-event` 之外沒有第二個豁免 `--then-wake` 的旗標。
+# 「豁免 `--then-wake`」的那個條件式 ＝ 同時提到 `args.issue` 與 `args.then_wake` 的 if
+# （`main()` 內另有一個只提 `args.issue` 的——`--handback-event` 缺單號的拒絕，不是它）。
+_p313_issue_if = next(
+    n for n in ast.walk(p312_main_fn(RELAY_SRC))
+    if isinstance(n, ast.If) and "args.issue" in ast.unparse(n.test)
+    and "args.then_wake" in ast.unparse(n.test))
+check("#313 AC-5 唯一例外入口：豁免 `--then-wake` 的條件只提到 `--handback-event` 一個旗標",
+      sorted({ast.unparse(a) for a in ast.walk(_p313_issue_if.test)
+              if isinstance(a, ast.Attribute)})
+      == ["args.handback_event", "args.issue", "args.then_wake"],
+      f"條件式={ast.unparse(_p313_issue_if.test)!r}")
+check("#313 AC-5 `--handback-event` 的用途只有三處（互斥判斷 ＋ 其訊息、豁免條件、continuation 旗標）",
+      RELAY_SRC.count("args.handback_event") >= 4
+      and "bool(args.handback_event)" in RELAY_SRC
+      and len([n for n in ast.walk(p312_main_fn(RELAY_SRC))
+               if isinstance(n, ast.If)
+               and "args.handback_event" in ast.unparse(n.test)]) >= 2,
+      f"命中次數={RELAY_SRC.count('args.handback_event')}")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# `#313` 第 2 輪 `BLOCK 4`：終態投遞的**產品路徑**（整合，假 forge／假 send／假 child）
+# ════════════════════════════════════════════════════════════════════════════
+# 第 1 輪的缺口：EID 只當布林開關（接收端拿不到）、`failure_exit()` 沒有產品呼叫者、
+# 深度拒絕只留 stderr。本節驗的是**relay 真的做了那三件事**，仍然零真 API——`gh` 與
+# 送訊都走模組全域的 `subprocess`（假類攔下），`HOME` 指向本檔的暫存目錄。
+print("\n── #313 BLOCK 4：EID 交付、層1 前置、失敗出口（產品路徑整合）")
+
+hbm = _handback_mod()
+
+
+def hb_pending_files(profile: str = "dfcoord") -> list:
+    root = hbm.pending_dir(profile, home=P313_HOME)
+    return sorted(root.glob("*.json")) if root.exists() else []
+
+
+def hb_alerts(fake) -> list[str]:
+    """失敗出口的告警（送訊的文字含 `NO_AUTO_RESUME` 那幾則）。
+
+    為什麼要篩：`send_calls` 也收**正常轉播**的訊息（工具行批次、`✅ 完成`、子程序 exit
+    的警告）。不篩的話「送了幾則告警」會被轉播量干擾——那是計到別的東西上。
+    """
+    return [c[-1] for c in fake.send_calls if hbm.NO_AUTO_RESUME in c[-1]]
+
+
+def hb_alert_threads(fake) -> list[str]:
+    return [c[c.index("-t") + 1].rsplit(":", 1)[-1]
+            for c in fake.send_calls if hbm.NO_AUTO_RESUME in c[-1]]
+
+
+def hb_reset_pending() -> None:
+    shutil.rmtree(P313_HOME, ignore_errors=True)
+
+
+# (1) EID 交付：prompt 前置通知（給模型）＋ 環境變數（給程式），兩者同一個值。
+hb_reset_pending()
+f4a = FakeSub(LINES)
+rc4a, _, _ = with_env(hb_env("1", "dfmgr"), lambda: run(
+    ["4149", "receiver prompt without eid", "-p", "dfcoord", "--issue", "313",
+     "--handback-event", P313_EID], f4a))
+_child_cmd = f4a.spawned[0] if f4a.spawned else []
+_child_prompt = prompt_of(_child_cmd)
+check("#313 BLOCK 4(1) EID 在子程序的指令裡（`eid_in_child_cmd` ＝ True）",
+      rc4a == 0 and any(P313_EID in str(x) for x in _child_cmd),
+      f"rc={rc4a} cmd={_child_cmd!r}")
+check("#313 BLOCK 4(1) EID 在 prompt 裡（oneshot 的 seat 只看得到 prompt）",
+      P313_EID in _child_prompt and "終態投遞" in _child_prompt,
+      f"prompt={_child_prompt[:200]!r}")
+check("#313 BLOCK 4(1) 原本的 prompt 仍在（前置通知是加上去的，不是取代）",
+      "receiver prompt without eid" in _child_prompt,
+      f"prompt={_child_prompt[:200]!r}")
+check("#313 BLOCK 4(1) EID 也在子程序的環境變數 `DEVFLOW_HANDBACK_EVENT`（給程式讀）",
+      bool(f4a.kwargs)
+      and f4a.kwargs[0].get("env", {}).get("DEVFLOW_HANDBACK_EVENT") == P313_EID,
+      f"env={f4a.kwargs[0].get('env', {}).get('DEVFLOW_HANDBACK_EVENT') if f4a.kwargs else None!r}")
+check("#313 BLOCK 4(1) prompt 給的是**可照抄的接收端指令**（ack／done 各一條）",
+      "_handback.py ack --issue 313" in _child_prompt
+      and "_handback.py done --issue 313" in _child_prompt,
+      f"prompt={_child_prompt[:400]!r}")
+check("#313 BLOCK 4(1) 普通模式不帶這個環境變數（新鍵只在終態投遞出現）",
+      "DEVFLOW_HANDBACK_EVENT" not in (
+          FakeSub(LINES).kwargs[0].get("env", {}) if False else
+          (lambda f: (run(["4149", "hi", "--issue", "287", "--then-wake", "dfmgr"], f),
+                      f.kwargs[0].get("env", {}))[1])(FakeSub(LINES))),
+      "普通模式的子程序環境多了終態投遞的鍵")
+
+# (2) prompt 提到**另一個**事件 → 拒絕，且零子程序。
+f4b = FakeSub(LINES)
+_other = "313-merge.done-6067899999"
+rc4b, _, err4b = with_env(hb_env(), lambda: run(
+    ["4149", f"請處理 event={_other}", "-p", "dfcoord", "--issue", "313",
+     "--handback-event", P313_EID], f4b))
+check("#313 BLOCK 4(1) prompt 與旗標的事件不一致 → rc 2、零子程序（不猜哪一個才對）",
+      rc4b == 2 and len(f4b.spawned) == 0 and _other in err4b,
+      f"rc={rc4b} spawned={len(f4b.spawned)} err={err4b[:200]!r}")
+
+# (2b) 第 3 輪 `BLOCK 3`：衝突偵測的**射程**——只認約定的結構化欄位。
+# manager 取 (b)（收窄宣稱、不擴成掃散文），故這裡要有**正反兩條**：結構化欄位衝突要擋、
+# 散文裡裸寫的別單 EID **不**擋。後者是宣稱射程的反向斷言，不是漏洞——交接稿常引用別單的
+# 事件識別當材料，把任意提及當衝突會讓正當的終態投遞被擋下。`telegram.md` 值欄同此說法。
+f4b2 = FakeSub(LINES)
+rc4b2, _, _err4b2 = with_env(hb_env(), lambda: run(
+    ["4149", f"請處理交接事件 `{_other}`，不要處理其他事件", "-p", "dfcoord",
+     "--issue", "313", "--handback-event", P313_EID], f4b2))
+check("#313 BLOCK 3 散文裡裸寫的別單 EID **不**拒絕（宣稱射程的反向斷言）",
+      rc4b2 == 0 and len(f4b2.spawned) == 1,
+      f"rc={rc4b2} spawned={len(f4b2.spawned)} err={_err4b2[:200]!r}")
+check("#313 BLOCK 3 那一棒仍以本旗標的事件投遞（散文裡的別單 EID 不會頂替它）",
+      P313_EID in f4b2.spawned[0][f4b2.spawned[0].index("-q") + 1]
+      and f4b2.kwargs[0].get("env", {}).get("DEVFLOW_HANDBACK_EVENT") == P313_EID,
+      f"env={f4b2.kwargs[0].get('env', {}).get('DEVFLOW_HANDBACK_EVENT')!r}")
+f4b3 = FakeSub(LINES)
+rc4b3, _, err4b3 = with_env(hb_env(), lambda: run(
+    ["4149", f"環境裡另一個：{hbm.EVENT_ENV}={_other}", "-p", "dfcoord",
+     "--issue", "313", "--handback-event", P313_EID], f4b3))
+check("#313 BLOCK 3 `DEVFLOW_HANDBACK_EVENT=` 標示的衝突同樣擋（兩個約定欄位都算）",
+      rc4b3 == 2 and len(f4b3.spawned) == 0 and _other in err4b3,
+      f"rc={rc4b3} spawned={len(f4b3.spawned)}")
+
+# (2c) 第 3 輪 `BLOCK 2`：`--handback-event` 的值會被拼進待處理紀錄的路徑 → 入口先驗。
+for _lbl, _ev in [("逃出目錄", "../../../escaped"),
+                  ("不合 grammar", "X"),
+                  ("帶路徑分隔符", "313-r1.approve-/etc/passwd")]:
+    hb_reset_pending()
+    _f4k = FakeSub(LINES)
+    _rc4k, _, _err4k = with_env(hb_env(), lambda f=_f4k, e=_ev: run(
+        ["4149", "hi", "-p", "dfcoord", "--issue", "313", "--handback-event", e], f))
+    check(f"#313 BLOCK 2 relay 入口拒絕不合法的 EID（{_lbl}）→ rc 2、零子程序、零 gh",
+          _rc4k == 2 and len(_f4k.spawned) == 0 and _f4k.gh_calls == []
+          and hb_pending_files() == [],
+          f"rc={_rc4k} spawned={len(_f4k.spawned)} gh={len(_f4k.gh_calls)} "
+          f"pending={hb_pending_files()!r}")
+_f4k2 = FakeSub(LINES)
+_rc4k2, _, _err4k2 = with_env(hb_env(), lambda: run(
+    ["4149", "hi", "-p", "dfcoord", "--issue", "../../x",
+     "--handback-event", P313_EID], _f4k2))
+check("#313 BLOCK 2 relay 入口同樣驗單號（會進檔名的另一欄）→ rc 2、零子程序",
+      _rc4k2 == 2 and len(_f4k2.spawned) == 0 and "issue=" in _err4k2,
+      f"rc={_rc4k2} err={_err4k2[:200]!r}")
+
+# (3) 層1 前置：讀不到該 EID 的 handback 行 → 不派子程序，走失敗出口。
+hb_reset_pending()
+f4c = FakeSub(LINES, issue_body="這張單上沒有任何 handback 行。")
+rc4c, _, err4c = with_env(hb_env(), lambda: run(
+    ["4149", "hi", "-p", "dfcoord", "--issue", "313",
+     "--handback-event", P313_EID], f4c))
+_pend_c = hb_pending_files()
+check("#313 BLOCK 4(2) 層1 未成立 → rc 2、**零子程序**（哨兵反證 Popen 未被呼叫）",
+      rc4c == 2 and len(f4c.spawned) == 0, f"rc={rc4c} spawned={len(f4c.spawned)}")
+check("#313 BLOCK 4(2) 層1 的讀回確實發生過（`gh issue view` ≥1，且在派子程序之前）",
+      len(f4c.gh_view_calls) >= 1 and "popen" not in f4c.events,
+      f"events={f4c.events!r}")
+check("#313 BLOCK 4(4) 層1 失敗走失敗出口：topic ＋ General 各一則、待處理紀錄一筆",
+      len(hb_alerts(f4c)) == 2 and len(_pend_c) == 1
+      and hb_alert_threads(f4c) == ["4149", "1"],
+      f"告警 thread={hb_alert_threads(f4c)!r} pending={_pend_c!r}")
+check("#313 BLOCK 4(4) 待處理紀錄有 profile 與本單歸屬，且結果記為未定",
+      bool(_pend_c) and _pend_c[0].name == f"313-{P313_EID}.json"
+      and json.loads(_pend_c[0].read_text())["result"] == "indeterminate"
+      and json.loads(_pend_c[0].read_text())["reason"] == "land_failed",
+      f"pending={[p.name for p in _pend_c]!r}")
+check("#313 BLOCK 4(4) 告警內容合 AC-6（單號、事件、不自動續接、待處理紀錄位置）",
+      bool(hb_alerts(f4c)) and all(
+          s in hb_alerts(f4c)[0]
+          for s in ("#313", P313_EID, hbm.NO_AUTO_RESUME, str(_pend_c[0]))),
+      f"text={hb_alerts(f4c)[0][:300] if hb_alerts(f4c) else None!r}")
+
+# (4) 深度拒絕也走失敗出口（第 1 輪只留 stderr 的那條路）。
+hb_reset_pending()
+f4d = FakeSub(LINES)
+rc4d, _, err4d = with_env(hb_env(str(P312_MAX), "dfmgr,dfimpl,dfmgr"), lambda: run(
+    ["4149", "hi", "-p", "dfcoord", "--issue", "313",
+     "--handback-event", P313_EID], f4d))
+_pend_d = hb_pending_files()
+check("#313 BLOCK 4(4) `DEPTH=3` 的終態投遞：rc 2、零子程序**且**topic ＋ General ＋ pending",
+      rc4d == 2 and len(f4d.spawned) == 0 and hb_alert_threads(f4d) == ["4149", "1"]
+      and len(_pend_d) == 1
+      and json.loads(_pend_d[0].read_text())["reason"] == "depth_rejected",
+      f"rc={rc4d} 告警={hb_alert_threads(f4d)!r} pending={[p.name for p in _pend_d]!r}")
+check("#313 BLOCK 4(4) 深度拒絕的既有 stderr 訊息一字未動（新出口是**加上去**的）",
+      P312_LIMIT_SENTENCE in err4d and P312_LEADING_SENTENCE in err4d,
+      f"err={err4d[-200:]!r}")
+
+# (4b) 第 3 輪 `BLOCK 1`：pending 寫不成時，relay 仍要把兩則告警送出去。
+# 第 2 輪的現場是兩層短路：`failure_exit()` 先寫 pending、失敗即拋，而 relay 的
+# `_handback_failure()` 把整段包在一個 `try` 裡——於是 `$HOME` 不是目錄時，topic 與
+# General **連嘗試都沒有**，只剩一行 stderr。這裡用「HOME 指向一個普通檔案」重現那個
+# 條件（`mkdir(parents=True)` 必拋），要求兩則告警照送、且 stderr 明說紀錄沒落地。
+# 鑑別力：產品修好後 relay 已**結構上**無法短路（`failure_exit()` 自己不拋了），故同述詞
+# 的突變對照放在 `tests/channels/test_handback.py` 的「第 3 輪 BLOCK 1」一節（舊實作
+# ＝ 先寫 pending、失敗即拋 → `send_attempts []`）。
+hb_reset_pending()
+P313_HOME_FILE = TESTTMP / "home-is-a-file"
+P313_HOME_FILE.write_text("x")
+f4i = FakeSub(LINES, issue_body="這張單上沒有任何 handback 行。")
+rc4i, _, err4i = with_env({DEPTH_KEY: None, CHAIN_KEY: None, "HOME": str(P313_HOME_FILE)},
+                          lambda: run(["4149", "hi", "-p", "dfcoord", "--issue", "313",
+                                       "--handback-event", P313_EID], f4i))
+check("#313 BLOCK 1 pending 寫不成（HOME 是檔案）→ 兩則告警仍落 topic ＋ General",
+      rc4i == 2 and len(f4i.spawned) == 0
+      and hb_alert_threads(f4i) == ["4149", "1"] and len(hb_alerts(f4i)) == 2,
+      f"rc={rc4i} 告警={hb_alert_threads(f4i)!r}")
+check("#313 BLOCK 1 告警文字自己說得出「待處理紀錄未落地」（不叫人去翻不存在的檔）",
+      all(hbm.PENDING_NOT_WRITTEN in t for t in hb_alerts(f4i))
+      and all("NotADirectoryError" in t for t in hb_alerts(f4i)),
+      f"text={hb_alerts(f4i)[0][:300] if hb_alerts(f4i) else None!r}")
+check("#313 BLOCK 1 relay 的 stderr 也分得出是「三處少一處」而不是整個出口沒跑",
+      "待處理紀錄未落地" in err4i and "告警已送 thread ['4149', '1']" in err4i
+      and "失敗出口自己也失敗了" not in err4i,
+      f"err={err4i[-300:]!r}")
+
+# (4c) 第 4 輪 `BLOCK 1`（`AC-3`）：合法且**自相一致**的 `313-…` 行放在假 `#999` 上，
+# 配 `--issue 999` → 必須拒絕。第 3 輪的現場是 `rc 0`、`spawned 1`、`gh_targets ['999',
+# '999']`、子程序開在 `issue-999`——`#999` 的交回被 `#313` 的紀錄代簽。
+# `landed()` 只收 body 與 EID，分不出 body 是哪張單來的，所以核對必須長在「決定去讀哪張
+# 單」的邊界上（relay 入口 ＋ forge 建構）。
+hb_reset_pending()
+f4j = FakeSub(LINES, issue_body=HB_BODY)   # 內含自相一致的 `313-…` handback ＋ ack
+rc4j, _, err4j = with_env(hb_env(), lambda: run(
+    ["4149", "hi", "-p", "dfcoord", "--issue", "999",
+     "--handback-event", P313_EID], f4j))
+check("#313 BLOCK 1 跨單投遞（`--issue 999` ＋ `313-…`）→ rc 2、**零子程序**",
+      rc4j == 2 and len(f4j.spawned) == 0,
+      f"rc={rc4j} spawned={len(f4j.spawned)} err={err4j[:200]!r}")
+check("#313 BLOCK 1 拒絕發生在**任何 `gh` 之前**（`gh_calls` 恰 0，含 view 與 comment）",
+      f4j.gh_calls == [] and f4j.gh_view_calls == [] and f4j.gh_comment_calls == [],
+      f"gh={f4j.gh_calls!r}")
+check("#313 BLOCK 1 零 ack／done／pending 寫入（沒有任何一處把這次當成有效事件）",
+      hb_pending_files() == [] and hb_alerts(f4j) == [],
+      f"pending={hb_pending_files()!r} 告警={len(hb_alerts(f4j))}")
+check("#313 BLOCK 1 拒絕訊息指得出兩個不一致的值（999 與 EID 的 313）",
+      "999" in err4j and P313_EID in err4j,
+      f"err={err4j[:300]!r}")
+check("#313 BLOCK 1 正例不受影響：`--issue 313` ＋ `313-…` 仍 rc 0、1 個子程序、session issue-313",
+      (lambda f: (with_env(hb_env(), lambda: run(
+          ["4149", "hi", "-p", "dfcoord", "--issue", "313",
+           "--handback-event", P313_EID], f))[0] == 0
+                  and len(f.spawned) == 1
+                  and f.spawned[0][f.spawned[0].index("-c") + 1] == "issue-313"))(
+          FakeSub(LINES)),
+      "同一張單的終態投遞被擋掉了")
+
+# 鑑別力：把兩道核對都從 relay 這一側拿掉 → 跨單投遞又成立（`spawned 1`、session issue-999）。
+P313_KEY_GATE = "            handback_validate_key(args.profile, args.issue, args.handback_event)\n"
+P313_FORGE_BIND = """            body = HandbackForge(args.issue, event=args.handback_event,
+                                 capture=_capture).read()
+"""
+MUT_CROSS = p312_mutate(
+    p312_mutate(RELAY_SRC, P313_KEY_GATE, "            pass\n"),
+    P313_FORGE_BIND,
+    "            body = HandbackForge(args.issue, capture=_capture).read()\n")
+check("#313 BLOCK 1 突變確實套上（兩個錨點各恰一處命中）", MUT_CROSS != RELAY_SRC, "錨點漂移")
+_f4j_mut = FakeSub(LINES, issue_body=HB_BODY)
+_m_cross = load_mutant(MUT_CROSS, "devflow_relay_mut_crossissue", _f4j_mut)
+_rc4j_mut, _, _ = with_env(hb_env(), lambda: run_mod(
+    _m_cross, ["4149", "hi", "-p", "dfcoord", "--issue", "999",
+               "--handback-event", P313_EID]))
+check("#313 BLOCK 1 反例「不核 EID 的 issue 欄」→ 跨單投遞成立（產品拒絕，實跑對照）",
+      _rc4j_mut == 0 and len(_f4j_mut.spawned) == 1
+      and _f4j_mut.spawned[0][_f4j_mut.spawned[0].index("-c") + 1] == "issue-999"
+      and rc4j == 2 and len(f4j.spawned) == 0,
+      f"突變 rc={_rc4j_mut} spawned={len(_f4j_mut.spawned)}；產品 rc={rc4j}")
+
+# (5) 子程序 rc 非 0：忙碌（`SESSION_NOT_OWNED`）與其他失敗分流，都走失敗出口。
+hb_reset_pending()
+f4e = FakeSub(LINES, rc=1, err_lines=["hermes: SESSION_NOT_OWNED issue-313\n"])
+rc4e, _, _ = with_env(hb_env(), lambda: run(
+    ["4149", "hi", "-p", "dfcoord", "--issue", "313",
+     "--handback-event", P313_EID], f4e))
+_pend_e = hb_pending_files()
+check("#313 BLOCK 4(4) 忙碌（`SESSION_NOT_OWNED`）→ 失敗出口且**具名到 session**",
+      rc4e == 1 and len(_pend_e) == 1
+      and json.loads(_pend_e[0].read_text())["reason"] == "busy"
+      and len(hb_alerts(f4e)) == 2
+      and all("hermes -p dfcoord chat -c issue-313" in t for t in hb_alerts(f4e)),
+      f"rc={rc4e} 告警={len(hb_alerts(f4e))} pending={[p.name for p in _pend_e]!r}")
+
+hb_reset_pending()
+f4f = FakeSub(LINES, rc=1, err_lines=["boom\n"])
+rc4f, _, _ = with_env(hb_env(), lambda: run(
+    ["4149", "hi", "-p", "dfcoord", "--issue", "313",
+     "--handback-event", P313_EID], f4f))
+_pend_f = hb_pending_files()
+check("#313 BLOCK 4(4) 其他失敗 → `deliver_failed`（不誤報成忙碌）",
+      rc4f == 1 and len(_pend_f) == 1
+      and json.loads(_pend_f[0].read_text())["reason"] == "deliver_failed",
+      f"rc={rc4f} pending={[json.loads(p.read_text())['reason'] for p in _pend_f]!r}")
+
+# (6) 子程序 rc 0 但接收端沒寫 ack（層3 未成立）→ 失敗出口；`Popen` 不冒充接收。
+hb_reset_pending()
+f4g = FakeSub(LINES, issue_body=HB_BODY_NO_ACK)
+rc4g, _, _ = with_env(hb_env(), lambda: run(
+    ["4149", "hi", "-p", "dfcoord", "--issue", "313",
+     "--handback-event", P313_EID], f4g))
+_pend_g = hb_pending_files()
+check("#313 BLOCK 4(4) 投遞成功但無 ack → `no_ack` 失敗出口（層2 不冒充層3）",
+      rc4g == 0 and len(f4g.spawned) == 1 and len(_pend_g) == 1
+      and json.loads(_pend_g[0].read_text())["reason"] == "no_ack"
+      and len(hb_alerts(f4g)) == 2,
+      f"rc={rc4g} pending={[json.loads(p.read_text())['reason'] for p in _pend_g]!r}")
+
+# (7) 正向路徑：層1 成立 ＋ 子程序 rc 0 ＋ 讀得到 ack → 零告警、零待處理紀錄。
+hb_reset_pending()
+f4h = FakeSub(LINES)
+rc4h, _, _ = with_env(hb_env(), lambda: run(
+    ["4149", "hi", "-p", "dfcoord", "--issue", "313",
+     "--handback-event", P313_EID], f4h))
+check("#313 BLOCK 4 正向路徑：層1 ＋ 層3 齊備 → rc 0、零告警、零待處理紀錄",
+      rc4h == 0 and len(f4h.spawned) == 1 and hb_alerts(f4h) == []
+      and hb_pending_files() == [],
+      f"rc={rc4h} 告警={hb_alerts(f4h)!r} pending={hb_pending_files()!r}")
+
+# ── 鑑別力：三個未達成候選各自實跑 ──
+P313_NOTICE = ("        prompt = (handback_receiver_notice(args.issue, args.handback_event,\n"
+               "                                           thread=args.thread, profile=args.profile)\n"
+               "                  + \"\\n\\n\" + prompt)\n")
+P313_LAND_GATE = "        if not ok1:\n"
+# 錨點取**縮排 8 格**的那一行（深度拒絕區塊內的那一個）；模組內其餘同名條件都是 4 格。
+P313_DEPTH_FAIL = "        if args.handback_event:\n"
+MUT4_NOEID = p312_mutate(RELAY_SRC, P313_NOTICE, "        pass\n")
+MUT4_NOGATE = p312_mutate(RELAY_SRC, P313_LAND_GATE, "        if False:\n")
+MUT4_STDERRONLY = p312_mutate(RELAY_SRC, P313_DEPTH_FAIL, "        if False:\n")
+check("#313 BLOCK 4 三種突變確實套上（錨點各恰一處命中）",
+      MUT4_NOEID != RELAY_SRC and MUT4_NOGATE != RELAY_SRC
+      and MUT4_STDERRONLY != RELAY_SRC,
+      "錨點漂移：某個突變沒有套上去")
+
+hb_reset_pending()
+_f4m1 = FakeSub(LINES)
+_m4a = load_mutant(MUT4_NOEID, "devflow_relay_mut_hb_noeid", _f4m1)
+with_env(hb_env(), lambda: run_mod(
+    _m4a, ["4149", "receiver prompt without eid", "-p", "dfcoord", "--issue", "313",
+           "--handback-event", P313_EID]))
+check("#313 BLOCK 4 反例①「EID 不進 prompt」→ `eid_in_child_cmd` 轉 False（實跑對照）",
+      bool(_f4m1.spawned)
+      and not any(P313_EID in str(x) for x in _f4m1.spawned[0])
+      and any(P313_EID in str(x) for x in _child_cmd),
+      f"突變 prompt={prompt_of(_f4m1.spawned[0])[:120] if _f4m1.spawned else None!r}")
+
+hb_reset_pending()
+_f4m2 = FakeSub(LINES, issue_body="這張單上沒有任何 handback 行。")
+_m4b = load_mutant(MUT4_NOGATE, "devflow_relay_mut_hb_nogate", _f4m2)
+_rc4m2, _, _ = with_env(hb_env(), lambda: run_mod(
+    _m4b, ["4149", "hi", "-p", "dfcoord", "--issue", "313",
+           "--handback-event", P313_EID]))
+check("#313 BLOCK 4 反例②「層1 失敗仍派 child」→ 突變下 spawned 轉非零（產品為 0，實跑對照）",
+      len(_f4m2.spawned) == 1 and len(f4c.spawned) == 0,
+      f"突變 spawned={len(_f4m2.spawned)} rc={_rc4m2}；產品 spawned={len(f4c.spawned)}")
+
+hb_reset_pending()
+_f4m3 = FakeSub(LINES)
+_m4c = load_mutant(MUT4_STDERRONLY, "devflow_relay_mut_hb_stderronly", _f4m3)
+_rc4m3, _, _err4m3 = with_env(hb_env(str(P312_MAX), "dfmgr,dfimpl,dfmgr"), lambda: run_mod(
+    _m4c, ["4149", "hi", "-p", "dfcoord", "--issue", "313",
+           "--handback-event", P313_EID]))
+check("#313 BLOCK 4 反例③「深度拒絕只留 stderr」→ 零告警、零待處理紀錄（產品兩者都有，實跑對照）",
+      _rc4m3 == 2 and hb_alerts(_f4m3) == [] and hb_pending_files() == []
+      and P312_LIMIT_SENTENCE in _err4m3
+      and len(hb_alerts(f4d)) == 2 and len(_pend_d) == 1,
+      f"突變 告警={len(hb_alerts(_f4m3))} pending={hb_pending_files()!r}；"
+      f"產品 告警={len(hb_alerts(f4d))} pending={len(_pend_d)}")
+hb_reset_pending()
+
 
 
 # ── 收尾 ────────────────────────────────────────────────────────────────────

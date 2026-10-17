@@ -44,6 +44,16 @@ import time
 from collections.abc import Callable
 
 from devflow_archive import tool_summary  # noqa: E402 — 與封存檔共用摘要邏輯
+from _handback import (  # noqa: E402 — 同目錄；終態交回協定的單一實作（`#313`）
+    EVENT_ENV as HANDBACK_EVENT_ENV,
+    GhForge as HandbackForge,
+    conflicting_event as handback_conflicting_event,
+    failure_exit as handback_failure_exit,
+    landed as handback_landed,
+    received as handback_received,
+    receiver_notice as handback_receiver_notice,
+    validate_pending_key as handback_validate_key,
+)
 
 CHAT = "-1003546152597"
 MAX_MSG = 3500  # Telegram 單則上限 4096，留邊給標題與截斷標記
@@ -133,7 +143,8 @@ def _current_depth() -> int:
         return 0  # 外部亂塞值不該讓轉播掛掉；當最外層處理
 
 
-def _child_env(profile: str, *, continuation: bool = False) -> dict[str, str]:
+def _child_env(profile: str, *, continuation: bool = False,
+               handback_event: str | None = None) -> dict[str, str]:
     """子程序的環境 ＝ 本程序環境的複本 ＋ 深度與鏈的覆寫。
 
     必須是複本：只給一個鍵的話子程序連 `PATH` 都沒有，`hermes` 找不到（實測必掛）。
@@ -142,6 +153,11 @@ def _child_env(profile: str, *, continuation: bool = False) -> dict[str, str]:
     （primary，巢狀一層，深度 +1、鏈以 `,` 接），`True` ＝ `--then-wake` 喚醒者
     （同一流程的續接，承襲呼叫者自身的深度、鏈以 `>` 接）。判準是**派出方式**，
     **不是** profile 名；語意與射程見 `MAX_RELAY_DEPTH` 上方的註解。
+
+    `handback_event`（`#313`）：終態投遞時把**事件識別**交給接收端。給環境變數是為了讓
+    接收端的**程式**讀得到（不必解析自然語言）；同一個值另外進 prompt 的前置通知，給
+    **模型**讀——兩者由同一個值生成，故不可能不一致。第 1 輪 `R1` `BLOCK 4` 的現場是
+    「EID 只當布林開關」，接收端因此無從依該事件寫 ack。
     """
     env = dict(os.environ)
     depth = _current_depth()
@@ -154,6 +170,8 @@ def _child_env(profile: str, *, continuation: bool = False) -> dict[str, str]:
     # （`dfmgr` vs `dfmgr`），「可機械區分」在這個**合法輸入**下就不成立
     # （`#312` 第 1 輪 `R1` `BLOCK 1` 實測；既有回歸走的正是 `CHAIN` 未設這條路徑）。
     env[CHAIN_ENV] = f"{chain}{sep}{profile}" if chain or continuation else profile
+    if handback_event:
+        env[HANDBACK_EVENT_ENV] = handback_event
     return env
 
 
@@ -449,7 +467,8 @@ def _build_cmd(profile: str, prompt: str, *, thread: str, issue: str | None,
 def _run_child(cmd: list[str], *, profile: str, thread: str, title: str, pace: str,
                session_label: str, log: pathlib.Path,
                after_spawn: Callable[[], None] | None = None,
-               continuation: bool = False) -> int:
+               continuation: bool = False, handback_event: str | None = None,
+               err_sink: list[str] | None = None) -> int:
     """跑一個子程序、全程轉播，並把原始事件流與 stderr 寫進 `log`。回傳 rc。
 
     log 的用途（`AC-2`）：`--then-wake` 喚醒的是新的 oneshot，畫面已經不在；
@@ -463,6 +482,11 @@ def _run_child(cmd: list[str], *, profile: str, thread: str, title: str, pace: s
 
     `continuation`（`#312`）：唯一的用途是把「這個子程序是哪一類」傳進 `_child_env`
     （primary 或 `--then-wake` 喚醒者）。轉播、log、rc 與 handoff 的時機一概不受它影響。
+
+    `handback_event`／`err_sink`（`#313`）：前者轉給 `_child_env`（終態投遞把事件識別交給
+    接收端）；後者讓呼叫端**拿得到子程序的 stderr 文字**——終態投遞要靠它分辨「忙碌
+    （`SESSION_NOT_OWNED`）」與其他失敗，才能走具名到 session 的失敗出口（`AC-6`）。
+    兩者都預設 `None`，普通模式的行為一字不變。
     """
     relay = Relay(profile, thread, title, pace, session_label)
 
@@ -479,7 +503,8 @@ def _run_child(cmd: list[str], *, profile: str, thread: str, title: str, pace: s
 
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             stdin=subprocess.DEVNULL, text=True, bufsize=1,
-                            env=_child_env(profile, continuation=continuation))
+                            env=_child_env(profile, continuation=continuation,
+                                           handback_event=handback_event))
 
     if after_spawn is not None:
         try:
@@ -514,6 +539,8 @@ def _run_child(cmd: list[str], *, profile: str, thread: str, title: str, pace: s
         proc.wait()
         err_thread.join(timeout=5)
         relay.flush(force=True)
+        if err_sink is not None:
+            err_sink.extend(err_lines)       # `#313`：呼叫端要靠它分辨忙碌與其他失敗
         # 寫 log 失敗不該讓任務跟著死（同 `_send` 的理由）——但要讓人看到。
         try:
             log.write_text("".join(out_lines)
@@ -544,6 +571,38 @@ def _wake_prompt(issue: str | None, log: pathlib.Path, rc: int, child_profile: s
     )
 
 
+def _handback_failure(issue: str | None, eid: str, reason: str, *,
+                      thread: str, profile: str, detail: str = "") -> None:
+    """終態投遞的失敗出口（`#313` `AC-6`）：**該單 topic ＋ General ＋ 待處理紀錄**。
+
+    為什麼不是 `print(..., file=sys.stderr)` 就算數（第 1 輪 `R1` `BLOCK 4`）：relay 在
+    oneshot 下沒有 stderr 的讀者（`#287` 的 5-byte log 就是這個形狀），而終態投遞正是
+    「沒有下一棒」的那一棒——它失敗時若只留 stderr，整條鏈就靜悄悄地停在那裡。stderr
+    仍然印（給當場盯著看的人），但**不是唯一出口**。
+
+    `home` 取 `pathlib.Path.home()`（即 `$HOME`）：待處理紀錄落該 profile 自己的目錄，
+    有 profile 與本單歸屬。
+
+    第 2 輪 `R1` `BLOCK 1`：本函式原本把 `failure_exit()` 整段包在一個 `try` 裡，於是
+    pending 寫不成時（`$HOME` 不是目錄、權限不足、磁碟滿）**連兩則告警都沒送**就落到
+    `except` 印一行 stderr——那正是「只留 stderr」的那個形狀。現在三處出口各自嘗試由
+    `failure_exit()` 自己負責，本函式只負責把**三處的成敗各自**印出來；真的連 `send`
+    都湊不出來（例如 import 掛掉）才走最後那個 `except`。
+    """
+    try:
+        fx = handback_failure_exit(
+            issue=issue or "?", eid=eid, reason=reason, topic_thread=thread,
+            send=lambda t, text: _send(profile, t, text),
+            home=pathlib.Path.home(), profile=profile, detail=detail)
+        pending_state = (f"待處理紀錄 {fx.pending_file}" if fx.pending_written
+                         else f"⚠️ 待處理紀錄未落地（{fx.pending_error}）")
+        print(f"[relay] ⚠️ 終態投遞失敗（{reason}）：告警已送 thread {fx.threads}"
+              f"（嘗試 {fx.attempted}）、{pending_state}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 — 失敗出口自己掛掉不得再往上炸
+        print(f"[relay] ⚠️ 終態投遞的失敗出口自己也失敗了（{reason}）：{exc}",
+              file=sys.stderr)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -555,6 +614,10 @@ def main() -> int:
     ap.add_argument("--then-wake", dest="then_wake", metavar="PROFILE",
                     help="子程序退出後，由 relay 自己以同一 thread／issue 再喚醒這個 profile。"
                          "帶 --issue 時為必給（那一輪屬於某張單的執行流程，需要銜接）")
+    ap.add_argument("--handback-event", dest="handback_event", metavar="EID",
+                    help="終態投遞（`#313`）：這一棒是某個交接事件的**最後一棒**，之後沒有"
+                         "下一棒，故 --issue 不強制 --then-wake（兩者同時出現即拒絕）。"
+                         "EID ＝ 該交接事件的識別，relay 只轉述不解析（grammar 住 _handback.py）")
     ap.add_argument("--pace", choices=sorted(PACE), default=DEFAULT_PACE,
                     help=f"轉播節奏（預設 {DEFAULT_PACE}）：instant 3則/8秒、normal 6則/15秒、quiet 10則/30秒")
     ap.add_argument("--session", metavar="NAME",
@@ -570,14 +633,56 @@ def main() -> int:
                     help="覆寫 provider。半價備援用 or_flex_proxy（需 or-flex-proxy.py 在跑）")
     args = ap.parse_args()
 
-    # ── 兩個拒絕條件：都必須在派子程序之前（`AC-3`／`AC-4`），否則 coder 已經跑起來才報錯 ──
-    if args.issue and not args.then_wake:
+    # ── 三個拒絕條件：都必須在派子程序之前（`AC-3`／`AC-4`、`#313` `AC-5`），否則 coder
+    # 已經跑起來才報錯 ──
+    if args.handback_event and args.then_wake:
+        # `#313` `AC-5`：終態投遞是**最後一棒**，它之後沒有下一棒；`--then-wake` 的語意是
+        # 「這一棒結束後還有人要接」。兩者同時出現時我們無從知道呼叫者要的是哪一種，
+        # 猜任一邊都會在「最後一棒」這件事上說謊，故**拒絕**。位置與下面兩條同在
+        # `main()` 派子程序之前——先派再報錯等於那一棒已經跑起來了。
+        print("[relay] --handback-event 與 --then-wake 互斥：終態投遞是最後一棒，"
+              "它之後沒有下一棒；要續接就不要帶 --handback-event，"
+              f"要終態投遞就不要帶 --then-wake（本次：--handback-event {args.handback_event} "
+              f"--then-wake {args.then_wake}）",
+              file=sys.stderr)
+        return 2
+
+    if args.handback_event and not args.issue:
+        # `#313`：終態投遞一定指向某張單——層1（該 EID 的 `handback` 行可讀回）要去 forge
+        # 讀，沒有單號就無從核實，而「核不了就先派出去」正是本單要修掉的形狀。
+        print("[relay] --handback-event 需同時帶 --issue <單號>："
+              "終態投遞要在派子程序之前核實該事件的 handback 行已落地（層1），"
+              "沒有單號讀不到 forge", file=sys.stderr)
+        return 2
+
+    if args.handback_event:
+        # `#313` 第 2 輪 `R1` `BLOCK 2`：EID／單號／profile 會被拼進待處理紀錄的路徑
+        # （`~/.hermes/profiles/<profile>/handback-pending/<issue>-<EID>.json`）。
+        # `../../../escaped` 這種值會讓那個檔落到 `handback-pending` 外面——沒有歸屬、
+        # `pending` 子命令也列不到，等於把「結果未定」靜悄悄丟掉。公開入口先擋。
+        # 同一處另核 **EID 的 issue 欄 ＝ `--issue`**（第 3 輪 `R1` `BLOCK 1`，`AC-3`）：
+        # 不核的話 `--issue 999 --handback-event 313-…` 會去讀 `#999`，而 `#999` 上若有
+        # 一行自相一致的 `313-…`（複製貼上、或引用材料時整行照抄），層1 就「成立」了，
+        # 於是 `#999` 的交回被 `#313` 的紀錄代簽、子程序還開在 `issue-999`。
+        # 這一關在**任何 `gh`、pending 寫入或子程序之前**。
+        try:
+            handback_validate_key(args.profile, args.issue, args.handback_event)
+        except Exception as exc:  # noqa: BLE001 — HandbackError，入口拒絕不往上炸
+            print(f"[relay] --handback-event 的值不合法，拒絕終態投遞：{exc}",
+                  file=sys.stderr)
+            return 2
+
+    if args.issue and not args.then_wake and not args.handback_event:
         # 判準用 `--issue` 而不是 profile 名：後者要 relay 硬編碼 seat 的角色名，
         # 比 `--then-wake` 本身更接近「懂 workflow」（裁決位 2026-10-07 的否決理由）。
         # 不帶 `--issue` ＝ 一次性操作，不需鏈結——那一列必須照舊能跑。
+        # `#313`：`--handback-event` 是**唯一**的例外入口（顯式旗標，**不依 profile 名猜
+        # 意圖**）——那一棒之後結構上沒有下一棒，要求它 `--then-wake` 等於要求它說謊。
+        # 普通 `--issue` 呼叫**仍須** `--then-wake`，本條的既有行為一字不改。
         print("[relay] --issue 需同時帶 --then-wake <profile>；"
               f"例：devflow_relay.py {args.thread} --file x.md "
-              f"-p {args.profile} --issue {args.issue} --then-wake dfmgr",
+              f"-p {args.profile} --issue {args.issue} --then-wake dfmgr"
+              "（終態投遞例外：改帶 --handback-event <EID>，不得與 --then-wake 併用）",
               file=sys.stderr)
         return 2
 
@@ -596,20 +701,96 @@ def main() -> int:
               f"[relay] 本上限的射程：只計 primary 方向的巢狀；"
               f"純 continuation 的平層循環不增深，本機制不保證擋住它。",
               file=sys.stderr)
+        if args.handback_event:
+            # `#313` `AC-6`：終態投遞被深度判準擋下時**不得只留 stderr**——它是最後一棒，
+            # 沒有下一棒會發現這件事。訊息、rc 與既有判準一字不變，只是多了可查的出口。
+            _handback_failure(args.issue, args.handback_event, "depth_rejected",
+                              thread=args.thread, profile=args.profile,
+                              detail=f"{DEPTH_ENV}={depth} ≥ {MAX_RELAY_DEPTH}，鏈：{chain}")
         return 2
 
     prompt = pathlib.Path(args.file).read_text() if args.file else args.prompt
     if not prompt.strip():
         return ap.error("prompt 不可為空（用位置參數或 --file）")
 
+    # ── 終態投遞（`#313`）：派子程序**之前**的兩件事 ────────────────────────────
+    #   (1) 事件一致性：呼叫者給的 prompt 不得提到**另一個**事件。
+    #   (2) 層1 落地：該 EID 的 `handback` 行讀得回且恰一行；不成立 → 不派、走失敗出口。
+    # 兩者都在 `_run_child` 之前，故「未達成時零子程序」可由 `spawned` 計數反證。
+    if args.handback_event:
+        clash = handback_conflicting_event(prompt, args.handback_event)
+        if clash:
+            print(f"[relay] prompt 裡的事件識別與 --handback-event 不一致："
+                  f"旗標 {args.handback_event}、prompt 內 {clash}。"
+                  f"兩者必有一個是錯的，猜哪一個會讓接收端替錯誤的事件簽收——拒絕。",
+                  file=sys.stderr)
+            return 2
+        try:
+            # `event=`（第 3 輪 `R1` `BLOCK 1`）：forge 建構時就核 EID 的 issue 欄
+            # ＝ `--issue`。`handback_landed()` 只看得到 body 與 EID，分不出 body 是
+            # 哪張單來的——跨單綁定只能由「決定去讀哪張單」的這一處負責。
+            body = HandbackForge(args.issue, event=args.handback_event,
+                                 capture=_capture).read()
+            ok1, why1 = handback_landed(body, args.handback_event)
+        except Exception as exc:  # noqa: BLE001 — 讀不到 ＝ 核不了，不猜
+            ok1, why1 = False, f"讀不回該單，層1 無法核實（{exc}）"
+        if not ok1:
+            print(f"[relay] 層1 未成立，拒絕終態投遞（不派子程序）：{why1}", file=sys.stderr)
+            _handback_failure(args.issue, args.handback_event, "land_failed",
+                              thread=args.thread, profile=args.profile, detail=why1)
+            return 2
+        # EID 交給接收端：prompt 前置通知（給模型）＋ 環境變數（給程式），同一個值生成。
+        prompt = (handback_receiver_notice(args.issue, args.handback_event,
+                                           thread=args.thread, profile=args.profile)
+                  + "\n\n" + prompt)
+
     cmd, session_label = _build_cmd(
         args.profile, prompt, thread=args.thread, issue=args.issue, session=args.session,
         fresh=args.fresh, workdir=args.workdir, model=args.model, provider=args.provider)
 
     log = _log_path(args.issue, args.profile)
-    rc = _run_child(cmd, profile=args.profile, thread=args.thread,
-                    title=f"`#{args.issue}`" if args.issue else f"thread {args.thread}",
-                    pace=args.pace, session_label=session_label, log=log)
+    # `continuation`（`#312` 的判準，本單沿用不改）：判的是「這個子程序是怎麼被派出的」。
+    # 終態投遞（`#313`）是**同一流程的最後一棒**——它取代呼叫者繼續跑、之後沒有下一棒，
+    # 與 `--then-wake` 喚醒者同類，故承襲呼叫者自身的深度、鏈以 `>` 接。普通的受託子程序
+    # 仍是 primary（`depth + 1`、鏈以 `,` 接），`_child_env` 的語意一字不動。
+    # ⚠️ 不增深**不代表任何深度都能啟動**：上方的 `DEPTH >= MAX_RELAY_DEPTH` 一律 `rc 2`，
+    # 終態投遞不例外（檢查在這之前，見該區塊）。
+    hb_err: list[str] | None = [] if args.handback_event else None
+    try:
+        rc = _run_child(cmd, profile=args.profile, thread=args.thread,
+                        title=f"`#{args.issue}`" if args.issue else f"thread {args.thread}",
+                        pace=args.pace, session_label=session_label, log=log,
+                        continuation=bool(args.handback_event),
+                        handback_event=args.handback_event, err_sink=hb_err)
+    except Exception as exc:  # noqa: BLE001 — 普通模式照舊往上拋，終態投遞要留痕
+        if not args.handback_event:
+            raise
+        print(f"[relay] 終態投遞派子程序失敗：{exc}", file=sys.stderr)
+        _handback_failure(args.issue, args.handback_event, "deliver_failed",
+                          thread=args.thread, profile=args.profile, detail=str(exc))
+        return 2
+
+    if args.handback_event:
+        # 層3 的核對：投遞已發出 ≠ 已接收（`Popen` 不冒充 ack）。子程序退出後再讀一次
+        # forge——接收端在它那一輪裡應該已經寫下 ack。沒有就走失敗出口，**不宣稱自動續接**。
+        err_text = "".join(hb_err or "")
+        if rc:
+            reason = "busy" if "SESSION_NOT_OWNED" in err_text else "deliver_failed"
+            _handback_failure(args.issue, args.handback_event, reason,
+                              thread=args.thread, profile=args.profile,
+                              detail=f"子程序 rc={rc}；stderr 末段：{err_text[-300:]}")
+            return rc
+        try:
+            after = HandbackForge(args.issue, event=args.handback_event,
+                                  capture=_capture).read()
+            acked = handback_received(after, args.handback_event, by=args.profile)
+        except Exception as exc:  # noqa: BLE001
+            acked, err_text = False, f"{err_text}\n讀回失敗：{exc}"
+        if not acked:
+            _handback_failure(args.issue, args.handback_event, "no_ack",
+                              thread=args.thread, profile=args.profile,
+                              detail=f"子程序 rc=0 但讀不到 by={args.profile} 的 ack")
+        return rc
 
     if args.then_wake:
         # 銜接在 relay 這一層，不在任何 seat 的 turn 裡——故不需要等待（`#287` 證明等不住）。
