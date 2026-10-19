@@ -41,6 +41,7 @@ devflow/                  kit 本體：安裝時整個目錄鏡像到消費者�
   VERSION                 kit 的四碼版本，依 `V7` 隨 devflow/** 的變更進位
   install.py              安裝器：鏡像 devflow/、建 devflow.local/、插入口區塊
   seats/                  五個職位的職責定義（implementer / reviewer / manager / coordinator / approver）
+  workflows/              跨職位交接索引：各階段的規則 ID、行為人、交付落點與停下出口（只引用，不定義規則）
   forges/ coders/ orchestrators/   衍生值對照表，每格標實測狀態
   templates/              devflow.yml / spec / issue / pr / review-prompt / entry-block / local-README
 devflow.local/            消費者自己的本機證據（具名 instance 的事實）；不存在才建、且只放 README.md，已存在則整棵不碰
