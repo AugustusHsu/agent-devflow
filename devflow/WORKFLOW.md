@@ -1,5 +1,5 @@
 ---
-version: 1.16.0.0
+version: 1.17.0.0
 ---
 
 # agent-devflow WORKFLOW
@@ -18,7 +18,7 @@ version: 1.16.0.0
 ## 1. 不變層（I）
 
 - `I1` 同一時間：一張 issue ＝ 一條分支 ＝ 一個 worktree ＝ 一個實作者（職位，`seats/implementer.md`）。分支名 `<N>-<slug>`。
-- `I2` 實作者（職位，`seats/implementer.md`）不在主 checkout 工作。worktree 由協調者（職位，`seats/coordinator.md`；由工具或人填）建在 `../<repo>.worktrees/<N>`；實作者只收路徑。主 checkout 只供協調用：forge 操作、建 worktree、收尾。
+- `I2` 實作者（職位，`seats/implementer.md`）不在主 checkout 工作。worktree 由執行位（職位，`seats/manager.md`；`devflow.yml` 的 `seats.manager` 已綁定時由執行位建）或協調者（職位，`seats/coordinator.md`；未綁定時由協調位建）建在 `../<repo>.worktrees/<N>`；實作者只收路徑。主 checkout 只供協調用：forge 操作、建 worktree、收尾。
 - `I3` 進 main 的每個變更都經 PR/MR，以 merge commit 合入；不 squash、不 rebase merge。唯一例外是直推 main；第 10 節生效時依該節。
 - `I4` 工單只住 forge。repo 內不放工單檔、BACKLOG、審查報告副本；orchestrator 不得持有工單的第二份拷貝。
 - `I5` 一個事實只住一處。入口檔區塊、對照表衍生物、人類站都是產物：不手抄、不設同步戳記。
@@ -56,6 +56,7 @@ version: 1.16.0.0
 - `L4` 完成：測試綠 → push 分支 → 開 PR，引用 issue、G、T、head sha。模板 `templates/pr.md`。
 - `L5` 之後依序：審查（第 5 節）→ 合併（第 6 節）→ 收尾（第 8 節）。
 - `L6` 取消任務而分支已有 commit：先問人保留或丟棄，不得逕自刪除。
+- `L7` 準備階段（常設，不是 `L1` 的替代）。**委託**：協調位於 `L1` 齊備前以 issue 留言明確委託準備工作；`devflow.yml` 的 `seats.manager` 已綁定時由協調位委託執行位執行，未綁定時由協調位自做。委託至少七欄：單號、問題與目標、固定 G、允許讀寫範圍、禁止事項、交付落點、回報出口；缺一不構成委託，受託位回報缺欄並停下。**允許**：讀 forge 與 repo、在隔離環境跑既有檢查取得基準、寫 `.hermes/plans/` 之下的材料檔、在 issue 留言貼明標「準備材料、非正式 T」的材料。**禁止**：不得派實作位、不得派審查位、不得建 worktree、不得建任務分支、不得開 PR、不得合併、不得修改受版控檔、不得改設定（含填充者綁定）。**`L1` 邊界**：準備是受限寫入、不是無副作用，材料檔與留言都是真實副作用；準備產物不構成 `L1` 齊備，派工仍須 `L1` 各欄完整、未決事項為空，證據義務照舊。
 
 ## 5. 審查（R）
 
