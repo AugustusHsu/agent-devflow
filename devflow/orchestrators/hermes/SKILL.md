@@ -27,6 +27,14 @@ metadata:
 
 **投影**：`launch: agent` 的填充者（`devflow.yml` 的 `seats.<位>.launch`）每一個工具呼叫，由協調平台的轉播機制即時投影到該單的對話通道——這是 runtime 行為，不依賴填充者自行播報，也不是誰要遵守的義務。派工者因此**不必**為進度另發訊息；需要人看見的只有里程碑：PR 開出、每輪 verdict、合併、收尾。投影的載體與格式（通道、訊息形狀、節奏）屬通道層 `channels/`（K4／`#258` 建），不在本檔規定。`launch: cli` 無投影——進度只落在 stdout 與 issue 留言，派工者要讓人看見什麼就得自己寫。
 
+### 0. 準備階段（`L7`）
+
+`L1` 齊備前的準備工作要有協調位的 issue 留言委託才做。**行為人依綁定**：`devflow.yml` 的 `seats.manager` 已綁定時由執行位執行（`seats/manager.md`），未綁定時由協調位自做。
+
+- 委託七欄缺一即回報缺欄並停下，不自己補：單號、問題與目標、固定 G、允許讀寫範圍、禁止事項、交付落點、回報出口。
+- 產物落點：材料檔寫在 `.hermes/plans/<N>/` 之下；結論以 issue 留言貼出並明標「準備材料、非正式 T」。
+- 允許集合、禁止集合八項與 `L1` 邊界一律依 `L7`，本檔不複述；準備產物不構成 `L1` 齊備，派工仍走第 1 步起的固定序。
+
 ### 1. 開 issue（`L1`、`I4`）
 
 - 用 `templates/issue.md`，欄位依 `L1`；G 填 commit sha，T 填規格 commit sha 或（治理／流程類）T 留言 id。
@@ -34,6 +42,8 @@ metadata:
 - 命中 `L3` 停判準的政策問題先在 issue 留言裁決，再派工。
 
 ### 2. 建 worktree（`I1`、`I2`、`L2`）
+
+**行為人依綁定**：`devflow.yml` 的 `seats.manager` 已綁定時由執行位執行（`seats/manager.md`），未綁定時由協調位執行。
 
 主 checkout 執行，coder 只收路徑（`hermes.md` 「建 worktree（`I2`）」格、`coders/claude-code.md` 「worktree（`I2`）」格）：
 
@@ -45,6 +55,8 @@ git -C ../<repo>.worktrees/<N> rev-parse HEAD       # 等於 base sha
 ```
 
 ### 3. 派 coder（`L2`；`hermes.md` 「派工（`L2`）」格）
+
+**行為人依綁定**：`devflow.yml` 的 `seats.manager` 已綁定時由執行位執行（`seats/manager.md`），未綁定時由協調位執行。
 
 以 Hermes `terminal(command="…", background=true)` 啟動，記下回傳的 pid。**不用 `delegate_task`**，不用 `setsid`（第六節）。
 
