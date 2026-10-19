@@ -452,10 +452,17 @@ def check_contract(files):
         miss = [n for n, _ in FIELDS if n not in t0]
         banned = [b for b in ("git worktree add", "devflow_relay.py", "systemd-run", "claude -p")
                   if b in t0]
-        rep.add("`L7`" in t0 and not miss and not banned, "OB-SKILL-0", where,
-                "引 `L7`=%s 七欄=%s 禁字面=%s" % ("`L7`" in t0,
-                                                "齊" if not miss else "缺" + "／".join(miss),
-                                                "無" if not banned else "／".join(banned)))
+        # 位置也是義務（T v3 驗證器規格第 3 項）：內容對但擺在檔尾，流程讀起來就不是
+        # 「`L1` 齊備前的那一步」。`### 1.` 不在就一樣 FAIL——沒有可比的基準。
+        at0 = rows0[0][0]
+        at1 = ssec[1][0][0] if 1 in ssec else None
+        placed = at1 is not None and at0 < at1
+        rep.add("`L7`" in t0 and not miss and not banned and placed, "OB-SKILL-0", where,
+                "引 `L7`=%s 七欄=%s 禁字面=%s 位置=### 0.@%s < ### 1.@%s" % (
+                    "`L7`" in t0,
+                    "齊" if not miss else "缺" + "／".join(miss),
+                    "無" if not banned else "／".join(banned),
+                    at0, at1 if at1 is not None else "缺"))
         pair = parse_cond(t0)
         rep.add(cond_ok(pair), "OB-SKILL-0-ACTOR", where, show_cond(pair))
 
@@ -866,6 +873,16 @@ def build_mutations():
             def drop(f, rel=rel, start=start, end=end, prefix=prefix, item=item, last=last):
                 drop_item(f, rel, start, end, prefix, item, last)
             add("N06-forbid-%s-%s" % (site, slug), drop, [FORBID_PRIMARY[site] % slug])
+
+    # N07 `### 0.` 內容完全正確但整塊搬到檔尾（錯位）。位置是義務，所以這一項必須擋下來：
+    # 內容對而位置錯時，讀 SKILL 的人會在走完第 1～10 步之後才看到「`L1` 齊備前要做的事」。
+    def n07(f):
+        t = f[SKILL]
+        m = re.search(r"(?ms)^### 0\..*?(?=^### 1\.)", t)
+        if m is None:
+            raise MutError("SKILL 找不到 `### 0.`～`### 1.` 之間的區塊")
+        f[SKILL] = t[:m.start()] + t[m.end():].rstrip() + "\n\n" + m.group(0).rstrip() + "\n"
+    add("N07-skill-0-misplaced", n07, ["OB-SKILL-0"])
     return muts
 
 
